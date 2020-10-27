@@ -678,8 +678,8 @@ RelOptInfo* build_join_rel(PlannerInfo* root, Relids joinrelids, RelOptInfo* out
         root->join_rel_level[root->join_cur_level] = lappend(root->join_rel_level[root->join_cur_level], joinrel);
     }
 
-    /* set interesting distribute keys */
 #ifdef ENABLE_MULTIPLE_NODES 
+    /* set interesting distribute keys */
     build_joinrel_itst_diskeys(root, joinrel, outer_rel, inner_rel, sjinfo->jointype);
 #endif
     /* Adjust joinrel globle_rows according hint. */
