@@ -17901,7 +17901,17 @@ ColLabel:	IDENT									{ $$ = $1; }
 			| unreserved_keyword					{ $$ = pstrdup($1); }
 			| col_name_keyword						{ $$ = pstrdup($1); }
 			| type_func_name_keyword				{ $$ = pstrdup($1); }
-			| reserved_keyword						{ $$ = pstrdup($1); }
+			| reserved_keyword
+				{
+					/* ROWNUM can not be used as alias */
+					if (strcmp($1, "rownum") == 0) {
+						ereport(ERROR,
+							(errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("ROWNUM cannot be used as an alias"),
+										parser_errposition(@1)));
+					}
+					$$ = pstrdup($1);
+				}
 		;
 
 
@@ -18217,7 +18227,7 @@ unreserved_keyword:
 			| SHARE
 			| SHIPPABLE
 			| SHOW
-                        | SHUTDOWN
+			| SHUTDOWN
 			| SIMPLE
 			| SIZE
 			| SMALLDATETIME_FORMAT_P
