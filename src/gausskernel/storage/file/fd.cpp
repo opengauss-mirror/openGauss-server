@@ -185,6 +185,19 @@ typedef struct AllocateDesc {
     SubTransactionId create_subid;
 } AllocateDesc;
 
+/* Number of partions the Vfd hashtable */
+#define NUM_VFD_PARTITIONS 1024
+static pthread_mutex_t g_vfdLockArray[NUM_VFD_PARTITIONS];
+
+/*
+ * The VFD mapping table is partitioned to reduce contention.
+ * To determine which partition lock a given tag requires, compute the tag's
+ * hash code with VFDTableHashCode(), then apply VFD_MAPPING_PARTITION_LOCK().
+ */
+#define VFD_TABLE_HASH_PARTITION(hashcode) ((hashcode) % NUM_VFD_PARTITIONS)
+#define VFD_MAPPING_PARTITION_LOCK(hashcode) \
+    (&g_vfdLockArray[VFD_TABLE_HASH_PARTITION(hashcode)])
+
 /* --------------------
  *
  * Private Routines
@@ -241,6 +254,7 @@ static void walkdir(const char *path, void (*action)(const char *fname, bool isd
 static struct dirent *ReadDirExtended(DIR *dir, const char *dirname, int elevel);
 static void unlink_if_exists_fname(const char *fname, bool isdir, int elevel);
 void AtProcExit_Files(int code, Datum arg);
+static uint32 VFDTableHashCode(const void* tagPtr);
 
 void ReportAlarmInsuffDataInstFileDesc()
 {
@@ -301,8 +315,10 @@ void InitDataFileIdCache(void)
     ctl.keysize = sizeof(RelFileNodeForkNum);
     ctl.entrysize = sizeof(DataFileIdCacheEntry);
     ctl.hash = tag_hash;
-    t_thrd.storage_cxt.DataFileIdCache = HeapMemInitHash(
-        "Shared FileId hash by request", 256, t_thrd.storage_cxt.max_userdatafiles, &ctl, HASH_ELEM | HASH_FUNCTION);
+    ctl.num_partitions = NUM_VFD_PARTITIONS;
+    t_thrd.storage_cxt.DataFileIdCache = HeapMemInitHash("Shared FileId hash by request", 256,
+                    Max(g_instance.attr.attr_common.max_files_per_process, t_thrd.storage_cxt.max_userdatafiles),
+                    &ctl, HASH_ELEM | HASH_FUNCTION | HASH_PARTITION);
     if (!t_thrd.storage_cxt.DataFileIdCache)
         ereport(FATAL, (errmsg("could not initialize shared file id hash table")));
 }
@@ -1038,6 +1054,13 @@ static void FreeVfd(File file)
 
     DO_DB(ereport(LOG, (errmsg("FreeVfd: %d (%s)", file, vfdP->fileName ? vfdP->fileName : ""))));
 
+    /*
+     * If the vfd has been freed, recieve a signal and FATAL, thread_exit callback
+     * will DestroyAllVfds() and free the vfd again, cause heap-use-after-free.
+     * So hold interrupts here.
+     */
+    HOLD_INTERRUPTS();
+
     if (vfdP->fileName != NULL) {
         pfree(vfdP->fileName);
         vfdP->fileName = NULL;
@@ -1046,6 +1069,7 @@ static void FreeVfd(File file)
 
     vfdP->nextFree = u_sess->storage_cxt.VfdCache[0].nextFree;
     u_sess->storage_cxt.VfdCache[0].nextFree = file;
+    RESUME_INTERRUPTS();
 }
 
 /* returns 0 on success, -1 on re-open failure (with errno set) */
@@ -1164,12 +1188,14 @@ static void DataFileIdCloseFile(Vfd* vfdP)
 
     // lock to prevent conflicts with other threads
     // do not use LWLock, because when thread exit t_thrd.proc = NULL
-    AutoMutexLock vfdLock(&gVfdMutex);
+    uint32 newHash = VFDTableHashCode((void *)&vfdP->fileNode);
+    AutoMutexLock vfdLock(VFD_MAPPING_PARTITION_LOCK(newHash));
     vfdLock.lock();
 
     // find the opened file
     entry =
-        (DataFileIdCacheEntry*)hash_search(t_thrd.storage_cxt.DataFileIdCache, (void*)&vfdP->fileNode, HASH_FIND, NULL);
+        (DataFileIdCacheEntry*)hash_search_with_hash_value(t_thrd.storage_cxt.DataFileIdCache,
+                                                           (void*)&vfdP->fileNode, newHash, HASH_FIND, NULL);
     if (entry == NULL) {
         vfdLock.unLock();
         ereport(PANIC, (errmsg("file cache corrupted, file %s not opened with handle: %d", vfdP->fileName, vfdP->fd)));
@@ -1183,8 +1209,8 @@ static void DataFileIdCloseFile(Vfd* vfdP)
 
     // need to close and remove from cache
     if (entry->refcount == 0) {
-        entry = (DataFileIdCacheEntry*)hash_search(
-            t_thrd.storage_cxt.DataFileIdCache, (void*)&vfdP->fileNode, HASH_REMOVE, NULL);
+        entry = (DataFileIdCacheEntry*)hash_search_with_hash_value(
+                    t_thrd.storage_cxt.DataFileIdCache, (void*)&vfdP->fileNode, newHash, HASH_REMOVE, NULL);
         Assert(entry);
         vfdLock.unLock();
 
@@ -1244,15 +1270,18 @@ static File PathNameOpenFile_internal(
     /* Close excess kernel FDs. */
     ReleaseLruFiles();
 
+    uint32 newHash = 0;
     // Search in fd cache to avoid consuming file handles.
     if (useFileCache) {
         // lock to prevent conflicts with other threads
-        AutoMutexLock vfdLock(&gVfdMutex);
+        newHash = VFDTableHashCode((void*)&fileNode);
+        AutoMutexLock vfdLock(VFD_MAPPING_PARTITION_LOCK(newHash));
         vfdLock.lock();
 
         // find the opened file
         entry =
-            (DataFileIdCacheEntry*)hash_search(t_thrd.storage_cxt.DataFileIdCache, (void*)&fileNode, HASH_FIND, NULL);
+            (DataFileIdCacheEntry*)hash_search_with_hash_value(t_thrd.storage_cxt.DataFileIdCache,
+                                                               (void*)&fileNode, newHash, HASH_FIND, NULL);
         if (entry != NULL) {
             Assert(entry->fd >= 0);
             entry->refcount++;
@@ -1261,9 +1290,9 @@ static File PathNameOpenFile_internal(
     }
 
     // found in file id cache
-    if (entry != NULL)
+    if (entry != NULL) {
         vfdP->fd = entry->fd;
-    else {
+    } else {
         Assert(FileIsNotOpen(file));
         vfdP->fd = BasicOpenFile(fileName, fileFlags, fileMode);
     }
@@ -1297,12 +1326,12 @@ static File PathNameOpenFile_internal(
     if (useFileCache && (entry == NULL)) {
         bool found = false;
         START_CRIT_SECTION();
-        AutoMutexLock vfdLock(&gVfdMutex);
+        AutoMutexLock vfdLock(VFD_MAPPING_PARTITION_LOCK(newHash));
         vfdLock.lock();
 
         // find place to enter
-        entry = (DataFileIdCacheEntry*)hash_search(
-            t_thrd.storage_cxt.DataFileIdCache, (void*)&fileNode, HASH_ENTER, &found);
+        entry = (DataFileIdCacheEntry*)hash_search_with_hash_value(
+                    t_thrd.storage_cxt.DataFileIdCache, (void*)&fileNode, newHash, HASH_ENTER, &found);
         if (found) {
             // already opened, close my open
             Assert(entry->fd >= 0);
@@ -3767,10 +3796,12 @@ bool FdRefcntIsZero(SMgrRelation reln, ForkNumber forkNum)
     DataFileIdCacheEntry* entry = NULL;
     RelFileNodeForkNum fileNode = RelFileNodeForkNumFill(reln->smgr_rnode, forkNum, 0);
 
-    AutoMutexLock vfdLock(&gVfdMutex);
+    uint32 newHash = VFDTableHashCode((void*)&fileNode);
+    AutoMutexLock vfdLock(VFD_MAPPING_PARTITION_LOCK(newHash));
     vfdLock.lock();
 
-    entry = (DataFileIdCacheEntry*)hash_search(t_thrd.storage_cxt.DataFileIdCache, (void*)&fileNode, HASH_FIND, NULL);
+    entry = (DataFileIdCacheEntry*)hash_search_with_hash_value(t_thrd.storage_cxt.DataFileIdCache,
+                                                               (void*)&fileNode, newHash, HASH_FIND, NULL);
     if (entry != NULL) {
         Assert(entry->fd >= 0);
         Assert(entry->refcount > 0);
@@ -3813,6 +3844,24 @@ static void unlink_if_exists_fname(const char *fname, bool isdir, int elevel)
     } else {
         /* Use PathNameDeleteTemporaryFile to report filesize */
         (void)PathNameDeleteTemporaryFile(fname, false);
+    }
+}
+
+/*
+ * Compute hash code of RelFileNodeForkNum.
+ */
+static uint32 VFDTableHashCode(const void* tagPtr)
+{
+    return tag_hash(tagPtr, sizeof(RelFileNodeForkNum));
+}
+
+/*
+ * Initialize all vfd locks.
+ */
+void InitializeVFDLocks(void)
+{
+    for (int i = 0; i < NUM_VFD_PARTITIONS; i++) {
+        pthread_mutex_init(&g_vfdLockArray[i], NULL);
     }
 }
 
