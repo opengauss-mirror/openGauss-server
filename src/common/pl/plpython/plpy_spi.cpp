@@ -1,7 +1,7 @@
 /*
  * interface to SPI functions
  *
- * src/pl/plpython/plpy_spi.c
+ * src/common/pl/plpython/plpy_spi.cpp
  */
 
 #include "postgres.h"
@@ -59,9 +59,9 @@ PyObject* PLy_spi_prepare(PyObject* self, PyObject* args)
     nargs = list ? PySequence_Length(list) : 0;
 
     plan->nargs = nargs;
-    plan->types = nargs ? PLy_malloc(sizeof(Oid) * nargs) : NULL;
-    plan->values = nargs ? PLy_malloc(sizeof(Datum) * nargs) : NULL;
-    plan->args = nargs ? PLy_malloc(sizeof(PLyTypeInfo) * nargs) : NULL;
+    plan->types = nargs ? (Oid*)PLy_malloc(sizeof(Oid) * nargs) : NULL;
+    plan->values = nargs ? (Datum*)PLy_malloc(sizeof(Datum) * nargs) : NULL;
+    plan->args = nargs ? (PLyTypeInfo*)PLy_malloc(sizeof(PLyTypeInfo) * nargs) : NULL;
 
     oldcontext = CurrentMemoryContext;
     oldowner = t_thrd.utils_cxt.CurrentResourceOwner;
@@ -169,7 +169,7 @@ PyObject* PLy_spi_execute(PyObject* self, PyObject* args)
     if (PyArg_ParseTuple(args, "O|Ol", &plan, &list, &limit) && is_PLyPlanObject(plan))
         return PLy_spi_execute_plan(plan, list, limit);
 
-    PLy_exception_set(PLy_exc_error, "plpy.execute expected a query or a plan");
+    PLy_exception_set(plpy_t_context.PLy_exc_error, "plpy.execute expected a query or a plan");
     return NULL;
 }
 
@@ -224,7 +224,7 @@ static PyObject* PLy_spi_execute_plan(PyObject* ob, PyObject* list, long limit)
         volatile int j;
 
         if (nargs > 0)
-            nulls = palloc(nargs * sizeof(char));
+            nulls = (char*)palloc(nargs * sizeof(char));
         else
             nulls = NULL;
 
@@ -270,7 +270,7 @@ static PyObject* PLy_spi_execute_plan(PyObject* ob, PyObject* list, long limit)
          * cleanup plan->values array
          */
         for (k = 0; k < nargs; k++) {
-            if (plan->args[k].out.d.typbyval == NULL && (plan->values[k] != PointerGetDatum(NULL))) {
+            if (!plan->args[k].out.d.typbyval && (plan->values[k] != PointerGetDatum(NULL))) {
                 pfree(DatumGetPointer(plan->values[k]));
                 plan->values[k] = PointerGetDatum(NULL);
             }
@@ -289,7 +289,7 @@ static PyObject* PLy_spi_execute_plan(PyObject* ob, PyObject* list, long limit)
     }
 
     if (rv < 0) {
-        PLy_exception_set(PLy_exc_spi_error, "SPI_execute_plan failed: %s", SPI_result_code_string(rv));
+        PLy_exception_set(plpy_t_context.PLy_exc_spi_error, "SPI_execute_plan failed: %s", SPI_result_code_string(rv));
         return NULL;
     }
 
@@ -327,7 +327,7 @@ static PyObject* PLy_spi_execute_query(char* query, long limit)
 
     if (rv < 0) {
         Py_XDECREF(ret);
-        PLy_exception_set(PLy_exc_spi_error, "SPI_execute failed: %s", SPI_result_code_string(rv));
+        PLy_exception_set(plpy_t_context.PLy_exc_spi_error, "SPI_execute failed: %s", SPI_result_code_string(rv));
         return NULL;
     }
 
@@ -371,6 +371,7 @@ static PyObject* PLy_spi_execute_fetch_result(SPITupleTable* tuptable, int rows,
 
             if (rows) {
                 Py_DECREF(result->rows);
+                /* Return a new list of length len on success, or NULL on failure. */
                 result->rows = PyList_New(rows);
 
                 PLy_input_tuple_funcs(&args, tuptable->tupdesc);
@@ -385,7 +386,7 @@ static PyObject* PLy_spi_execute_fetch_result(SPITupleTable* tuptable, int rows,
         {
             MemoryContextSwitchTo(oldcontext);
             if (!PyErr_Occurred())
-                PLy_exception_set(PLy_exc_error, "unrecognized error in PLy_spi_execute_fetch_result");
+                PLy_exception_set(plpy_t_context.PLy_exc_error, "unrecognized error in PLy_spi_execute_fetch_result");
             PLy_typeinfo_dealloc(&args);
             SPI_freetuptable(tuptable);
             Py_DECREF(result);
@@ -470,10 +471,10 @@ void PLy_spi_subtransaction_abort(MemoryContext oldcontext, ResourceOwner oldown
     SPI_restore_connection();
 
     /* Look up the correct exception */
-    entry = hash_search(PLy_spi_exceptions, &(edata->sqlerrcode), HASH_FIND, NULL);
+    entry = (PLyExceptionEntry*)hash_search(plpy_t_context.PLy_spi_exceptions, &(edata->sqlerrcode), HASH_FIND, NULL);
     /* We really should find it, but just in case have a fallback */
     Assert(entry != NULL);
-    exc = entry ? entry->exc : PLy_exc_spi_error;
+    exc = entry ? entry->exc : plpy_t_context.PLy_exc_spi_error;
     /* Make Python raise the exception */
     PLy_spi_exception_set(exc, edata);
     FreeErrorData(edata);

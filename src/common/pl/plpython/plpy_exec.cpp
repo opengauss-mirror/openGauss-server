@@ -1,7 +1,7 @@
 /*
  * executing Python code
  *
- * src/pl/plpython/plpy_exec.c
+ * src/common/pl/plpython/plpy_exec.cpp
  */
 
 #include "postgres.h"
@@ -409,16 +409,16 @@ static void plpython_return_error_callback(void* arg)
 static PyObject* PLy_trigger_build_args(FunctionCallInfo fcinfo, PLyProcedure* proc, HeapTuple* rv)
 {
     TriggerData* tdata = (TriggerData*)fcinfo->context;
-    PyObject *pltname = NULL;
-    PyObject *pltevent = NULL;
-    PyObject *pltwhen = NULL;
-    PyObject *pltlevel = NULL;
-    PyObject *pltrelid = NULL;
-    PyObject *plttablename = NULL;
-    PyObject *plttableschema = NULL;
-    PyObject *pltargs = NULL;
-    PyObject *pytnew = NULL;
-    PyObject *pytold = NULL;
+    PyObject* pltname = NULL;
+    PyObject* pltevent = NULL;
+    PyObject* pltwhen = NULL;
+    PyObject* pltlevel = NULL;
+    PyObject* pltrelid = NULL;
+    PyObject* plttablename = NULL;
+    PyObject* plttableschema = NULL;
+    PyObject* pltargs = NULL;
+    PyObject* pytnew = NULL;
+    PyObject* pytold = NULL;
     PyObject* volatile pltdata = NULL;
     char* stroid = NULL;
 
@@ -565,9 +565,7 @@ static HeapTuple PLy_modify_tuple(PLyProcedure* proc, PyObject* pltd, TriggerDat
 {
     PyObject* volatile plntup = NULL;
     PyObject* volatile plkeys = NULL;
-    PyObject* volatile platt = NULL;
     PyObject* volatile plval = NULL;
-    PyObject* volatile plstr = NULL;
     HeapTuple rtup;
     int natts, i, attn, atti;
     int* volatile modattrs = NULL;
@@ -580,7 +578,7 @@ static HeapTuple PLy_modify_tuple(PLyProcedure* proc, PyObject* pltd, TriggerDat
     plerrcontext.previous = t_thrd.log_cxt.error_context_stack;
     t_thrd.log_cxt.error_context_stack = &plerrcontext;
 
-    plntup = plkeys = platt = plval = plstr = NULL;
+    plntup = plkeys = plval = NULL;
     modattrs = NULL;
     modvalues = NULL;
     modnulls = NULL;
@@ -603,6 +601,7 @@ static HeapTuple PLy_modify_tuple(PLyProcedure* proc, PyObject* pltd, TriggerDat
         tupdesc = tdata->tg_relation->rd_att;
 
         for (i = 0; i < natts; i++) {
+            PyObject* platt = NULL;
             char* plattstr = NULL;
 
             platt = PyList_GetItem(plkeys, i);
@@ -658,7 +657,6 @@ static HeapTuple PLy_modify_tuple(PLyProcedure* proc, PyObject* pltd, TriggerDat
         Py_XDECREF(plntup);
         Py_XDECREF(plkeys);
         Py_XDECREF(plval);
-        Py_XDECREF(plstr);
 
         if (modnulls != NULL)
             pfree(modnulls);
@@ -695,7 +693,7 @@ static void plpython_trigger_error_callback(void* arg)
 static PyObject* PLy_procedure_call(PLyProcedure* proc, char* kargs, PyObject* vargs)
 {
     PyObject* rv = NULL;
-    int volatile save_subxact_level = list_length(explicit_subtransactions);
+    int volatile save_subxact_level = list_length(plpy_t_context.explicit_subtransactions);
 
     PyDict_SetItemString(proc->globals, kargs, vargs);
 
@@ -712,7 +710,7 @@ static PyObject* PLy_procedure_call(PLyProcedure* proc, char* kargs, PyObject* v
          * started, you cannot *unnest* subtransactions, only *nest* them
          * without closing.
          */
-        Assert(list_length(explicit_subtransactions) >= save_subxact_level);
+        Assert(list_length(plpy_t_context.explicit_subtransactions) >= save_subxact_level);
     }
     PG_CATCH();
     {
@@ -738,10 +736,10 @@ static void PLy_abort_open_subtransactions(int save_subxact_level)
 {
     Assert(save_subxact_level >= 0);
 
-    while (list_length(explicit_subtransactions) > save_subxact_level) {
+    while (list_length(plpy_t_context.explicit_subtransactions) > save_subxact_level) {
         PLySubtransactionData* subtransactiondata = NULL;
 
-        Assert(explicit_subtransactions != NIL);
+        Assert(plpy_t_context.explicit_subtransactions != NIL);
 
         ereport(WARNING, (errmsg("forcibly aborting a subtransaction that has not been exited")));
 
@@ -749,8 +747,8 @@ static void PLy_abort_open_subtransactions(int save_subxact_level)
 
         SPI_restore_connection();
 
-        subtransactiondata = (PLySubtransactionData*)linitial(explicit_subtransactions);
-        explicit_subtransactions = list_delete_first(explicit_subtransactions);
+        subtransactiondata = (PLySubtransactionData*)linitial(plpy_t_context.explicit_subtransactions);
+        plpy_t_context.explicit_subtransactions = list_delete_first(plpy_t_context.explicit_subtransactions);
 
         MemoryContextSwitchTo(subtransactiondata->oldcontext);
         t_thrd.utils_cxt.CurrentResourceOwner = subtransactiondata->oldowner;

@@ -1,5 +1,5 @@
 /*
- * src/pl/plpython/plpy_subxactobject.h
+ * src/common/pl/plpython/plpy_subxactobject.h
  */
 
 #ifndef PLPY_SUBXACTOBJECT
@@ -7,9 +7,6 @@
 
 #include "nodes/pg_list.h"
 #include "utils/resowner.h"
-
-/* a list of nested explicit subtransactions */
-extern List* explicit_subtransactions;
 
 typedef struct PLySubtransactionObject {
     PyObject_HEAD bool started;

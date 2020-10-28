@@ -16,10 +16,6 @@
 #include "plpy_main.h"
 #include "plpy_procedure.h"
 
-PyObject* PLy_exc_error = NULL;
-PyObject* PLy_exc_fatal = NULL;
-PyObject* PLy_exc_spi_error = NULL;
-
 static void PLy_traceback(char** xmsg, char** tbmsg, int* tb_depth);
 static void PLy_get_spi_error_data(
     PyObject* exc, int* sqlerrcode, char** detail, char** hint, char** query, int* position);
@@ -40,8 +36,8 @@ void PLy_elog(int elevel, const char* fmt, ...)
     int tb_depth;
     StringInfoData emsg;
     PyObject* exc = NULL;
-    *val = NULL;
-    *tb = NULL;
+    PyObject* val = NULL;
+    PyObject* tb = NULL;
     const char* primary = NULL;
     int sqlerrcode = 0;
     char* detail = NULL;
@@ -51,9 +47,11 @@ void PLy_elog(int elevel, const char* fmt, ...)
 
     PyErr_Fetch(&exc, &val, &tb);
     if (exc != NULL) {
-        if (PyErr_GivenExceptionMatches(val, PLy_exc_spi_error)) {
+        if (PyErr_GivenExceptionMatches(val, plpy_t_context.PLy_exc_spi_error)) {
             PLy_get_spi_error_data(val, &sqlerrcode, &detail, &hint, &query, &position);
-        } else if (PyErr_GivenExceptionMatches(val, PLy_exc_fatal)) {
+            hint = pstrdup(hint);
+            query = pstrdup(query);
+        } else if (PyErr_GivenExceptionMatches(val, plpy_t_context.PLy_exc_fatal)) {
             elevel = FATAL;
         }
     }
@@ -112,6 +110,12 @@ void PLy_elog(int elevel, const char* fmt, ...)
         if (tbmsg != NULL) {
             pfree(tbmsg);
         }
+        if (query != NULL) {
+            pfree(query);
+        }
+        if (hint != NULL) {
+            pfree(hint);
+        }
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -125,6 +129,12 @@ void PLy_elog(int elevel, const char* fmt, ...)
     if (tbmsg) {
         pfree(tbmsg);
     }
+    if (query != NULL) {
+        pfree(query);
+    }
+    if (hint != NULL) {
+        pfree(hint);
+    }
 }
 
 /*
@@ -137,8 +147,8 @@ void PLy_elog(int elevel, const char* fmt, ...)
 static void PLy_traceback(char** xmsg, char** tbmsg, int* tb_depth)
 {
     PyObject* e = NULL;
-    *v = NULL;
-    *tb = NULL;
+    PyObject* v = NULL;
+    PyObject* tb = NULL;
     PyObject* e_type_o = NULL;
     PyObject* e_module_o = NULL;
     char* e_type_s = NULL;
@@ -188,8 +198,7 @@ static void PLy_traceback(char** xmsg, char** tbmsg, int* tb_depth)
             appendStringInfoString(&xstr, "unrecognized exception");
         }
     } else if (strcmp(e_module_s, "builtins") == 0 || strcmp(e_module_s, "__main__") == 0 ||
-             strcmp(e_module_s, "exceptions") == 0) {
-                 
+               strcmp(e_module_s, "exceptions") == 0) {
         /* mimics behavior of traceback.format_exception_only */
         appendStringInfo(&xstr, "%s", e_type_s);
     } else {
@@ -327,22 +336,46 @@ static void PLy_traceback(char** xmsg, char** tbmsg, int* tb_depth)
     Py_DECREF(e);
 }
 
-/* Extract the error data from a SPIError */
+/*
+ * Extract error code from SPIError's sqlstate attribute.
+ */
+static void PLy_get_spi_sqlerrcode(PyObject* exc, int* sqlerrcode)
+{
+    PyObject* sqlstate;
+    char* buffer;
+
+    sqlstate = PyObject_GetAttrString(exc, "sqlstate");
+    if (sqlstate == NULL)
+        return;
+
+    buffer = PyString_AsString(sqlstate);
+    if (strlen(buffer) == 5 && strspn(buffer, "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ") == 5) {
+        *sqlerrcode = MAKE_SQLSTATE(buffer[0], buffer[1], buffer[2], buffer[3], buffer[4]);
+    }
+
+    Py_DECREF(sqlstate);
+}
+
+/*
+ * Extract the error data from a SPIError
+ */
 static void PLy_get_spi_error_data(
     PyObject* exc, int* sqlerrcode, char** detail, char** hint, char** query, int* position)
 {
     PyObject* spidata = NULL;
 
     spidata = PyObject_GetAttrString(exc, "spidata");
-    if (spidata == NULL) {
-        goto cleanup;
+
+    if (spidata != NULL) {
+        PyArg_ParseTuple(spidata, "izzzi", sqlerrcode, detail, hint, query, position);
+    } else {
+        /*
+         * If there's no spidata, at least set the sqlerrcode. This can happen
+         * if someone explicitly raises a SPI exception from Python code.
+         */
+        PLy_get_spi_sqlerrcode(exc, sqlerrcode);
     }
 
-    if (!PyArg_ParseTuple(spidata, "izzzi", sqlerrcode, detail, hint, query, position)) {
-        goto cleanup;
-    }
-
-cleanup:
     PyErr_Clear();
     /* no elog here, we simply won't report the errhint, errposition etc */
     Py_XDECREF(spidata);
@@ -413,7 +446,7 @@ void PLy_exception_set_plural(PyObject* exc, const char* fmt_singular, const cha
 {
     char buf[1024];
     va_list ap;
-    errno_t rc;
+    errno_t rc = EOK;
 
     va_start(ap, n);
     rc = vsnprintf_s(buf, sizeof(buf), sizeof(buf) - 1, dngettext(TEXTDOMAIN, fmt_singular, fmt_plural, n), ap);

@@ -51,6 +51,10 @@
 /* Define to build with GSSAPI support. (--with-gssapi) */
 #undef ENABLE_GSS
 
+/* Define to build with PYTHON support. (--with-python) */
+#undef ENABLE_PYTHON2
+#undef ENABLE_PYTHON3
+
 /* Define to 1 if you want National Language Support. (--enable-nls) */
 #undef ENABLE_NLS
 

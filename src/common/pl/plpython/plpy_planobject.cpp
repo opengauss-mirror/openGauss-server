@@ -108,6 +108,6 @@ static PyObject* PLy_plan_status(PyObject* self, PyObject* args)
         Py_INCREF(Py_True);
         return Py_True;
     }
-    PLy_exception_set(PLy_exc_error, "plan.status takes no arguments");
+    PLy_exception_set(plpy_t_context.PLy_exc_error, "plan.status takes no arguments");
     return NULL;
 }

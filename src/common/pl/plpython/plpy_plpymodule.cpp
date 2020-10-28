@@ -1,7 +1,7 @@
 /*
  * the plpy module
  *
- * src/pl/plpython/plpy_plpymodule.c
+ * src/common/pl/plpython/plpy_plpymodule.cpp
  */
 
 #include "postgres.h"
@@ -20,8 +20,6 @@
 #include "plpy_resultobject.h"
 #include "plpy_spi.h"
 #include "plpy_subxactobject.h"
-
-HTAB* PLy_spi_exceptions = NULL;
 
 static void PLy_add_exceptions(PyObject* plpy);
 static void PLy_generate_spi_exceptions(PyObject* mod, PyObject* base);
@@ -88,6 +86,7 @@ static PyMethodDef PLy_methods[] = {
      */
     {"cursor", PLy_cursor, METH_VARARGS, NULL},
 
+    /* Sentinel */
     {NULL, NULL, 0, NULL}};
 
 static PyMethodDef PLy_exc_methods[] = {{NULL, NULL, 0, NULL}};
@@ -133,9 +132,9 @@ PyMODINIT_FUNC PyInit_plpy(void)
 
 void PLy_init_plpy(void)
 {
-    PyObject *main_mod = NULL;
-    PyObject *main_dict = NULL;
-    PyObject *plpy_mod = NULL;
+    PyObject* main_mod = NULL;
+    PyObject* main_dict = NULL;
+    PyObject* plpy_mod = NULL;
 
 #if PY_MAJOR_VERSION < 3
     PyObject* plpy = NULL;
@@ -180,8 +179,8 @@ static void PLy_add_exceptions(PyObject* plpy)
 #else
     excmod = PyModule_Create(&PLy_exc_module);
 #endif
-    if (PyModule_AddObject(plpy, "spiexceptions", excmod) < 0)
-        PLy_elog(ERROR, "could not add the spiexceptions module");
+    if (excmod == NULL)
+        PLy_elog(ERROR, "could not create the spiexceptions module");
 
     /*
      * XXX it appears that in some circumstances the reference count of the
@@ -194,27 +193,35 @@ static void PLy_add_exceptions(PyObject* plpy)
      * backend.
      */
     Py_INCREF(excmod);
+    if (PyModule_AddObject(plpy, "spiexceptions", excmod) < 0) {
+        PLy_elog(ERROR, "could not add the spiexceptions module");
+    }
 
-    PLy_exc_error = PyErr_NewException("plpy.Error", NULL, NULL);
-    PLy_exc_fatal = PyErr_NewException("plpy.Fatal", NULL, NULL);
-    PLy_exc_spi_error = PyErr_NewException("plpy.SPIError", NULL, NULL);
-    if (PLy_exc_error == NULL || PLy_exc_fatal == NULL || PLy_exc_spi_error == NULL)
+    plpy_t_context.PLy_exc_error = PyErr_NewException("plpy.Error", NULL, NULL);
+    plpy_t_context.PLy_exc_fatal = PyErr_NewException("plpy.Fatal", NULL, NULL);
+    plpy_t_context.PLy_exc_spi_error = PyErr_NewException("plpy.SPIError", NULL, NULL);
+
+    if (plpy_t_context.PLy_exc_error == NULL || plpy_t_context.PLy_exc_fatal == NULL ||
+        plpy_t_context.PLy_exc_spi_error == NULL)
         PLy_elog(ERROR, "could not create the base SPI exceptions");
 
-    Py_INCREF(PLy_exc_error);
-    PyModule_AddObject(plpy, "Error", PLy_exc_error);
-    Py_INCREF(PLy_exc_fatal);
-    PyModule_AddObject(plpy, "Fatal", PLy_exc_fatal);
-    Py_INCREF(PLy_exc_spi_error);
-    PyModule_AddObject(plpy, "SPIError", PLy_exc_spi_error);
+    Py_INCREF(plpy_t_context.PLy_exc_error);
+    PyModule_AddObject(plpy, "Error", plpy_t_context.PLy_exc_error);
+    Py_INCREF(plpy_t_context.PLy_exc_fatal);
+    PyModule_AddObject(plpy, "Fatal", plpy_t_context.PLy_exc_fatal);
+    Py_INCREF(plpy_t_context.PLy_exc_spi_error);
+    PyModule_AddObject(plpy, "SPIError", plpy_t_context.PLy_exc_spi_error);
 
-    MemSet_S(&hash_ctl, sizeof(hash_ctl), 0, sizeof(hash_ctl));
+    errno_t rc = EOK;
+    rc = memset_s(&hash_ctl, sizeof(hash_ctl), 0, sizeof(hash_ctl));
+    securec_check(rc, "\0", "\0");
+
     hash_ctl.keysize = sizeof(int);
     hash_ctl.entrysize = sizeof(PLyExceptionEntry);
     hash_ctl.hash = tag_hash;
-    PLy_spi_exceptions = hash_create("SPI exceptions", 256, &hash_ctl, HASH_ELEM | HASH_FUNCTION);
+    plpy_t_context.PLy_spi_exceptions = hash_create("Plpy SPI exceptions", 512, &hash_ctl, HASH_ELEM | HASH_FUNCTION);
 
-    PLy_generate_spi_exceptions(excmod, PLy_exc_spi_error);
+    PLy_generate_spi_exceptions(excmod, plpy_t_context.PLy_exc_spi_error);
 }
 
 /*
@@ -241,8 +248,10 @@ static void PLy_generate_spi_exceptions(PyObject* mod, PyObject* base)
         PyDict_SetItemString(dict, "sqlstate", sqlstate);
         Py_DECREF(sqlstate);
         exc = PyErr_NewException(exception_map[i].name, base, dict);
+        Py_INCREF(exc);
         PyModule_AddObject(mod, exception_map[i].classname, exc);
-        entry = hash_search(PLy_spi_exceptions, &exception_map[i].sqlstate, HASH_ENTER, &found);
+        entry = (PLyExceptionEntry*)hash_search(
+            plpy_t_context.PLy_spi_exceptions, &exception_map[i].sqlstate, HASH_ENTER, &found);
         entry->exc = exc;
         Assert(!found);
     }
@@ -383,7 +392,7 @@ static PyObject* PLy_output(volatile int level, PyObject* self, PyObject* args)
         Py_XDECREF(so);
 
         /* Make Python raise the exception */
-        PLy_exception_set(PLy_exc_error, "%s", edata->message);
+        PLy_exception_set(plpy_t_context.PLy_exc_error, "%s", edata->message);
         return NULL;
     }
     PG_END_TRY();

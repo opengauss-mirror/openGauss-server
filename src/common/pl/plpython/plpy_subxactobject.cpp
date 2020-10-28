@@ -33,8 +33,6 @@
 
 #include "plpy_elog.h"
 
-List* explicit_subtransactions = NIL;
-
 static void PLy_subtransaction_dealloc(PyObject* subxact);
 static PyObject* PLy_subtransaction_enter(PyObject* self, PyObject* unused);
 static PyObject* PLy_subtransaction_exit(PyObject* self, PyObject* args);
@@ -132,7 +130,7 @@ static PyObject* PLy_subtransaction_enter(PyObject* self, PyObject* unused)
     subxact->started = true;
     oldcontext = CurrentMemoryContext;
 
-    subxactdata = PLy_malloc(sizeof(*subxactdata));
+    subxactdata = (PLySubtransactionData*)PLy_malloc(sizeof(*subxactdata));
     subxactdata->oldcontext = oldcontext;
     subxactdata->oldowner = t_thrd.utils_cxt.CurrentResourceOwner;
 
@@ -140,7 +138,7 @@ static PyObject* PLy_subtransaction_enter(PyObject* self, PyObject* unused)
     /* Do not want to leave the previous memory context */
     MemoryContextSwitchTo(oldcontext);
 
-    explicit_subtransactions = lcons(subxactdata, explicit_subtransactions);
+    plpy_t_context.explicit_subtransactions = lcons(subxactdata, plpy_t_context.explicit_subtransactions);
 
     Py_INCREF(self);
     return self;
@@ -178,7 +176,7 @@ static PyObject* PLy_subtransaction_exit(PyObject* self, PyObject* args)
         return NULL;
     }
 
-    if (explicit_subtransactions == NIL) {
+    if (plpy_t_context.explicit_subtransactions == NIL) {
         PLy_exception_set(PyExc_ValueError, "there is no subtransaction to exit from");
         return NULL;
     }
@@ -192,8 +190,8 @@ static PyObject* PLy_subtransaction_exit(PyObject* self, PyObject* args)
         ReleaseCurrentSubTransaction();
     }
 
-    subxactdata = (PLySubtransactionData*)linitial(explicit_subtransactions);
-    explicit_subtransactions = list_delete_first(explicit_subtransactions);
+    subxactdata = (PLySubtransactionData*)linitial(plpy_t_context.explicit_subtransactions);
+    plpy_t_context.explicit_subtransactions = list_delete_first(plpy_t_context.explicit_subtransactions);
 
     MemoryContextSwitchTo(subxactdata->oldcontext);
     t_thrd.utils_cxt.CurrentResourceOwner = subxactdata->oldowner;
