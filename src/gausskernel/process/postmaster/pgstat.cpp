@@ -4266,6 +4266,12 @@ const char* pgstat_get_wait_io(WaitEventIO w)
         case WAIT_EVENT_WAL_WRITE:
             event_name = "WALWrite";
             break;
+        case WAIT_EVENT_WAL_BUFFER_FULL:
+            event_name = "WALBufferFull";
+            break;
+        case WAIT_EVENT_WAL_BUFFER_ACCESS:
+            event_name = "WALBufferAccess";
+            break;
         case WAIT_EVENT_DW_READ:
             event_name = "DoubleWriteFileRead";
             break;
