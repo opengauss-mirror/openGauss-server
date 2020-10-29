@@ -60,41 +60,8 @@
 #include "executor/execdebug.h"
 #include "executor/nodeAppend.h"
 
-/* ----------------------------------------------------------------
- *		exec_append_initialize_next
- *
- *		Sets up the append state node for the "next" scan.
- *
- *		Returns t iff there is a "next" scan to process.
- * ----------------------------------------------------------------
- */
-bool exec_append_initialize_next(AppendState* appendstate)
-{
-    int whichplan;
-
-    /*
-     * get information from the append node
-     */
-    whichplan = appendstate->as_whichplan;
-
-    if (whichplan < 0) {
-        /*
-         * if scanning in reverse, we start at the last scan in the list and
-         * then proceed back to the first.. in any case we inform ExecAppend
-         * that we are at the end of the line by returning FALSE
-         */
-        appendstate->as_whichplan = 0;
-        return FALSE;
-    } else if (whichplan >= appendstate->as_nplans) {
-        /*
-         * as above, end the scan if we go beyond the last scan in our list..
-         */
-        appendstate->as_whichplan = appendstate->as_nplans - 1;
-        return FALSE;
-    } else {
-        return TRUE;
-    }
-}
+static bool choose_next_subplan_for_leader(AppendState *node);
+static bool choose_next_subplan_for_worker(AppendState *node);
 
 /* ----------------------------------------------------------------
  *		ExecInitAppend
@@ -164,21 +131,29 @@ AppendState* ExecInitAppend(Append* node, EState* estate, int eflags)
     appendstate->ps.ps_ProjInfo = NULL;
 
     /*
-     * initialize to scan first subplan
+     * Parallel-aware append plans must choose the first subplan to execute by
+     * looking at shared memory, but non-parallel-aware append plans can
+     * always start with the first subplan.
      */
-    appendstate->as_whichplan = 0;
-    (void)exec_append_initialize_next(appendstate);
+    appendstate->as_whichplan = appendstate->ps.plan->parallel_aware ? INVALID_SUBPLAN_INDEX : 0;
+
+    /* If parallel query, this will be overridden later. */
+    appendstate->choose_next_subplan = choose_next_subplan_locally;
     return appendstate;
 }
 
 /* ----------------------------------------------------------------
- *	   ExecAppend
+ * ExecAppend
  *
- *		Handles iteration over multiple subplans.
+ *    Handles iteration over multiple subplans.
  * ----------------------------------------------------------------
  */
 TupleTableSlot* ExecAppend(AppendState* node)
 {
+    /* If no subplan has been chosen, we must choose one before proceeding. */
+    if (node->as_whichplan == INVALID_SUBPLAN_INDEX && !node->choose_next_subplan(node))
+        return ExecClearTuple(node->ps.ps_ResultTupleSlot);
+
     for (;;) {
         PlanState* subnode = NULL;
         TupleTableSlot* result = NULL;
@@ -186,6 +161,7 @@ TupleTableSlot* ExecAppend(AppendState* node)
         /*
          * figure out which subplan we are currently processing
          */
+        Assert(node->as_whichplan >= 0 && node->as_whichplan < node->as_nplans);
         subnode = node->appendplans[node->as_whichplan];
 
         /*
@@ -204,16 +180,8 @@ TupleTableSlot* ExecAppend(AppendState* node)
         /* Early free each of subplans after finishing execution */
         ExecEarlyFree(subnode);
 
-        /*
-         * Go on to the "next" subplan in the appropriate direction. If no
-         * more subplans, return the empty slot set up for us by
-         * ExecInitAppend.
-         */
-        if (ScanDirectionIsForward(node->ps.state->es_direction))
-            node->as_whichplan++;
-        else
-            node->as_whichplan--;
-        if (!exec_append_initialize_next(node))
+        /* choose new subplan; if none, we're done */
+        if (!node->choose_next_subplan(node))
             return ExecClearTuple(node->ps.ps_ResultTupleSlot);
 
         /* Else loop back and try to get a tuple from the new subplan */
@@ -268,6 +236,225 @@ void ExecReScanAppend(AppendState* node)
         if (subnode->chgParam == NULL)
             ExecReScan(subnode);
     }
-    node->as_whichplan = 0;
-    (void)exec_append_initialize_next(node);
+
+    node->as_whichplan = node->ps.plan->parallel_aware ? INVALID_SUBPLAN_INDEX : 0;
 }
+ 
+/* ----------------------------------------------------------------
+ *                     Parallel Append Support
+ * ----------------------------------------------------------------
+ */
+/* ----------------------------------------------------------------
+ *     ExecAppendEstimate
+ *
+ *     Compute the amount of space we'll need in the parallel
+ *     query DSM, and inform pcxt->estimator about our needs.
+ * ----------------------------------------------------------------
+ */
+void ExecAppendEstimate(AppendState *node, ParallelContext *pcxt)
+{
+    node->pstate_len = add_size(offsetof(ParallelAppendState, pa_finished), sizeof(bool) * node->as_nplans);	
+}
+
+/* ----------------------------------------------------------------
+ *     ExecAppendInitializeDSM
+ *
+ *     Set up shared state for Parallel Append.
+ * ----------------------------------------------------------------
+ */
+void ExecAppendInitializeDSM(AppendState *node, ParallelContext *pcxt, int nodeid)
+{
+    ParallelAppendState *pstate = NULL;
+    knl_u_parallel_context *cxt = (knl_u_parallel_context *)pcxt->seg;
+
+    pstate = (ParallelAppendState*)MemoryContextAllocZero(cxt->memCtx, node->pstate_len);
+
+    LWLockInitialize(&pstate->pa_lock, LWTRANCHE_PARALLEL_APPEND);
+    pstate->plan_node_id = node->ps.plan->plan_node_id;
+
+    cxt->pwCtx->queryInfo.pappend[nodeid] = pstate;
+    node->as_pstate = cxt->pwCtx->queryInfo.pappend[nodeid];
+    node->choose_next_subplan = choose_next_subplan_for_leader;
+}
+
+/* ----------------------------------------------------------------
+ *     ExecAppendInitializeWorker
+ *
+ *     Copy relevant information from TOC into planstate, and initialize
+ *     whatever is required to choose and execute the optimal subplan.
+ * ----------------------------------------------------------------
+ */
+void ExecAppendInitializeWorker(AppendState *node, void* context)
+{
+    knl_u_parallel_context *cxt = (knl_u_parallel_context *)context;
+
+    for (int i = 0; i < cxt->pwCtx->queryInfo.pappend_num; i++) {
+        if (node->ps.plan->plan_node_id == cxt->pwCtx->queryInfo.pappend[i]->plan_node_id) {
+            node->as_pstate = cxt->pwCtx->queryInfo.pappend[i];
+            break;
+        }
+    }
+    node->choose_next_subplan = choose_next_subplan_for_worker;
+}
+
+/* ----------------------------------------------------------------
+ *     choose_next_subplan_locally
+ *
+ *     Choose next subplan for a non-parallel-aware Append,
+ *     returning false if there are no more.
+ * ----------------------------------------------------------------
+ */
+bool choose_next_subplan_locally(AppendState *node)
+{
+    int         whichplan = node->as_whichplan;
+
+    if (ScanDirectionIsForward(node->ps.state->es_direction)) {
+        /*
+         * We won't normally see INVALID_SUBPLAN_INDEX in this case, but we
+         * might if a plan intended to be run in parallel ends up being run
+         * serially.
+         */
+        if (whichplan == INVALID_SUBPLAN_INDEX) {
+            node->as_whichplan = 0;
+        } else {
+            if (whichplan >= node->as_nplans - 1)
+                return false;
+            node->as_whichplan++;
+        }
+    } else {
+        if (whichplan <= 0)
+            return false;
+        node->as_whichplan--;
+    }
+
+    return true;
+}
+
+/* ----------------------------------------------------------------
+ *     choose_next_subplan_for_leader
+ *
+ *      Try to pick a plan which doesn't commit us to doing much
+ *      work locally, so that as much work as possible is done in
+ *      the workers.  Cheapest subplans are at the end.
+ * ----------------------------------------------------------------
+ */
+static bool choose_next_subplan_for_leader(AppendState *node)
+{
+    ParallelAppendState *pstate = node->as_pstate;
+    Append     *append = (Append *) node->ps.plan;
+
+    /* Backward scan is not supported by parallel-aware plans */
+    Assert(ScanDirectionIsForward(node->ps.state->es_direction));
+
+    LWLockAcquire(&pstate->pa_lock, LW_EXCLUSIVE);
+
+    if (node->as_whichplan != INVALID_SUBPLAN_INDEX) {
+        /* Mark just-completed subplan as finished. */
+        node->as_pstate->pa_finished[node->as_whichplan] = true;
+    } else {
+        /* Start with last subplan. */
+        node->as_whichplan = node->as_nplans - 1;
+    }
+
+    /* Loop until we find a subplan to execute. */
+    while (pstate->pa_finished[node->as_whichplan]) {
+        if (node->as_whichplan == 0) {
+            pstate->pa_next_plan = INVALID_SUBPLAN_INDEX;
+            node->as_whichplan = INVALID_SUBPLAN_INDEX;
+            LWLockRelease(&pstate->pa_lock);
+            return false;
+        }
+        node->as_whichplan--;
+    }
+
+    /* If non-partial, immediately mark as finished. */
+    if (node->as_whichplan < append->first_partial_plan)
+        node->as_pstate->pa_finished[node->as_whichplan] = true;
+
+    LWLockRelease(&pstate->pa_lock);
+
+    return true;
+}
+
+/* ----------------------------------------------------------------
+ *     choose_next_subplan_for_worker
+ *
+ *     Choose next subplan for a parallel-aware Append, returning
+ *     false if there are no more.
+ *
+ *     We start from the first plan and advance through the list;
+ *     when we get back to the end, we loop back to the first
+ *     nonpartial plan.  This assigns the non-partial plans first
+ *     in order of descending cost and then spreads out the
+ *     workers as evenly as possible across the remaining partial
+ *     plans.
+ * ----------------------------------------------------------------
+ */
+static bool choose_next_subplan_for_worker(AppendState *node)
+{
+    ParallelAppendState *pstate = node->as_pstate;
+    Append     *append = (Append *) node->ps.plan;
+ 
+    /* Backward scan is not supported by parallel-aware plans */
+    Assert(ScanDirectionIsForward(node->ps.state->es_direction));
+ 
+    LWLockAcquire(&pstate->pa_lock, LW_EXCLUSIVE);
+ 
+    /* Mark just-completed subplan as finished. */
+    if (node->as_whichplan != INVALID_SUBPLAN_INDEX)
+        node->as_pstate->pa_finished[node->as_whichplan] = true;
+ 
+    /* If all the plans are already done, we have nothing to do */
+    if (pstate->pa_next_plan == INVALID_SUBPLAN_INDEX) {
+        LWLockRelease(&pstate->pa_lock);
+        return false;
+    }
+
+    /* Save the plan from which we are starting the search. */
+    node->as_whichplan = pstate->pa_next_plan;
+
+    /* Loop until we find a subplan to execute. */
+    while (pstate->pa_finished[pstate->pa_next_plan]) {
+        if (pstate->pa_next_plan < node->as_nplans - 1) {
+            /* Advance to next plan. */
+            pstate->pa_next_plan++;
+        } else if (node->as_whichplan > append->first_partial_plan) {
+            /* Loop back to first partial plan. */
+            pstate->pa_next_plan = append->first_partial_plan;
+        } else {
+            /* At last plan, and either there are no partial plans or we've
+             * tried them all.  Arrange to bail out. */
+            pstate->pa_next_plan = node->as_whichplan;
+        }
+ 
+        if (pstate->pa_next_plan == node->as_whichplan) {
+            /* We've tried everything! */
+            pstate->pa_next_plan = INVALID_SUBPLAN_INDEX;
+            LWLockRelease(&pstate->pa_lock);
+            return false;
+        }
+    }
+
+    /* Pick the plan we found, and advance pa_next_plan one more time. */
+    node->as_whichplan = pstate->pa_next_plan++;
+    if (pstate->pa_next_plan >= node->as_nplans) {
+        if (append->first_partial_plan < node->as_nplans) {
+            pstate->pa_next_plan = append->first_partial_plan;
+        } else {
+            /*
+             * We have only non-partial plans, and we already chose the last
+             * one; so arrange for the other workers to immediately bail out.
+             */
+            pstate->pa_next_plan = INVALID_SUBPLAN_INDEX;
+        }
+    }
+
+    /* If non-partial, immediately mark as finished. */
+    if (node->as_whichplan < append->first_partial_plan)
+        node->as_pstate->pa_finished[node->as_whichplan] = true;
+
+    LWLockRelease(&pstate->pa_lock);
+
+    return true;
+}
+

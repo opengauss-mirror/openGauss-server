@@ -3491,6 +3491,7 @@ static Append* _readAppend(Append* local_node)
     // Read Plan
     _readPlan(&local_node->plan);
     READ_NODE_FIELD(appendplans);
+    READ_INT_FIELD(first_partial_plan);
 
     READ_DONE();
 }
@@ -4860,6 +4861,17 @@ static QualSkewInfo* _readQualSkewInfo()
     READ_DONE();
 }
 
+static Gather* _readGather(void)
+{
+    READ_LOCALS(Gather);
+
+    _readPlan(&local_node->plan);
+
+    READ_INT_FIELD(num_workers);
+    READ_BOOL_FIELD(single_copy);
+    READ_DONE();
+}
+
 /*
  * parseNodeString
  *
@@ -5253,6 +5265,8 @@ Node* parseNodeString(void)
         return_value = _readUpsertExpr();
     } else if (MATCH("UPSERTCLAUSE", 12)) {
         return_value = _readUpsertClause();
+    } else if (MATCH("GATHER", 6)) {
+        return_value = _readGather();
     } else {
         ereport(ERROR,
             (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE),

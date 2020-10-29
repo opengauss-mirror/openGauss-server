@@ -305,6 +305,9 @@ extern void dlist_add_tail_cell(DList* dlist, DListCell* cell);
 extern List* list_merge_int(List* list1, List* list2);
 extern List* list_insert_nth_oid(List *list, int pos, Oid datum);
 
+typedef int (*list_qsort_comparator) (const void *a, const void *b);
+extern List *list_qsort(const List *list, list_qsort_comparator cmp);
+
 /*
  * To ease migration to the new list API, a set of compatibility
  * macros are provided that reduce the impact of the list API changes

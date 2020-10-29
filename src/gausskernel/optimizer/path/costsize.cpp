@@ -137,6 +137,7 @@ static double get_parallel_divisor(Path *path);
 extern int getDataMinLen(Oid typeOid, int typeMod);
 extern bool isExprSonicEnable(Expr* node);
 extern bool isAggrefSonicEnable(Oid aggfnoid);
+static Cost append_nonpartial_cost(List *subpaths, int numpaths, int parallel_workers);
 
 /*
  * init_plan_cost
@@ -714,7 +715,7 @@ void cost_seqscan(Path* path, PlannerInfo* root, RelOptInfo* baserel, ParamPathI
      * This is almost certainly not exactly the right way to model this, so
      * this will probably need to be changed at some point...
      */
-    if (path->parallel_degree > 0) {
+    if (path->parallel_workers > 0) {
         double parallel_divisor = get_parallel_divisor(path);
 
         run_cost = run_cost / parallel_divisor;
@@ -2096,6 +2097,157 @@ void cost_sort(Path* path, List* pathkeys, Cost input_cost, double tuples, int w
     if (!u_sess->attr.attr_sql.enable_sort)
         path->total_cost *=
             (g_instance.cost_cxt.disable_cost_enlarge_factor * g_instance.cost_cxt.disable_cost_enlarge_factor);
+}
+
+/*
+ * append_nonpartial_cost
+ *   Estimate the cost of the non-partial paths in a Parallel Append.
+ *   The non-partial paths are assumed to be the first "numpaths" paths
+ *   from the subpaths list, and to be in order of decreasing cost.
+ */
+static Cost append_nonpartial_cost(List *subpaths, int numpaths, int parallel_workers)
+{
+    Cost       *costarr = NULL;
+    int         arrlen;
+    ListCell   *l = NULL;
+    ListCell   *cell = NULL;
+    int         i;
+    int         path_index;
+    int         min_index;
+    int         max_index;
+
+    if (numpaths == 0) {
+        return 0;
+    }
+    /*
+     * Array length is number of workers or number of relevants paths,
+     * whichever is less.
+     */
+    arrlen = Min(parallel_workers, numpaths);
+    costarr = (Cost *) palloc(sizeof(Cost) * arrlen);
+
+    /* The first few paths will each be claimed by a different worker. */
+    path_index = 0;
+    foreach(cell, subpaths) {
+        Path *subpath = (Path *) lfirst(cell);
+
+        if (path_index == arrlen)
+            break;
+        costarr[path_index++] = subpath->total_cost;
+    }
+
+    /*
+     * Since subpaths are sorted by decreasing cost, the last one will have
+     * the minimum cost.
+     */
+    min_index = arrlen - 1;
+
+    /*
+     * For each of the remaining subpaths, add its cost to the array element
+     * with minimum cost.
+     */
+    for_each_cell(l, cell) {
+        Path       *subpath = (Path *) lfirst(l);
+        int         i;
+
+        /* Consider only the non-partial paths */
+        if (path_index++ == numpaths)
+            break;
+
+        costarr[min_index] += subpath->total_cost;
+
+        /* Update the new min cost array index */
+        for (min_index = i = 0; i < arrlen; i++) {
+            if (costarr[i] < costarr[min_index])
+                min_index = i;
+        }
+    }
+
+    /* Return the highest cost from the array */
+    for (max_index = i = 0; i < arrlen; i++) {
+        if (costarr[i] > costarr[max_index])
+            max_index = i;
+    }
+
+    return costarr[max_index];
+}
+
+/*
+ * cost_append
+ *   Determines and returns the cost of an Append node.
+ *
+ * We charge nothing extra for the Append itself, which perhaps is too
+ * optimistic, but since it doesn't do any selection or projection, it is a
+ * pretty cheap node.
+ */
+void cost_append(AppendPath *apath)
+{
+    ListCell   *l = NULL;
+ 
+    apath->path.startup_cost = 0;
+    apath->path.total_cost = 0;
+ 
+    if (apath->subpaths == NIL)
+        return;
+ 
+    if (!apath->path.parallel_aware) {
+        Path *subpath = (Path *) linitial(apath->subpaths);
+ 
+        /*
+         * Startup cost of non-parallel-aware Append is the startup cost of
+         * first subpath.
+         */
+        apath->path.startup_cost = subpath->startup_cost;
+ 
+        /* Compute rows and costs as sums of subplan rows and costs. */
+        foreach(l, apath->subpaths) {
+            Path       *subpath = (Path *) lfirst(l);
+ 
+            apath->path.rows += subpath->rows;
+            apath->path.total_cost += subpath->total_cost;
+            apath->path.stream_cost += subpath->stream_cost;
+        }
+    } else {   /* parallel-aware */
+        int         i = 0;
+        double      parallel_divisor = get_parallel_divisor(&apath->path);
+ 
+        /* Calculate startup cost. */
+        foreach(l, apath->subpaths) {
+            Path *subpath = (Path *) lfirst(l);
+ 
+            /*
+             * Append will start returning tuples when the child node having
+             * lowest startup cost is done setting up. We consider only the
+             * first few subplans that immediately get a worker assigned.
+             */
+            if (i == 0) {
+                apath->path.startup_cost = subpath->startup_cost;
+            } else if (i < apath->path.parallel_workers) {
+                apath->path.startup_cost = Min(apath->path.startup_cost, subpath->startup_cost);
+            }
+            /*
+             * Apply parallel divisor to subpaths.  Scale the number of rows
+             * for each partial subpath based on the ratio of the parallel
+             * divisor originally used for the subpath to the one we adopted.
+             * Also add the cost of partial paths to the total cost, but
+             * ignore non-partial paths for now.
+             */
+            if (i < apath->first_partial_path) {
+                apath->path.rows += subpath->rows / parallel_divisor;
+            } else {
+                double subpath_parallel_divisor = get_parallel_divisor(subpath);
+                apath->path.rows += subpath->rows * (subpath_parallel_divisor / parallel_divisor);
+                apath->path.total_cost += subpath->total_cost;
+            }
+            apath->path.rows = clamp_row_est(apath->path.rows);
+            apath->path.stream_cost += subpath->stream_cost;
+            i++;
+        }
+
+        /* Add cost for non-partial subpaths. */
+        apath->path.total_cost += append_nonpartial_cost(apath->subpaths, apath->first_partial_path,
+            apath->path.parallel_workers);
+    }
 }
 
 /*
@@ -5682,7 +5834,7 @@ double page_size(double tuples, int width)
  */
 static double get_parallel_divisor(Path* path)
 {
-    double parallel_divisor = path->parallel_degree;
+    double parallel_divisor = path->parallel_workers;
 
     /*
      * Early experience with parallel query suggests that when there is only
@@ -5698,7 +5850,7 @@ static double get_parallel_divisor(Path* path)
     if (u_sess->attr.attr_sql.parallel_leader_participation) {
         double leader_contribution;
 
-        leader_contribution = 1.0 - (0.3 * path->parallel_degree);
+        leader_contribution = 1.0 - (0.3 * path->parallel_workers);
         if (leader_contribution > 0) {
             parallel_divisor += leader_contribution;
         }

@@ -309,6 +309,7 @@ static Append* _copyAppend(const Append* from)
      * copy remainder of node
      */
     COPY_NODE_FIELD(appendplans);
+    COPY_SCALAR_FIELD(first_partial_plan);
 
     return newnode;
 }

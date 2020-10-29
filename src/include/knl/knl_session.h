@@ -2033,6 +2033,9 @@ typedef struct knl_u_ext_fdw_context {
     pg_on_exit_callback fdwExitFunc;    /* Exit callback, will be called when session exit */
 } knl_u_ext_fdw_context;
 
+struct ParallelAppendState;
+typedef struct ParallelAppendState ParallelAppendState;
+
 /* Info need to pass from leader to worker */
 struct ParallelHeapScanDescData;
 typedef uint64 XLogRecPtr;
@@ -2047,6 +2050,8 @@ typedef struct ParallelQueryInfo {
     int eflags;
     int pscan_num;
     ParallelHeapScanDescData **pscan;
+    int pappend_num;
+    ParallelAppendState **pappend;
 } ParallelQueryInfo;
 
 struct BTShared;

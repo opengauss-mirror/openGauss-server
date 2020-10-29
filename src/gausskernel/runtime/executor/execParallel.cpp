@@ -26,6 +26,7 @@
 #include "executor/execParallel.h"
 #include "executor/executor.h"
 #include "executor/nodeSeqscan.h"
+#include "executor/nodeAppend.h"
 #include "executor/tqueue.h"
 #include "nodes/nodeFuncs.h"
 #include "optimizer/planmain.h"
@@ -149,6 +150,9 @@ static bool ExecParallelEstimate(PlanState *planstate, ExecParallelEstimateConte
             case T_SeqScanState:
                 ExecSeqScanEstimate((SeqScanState *)planstate, e->pcxt);
                 break;
+            case T_AppendState:
+                ExecAppendEstimate((AppendState*)planstate, e->pcxt);
+                break;
             default:
                 break;
         }
@@ -189,6 +193,10 @@ static bool ExecParallelInitializeDSM(PlanState *planstate, ExecParallelInitiali
             case T_SeqScanState:
                 ExecSeqScanInitializeDSM((SeqScanState *)planstate, d->pcxt, cxt->pwCtx->queryInfo.pscan_num);
                 cxt->pwCtx->queryInfo.pscan_num++;
+                break;
+            case T_AppendState:
+                ExecAppendInitializeDSM((AppendState *)planstate, d->pcxt, cxt->pwCtx->queryInfo.pappend_num);
+                cxt->pwCtx->queryInfo.pappend_num++;
                 break;
             default:
                 break;
@@ -356,6 +364,7 @@ ParallelExecutorInfo *ExecInitParallelPlan(PlanState *planstate, EState *estate,
     }
 
     queryInfo.pscan = (ParallelHeapScanDesc *)palloc0(sizeof(ParallelHeapScanDesc) * e.nnodes);
+    queryInfo.pappend = (ParallelAppendState**)palloc0(sizeof(ParallelAppendState*) * e.nnodes);
 
     /*
      * Give parallel-aware nodes a chance to initialize their shared data.
@@ -590,6 +599,9 @@ static bool ExecParallelInitializeWorker(PlanState *planstate, void *context)
         switch (nodeTag(planstate)) {
             case T_SeqScanState:
                 ExecSeqScanInitializeWorker((SeqScanState *)planstate, context);
+                break;
+            case T_AppendState:
+                ExecAppendInitializeWorker((AppendState *)planstate, context);
                 break;
             default:
                 break;

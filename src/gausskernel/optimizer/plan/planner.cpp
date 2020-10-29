@@ -3457,7 +3457,7 @@ static Plan* grouping_planner(PlannerInfo* root, double tuple_fraction)
                     while (--nrows > 0)
                         plans = lappend(plans, copyObject(result_plan));
 
-                    result_plan = (Plan*)make_append(plans, tlist);
+                    result_plan = (Plan*)make_append(plans, -1, tlist);
                 }
             }
 #ifdef PGXC

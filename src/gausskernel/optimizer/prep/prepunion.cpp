@@ -663,7 +663,7 @@ static Plan* generate_union_plan(SetOperationStmt* op, PlannerInfo* root, double
     /*
      * Append the child results together.
      */
-    plan = (Plan*)make_append(planlist, tlist);
+    plan = (Plan*)make_append(planlist, -1, tlist);
 
 #ifdef STREAMPLAN
     if (IS_STREAM_PLAN) {
@@ -767,7 +767,7 @@ static Plan* generate_nonunion_plan(SetOperationStmt* op, PlannerInfo* root, dou
     /*
      * Append the child results together.
      */
-    plan = (Plan*)make_append(planlist, tlist);
+    plan = (Plan*)make_append(planlist, -1, tlist);
 
 #ifdef STREAMPLAN
     if (IS_STREAM_PLAN) {
