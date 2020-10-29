@@ -592,7 +592,7 @@ test: gtt_clean
 test: create_procedure create_function pg_compatibility postgres_fdw
 
 # autonomous transaction Test
-test: autonomous_transaction
+#test: autonomous_transaction
 
 # parallel query
 test: parallel_query parallel_nested_loop parallel_hashjoin

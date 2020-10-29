@@ -95,10 +95,11 @@ ALTER TABLE xc_alter_table_2 DROP COLUMN e;
 EXPLAIN (VERBOSE true, COSTS false, NODES false) INSERT INTO xc_alter_table_2 VALUES ('Kodek', false);
                                              QUERY PLAN                                             
 ----------------------------------------------------------------------------------------------------
+ [Bypass]
  Insert on public.xc_alter_table_2
    ->  Result
          Output: NULL::integer, 'Kodek'::character varying(20), false, NULL::integer, NULL::integer
-(3 rows)
+(4 rows)
 
 INSERT INTO xc_alter_table_2 VALUES ('Kodek', false);
 SELECT b, c FROM xc_alter_table_2 ORDER BY b;
@@ -138,10 +139,11 @@ ALTER TABLE xc_alter_table_2 ADD COLUMN a2 varchar(20);
 EXPLAIN (VERBOSE true, COSTS false, NODES false) INSERT INTO xc_alter_table_2 (a, a2, b, c) VALUES (100, 'CEO', 'Gordon', true);
                                                               QUERY PLAN                                                               
 ---------------------------------------------------------------------------------------------------------------------------------------
+ [Bypass]
  Insert on public.xc_alter_table_2
    ->  Result
          Output: NULL::integer, 'Gordon'::character varying(20), true, NULL::integer, NULL::integer, 100, 'CEO'::character varying(20)
-(3 rows)
+(4 rows)
 
 INSERT INTO xc_alter_table_2 (a, a2, b, c) VALUES (100, 'CEO', 'Gordon', true);
 SELECT a, a2, b, c FROM xc_alter_table_2 ORDER BY b;

@@ -350,9 +350,10 @@ c_varchar2 varchar2(10)
 explain insert into testtd values('a','a','a','a');
                      QUERY PLAN                     
 ----------------------------------------------------
+ [Bypass]
 --? Insert on testtd  (cost=.* rows=.* width=.*)
 --?   ->  Result  (cost=.* rows=.* width=.*)
-(2 rows)
+(3 rows)
 
 insert into testtd values('a','a','a','a');
 drop table testtd;

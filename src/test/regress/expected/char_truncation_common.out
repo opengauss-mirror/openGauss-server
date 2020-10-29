@@ -381,7 +381,6 @@ show td_compatible_truncation;
 prepare insert1(char(6), varchar(6)) as insert into pre_table values($1,$2);
 execute insert1('aaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbb');
 ERROR:  value too long for type character(6)
-CONTEXT:  referenced column: a
 set td_compatible_truncation=on;
 show td_compatible_truncation;
  td_compatible_truncation 
@@ -399,7 +398,6 @@ show td_compatible_truncation;
 
 execute insert1('aaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbb');
 ERROR:  value too long for type character(6)
-CONTEXT:  referenced column: a
 drop table if exists pre_table;
 drop table testtd;
 drop table testtdn;
