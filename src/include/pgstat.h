@@ -935,6 +935,8 @@ typedef enum WaitEventIO {
     WAIT_EVENT_WAL_READ,
     WAIT_EVENT_WAL_SYNC_METHOD_ASSIGN,
     WAIT_EVENT_WAL_WRITE,
+    WAIT_EVENT_WAL_BUFFER_ACCESS,
+    WAIT_EVENT_WAL_BUFFER_FULL,
     WAIT_EVENT_DW_READ,
     WAIT_EVENT_DW_WRITE,
     WAIT_EVENT_PREDO_PROCESS_PENDING,
@@ -1075,6 +1077,7 @@ typedef struct WaitStatusInfo {
 
 typedef struct WaitEventInfo {
     int64 start_time;  // current wait starttime
+    int64 duration;    // current wait duration
     WaitStatisticsInfo io_info[IO_EVENT_NUM];
     WaitStatisticsInfo lock_info[LOCK_EVENT_NUM];
     WaitStatisticsInfo lwlock_info[LWLOCK_EVENT_NUM];
@@ -1597,6 +1600,54 @@ static inline void pgstat_report_waitevent(uint32 wait_event_info)
                wait_event_info == WAIT_EVENT_END) {
         int64 duration = GetCurrentTimestamp() - beentry->waitInfo.event_info.start_time;
         UpdateWaitEventStat(&beentry->waitInfo, old_wait_event_info, duration);
+        beentry->waitInfo.event_info.start_time = 0;
+        beentry->waitInfo.event_info.duration = duration;
+    }
+
+    pgstat_increment_changecount_after(beentry);
+}
+
+static inline void pgstat_report_waitevent_count(uint32 wait_event_info)
+{
+    volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+
+    if (IS_PGSTATE_TRACK_UNDEFINE)
+        return;
+
+    pgstat_increment_changecount_before(beentry);
+    /*
+     * Since this is a four-byte field which is always read and written as
+     * four-bytes, updates are atomic.
+     */
+    uint32 old_wait_event_info = beentry->st_waitevent;
+    beentry->st_waitevent = wait_event_info;
+
+    if (u_sess->attr.attr_common.enable_instr_track_wait && old_wait_event_info != WAIT_EVENT_END &&
+            wait_event_info == WAIT_EVENT_END) {
+        UpdateWaitEventStat(&beentry->waitInfo, old_wait_event_info, 0);
+    }
+
+    pgstat_increment_changecount_after(beentry);
+}
+
+/* wal_buffer full waitevent report use wal_write's duration. */
+static inline void pgstat_report_wal_buffer_full_waitevent()
+{
+    volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
+
+    if (IS_PGSTATE_TRACK_UNDEFINE)
+        return;
+
+    pgstat_increment_changecount_before(beentry);
+    /*
+     * Since this is a four-byte field which is always read and written as
+     * four-bytes, updates are atomic.
+     */
+    uint32 old_wait_event_info = WAIT_EVENT_WAL_BUFFER_FULL;
+    beentry->st_waitevent = WAIT_EVENT_END;
+
+    if (u_sess->attr.attr_common.enable_instr_track_wait) {
+        UpdateWaitEventStat(&beentry->waitInfo, old_wait_event_info, beentry->waitInfo.event_info.duration);
         beentry->waitInfo.event_info.start_time = 0;
     }
 

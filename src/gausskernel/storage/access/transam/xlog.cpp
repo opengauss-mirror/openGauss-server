@@ -939,6 +939,8 @@ static void CopyXLogRecordToWALForGroup(
     XLogPageHeader pagehdr;
     errno_t errorno = EOK;
 
+    pgstat_report_waitevent_count(WAIT_EVENT_WAL_BUFFER_ACCESS);
+
     /* Get a pointer to the right place in the right WAL buffer to start inserting to. */
     CurrPos = StartPos;
     currpos = GetXLogBuffer<true>(CurrPos, proc);
@@ -1011,6 +1013,8 @@ static void CopyXLogRecordToWALForGroup(
     if (SECUREC_UNLIKELY(CurrPos != EndPos)) {
         ereport(PANIC, (errmsg("space reserved for WAL record does not match what was written")));
     }
+
+    pgstat_report_waitevent_count(WAIT_EVENT_END);
 }
 
 #endif
@@ -1521,6 +1525,8 @@ static void CopyXLogRecordToWAL(
     XLogPageHeader pagehdr;
     errno_t errorno = EOK;
 
+    pgstat_report_waitevent_count(WAIT_EVENT_WAL_BUFFER_ACCESS);
+
     /*
      * Get a pointer to the right place in the right WAL buffer to start
      * inserting to.
@@ -1626,6 +1632,7 @@ static void CopyXLogRecordToWAL(
     if (CurrPos != EndPos) {
         ereport(PANIC, (errmsg("space reserved for WAL record does not match what was written")));
     }
+    pgstat_report_waitevent_count(WAIT_EVENT_END);
 }
 
 /*
@@ -2411,6 +2418,7 @@ static void AdvanceXLInsertBuffer(XLogRecPtr upto, bool opportunistic, PGPROC* p
                     WriteRqst.Write = OldPageRqstPtr;
                     WriteRqst.Flush = 0;
                     XLogWrite(WriteRqst, false);
+                    pgstat_report_wal_buffer_full_waitevent();
                     LWLockRelease(WALWriteLock);
                     TRACE_POSTGRESQL_WAL_BUFFER_WRITE_DIRTY_DONE();
                 }
@@ -2656,6 +2664,9 @@ static void XLogWrite(const XLogwrtRqst& WriteRqst, bool flexible)
             actualBytes = write(t_thrd.xlog_cxt.openLogFile, from, nbytes);
             INSTR_TIME_SET_CURRENT(endTime);
             INSTR_TIME_SUBTRACT(endTime, startTime);
+            /* when track_activities and enable_instr_track_wait are on,
+             * elapsedTime can be replaced by beentry->waitInfo.event_info.duration.
+             */
             elapsedTime = (PgStat_Counter)INSTR_TIME_GET_MICROSEC(endTime);
             pgstat_report_waitevent(WAIT_EVENT_END);
 
