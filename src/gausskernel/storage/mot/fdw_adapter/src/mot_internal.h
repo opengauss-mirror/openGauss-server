@@ -382,7 +382,7 @@ public:
 
     // data conversion
     static void DatumToMOT(MOT::Column* col, Datum datum, Oid type, uint8_t* data);
-    static void DatumToMOTKey(MOT::Column* col, Expr* expr, Datum datum, Oid type, uint8_t* data, size_t len,
+    static void DatumToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, Oid type, uint8_t* data, size_t len,
         KEY_OPER oper, uint8_t fill = 0x00);
     static void MOTToDatum(MOT::Table* table, const Form_pg_attribute attr, uint8_t* data, Datum* value, bool* is_null);
 
