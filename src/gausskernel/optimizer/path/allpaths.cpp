@@ -1056,10 +1056,12 @@ static void set_rel_consider_parallel(PlannerInfo *root, RelOptInfo *rel, RangeT
              * temporary buffers could be expensive, though, and we don't have
              * the rest of the necessary infrastructure right now anyway.  So
              * for now, bail out if we see a temporary table.
+             *
+             * Don't support parallel query for foreign table.
              */
-            if (get_rel_persistence(rte->relid) == RELPERSISTENCE_TEMP)
+            if (get_rel_persistence(rte->relid) == RELPERSISTENCE_TEMP || rte->relkind == RELKIND_FOREIGN_TABLE) {
                 return;
-
+            }
             /* Don't support parallel for partitioned table. */
             if (rte->ispartrel) {
                 return;
