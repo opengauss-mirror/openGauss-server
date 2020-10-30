@@ -268,6 +268,20 @@ EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE t1.c1 = postgres_fdw_a
 EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE t1.c1 === t1.c2;
 EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE t1.c1 = abs(t1.c2);
 EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE t1.c1 = t1.c2;
+-- don't do parallel query with foreign table
+set force_parallel_mode=on;
+set parallel_setup_cost=0;
+set parallel_tuple_cost=0.000005;
+set max_parallel_workers_per_gather=2;
+set min_parallel_table_scan_size=0;
+set parallel_leader_participation=on;
+EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1;
+reset force_parallel_mode;
+reset parallel_setup_cost;
+reset parallel_tuple_cost;
+reset max_parallel_workers_per_gather;
+reset min_parallel_table_scan_size;
+reset parallel_leader_participation;
 
 -- ===================================================================
 -- WHERE with remotely-executable conditions

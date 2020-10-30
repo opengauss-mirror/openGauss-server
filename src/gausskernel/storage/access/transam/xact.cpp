@@ -2424,7 +2424,9 @@ static void StartTransaction(bool begin_on_gtm)
     /* done with start processing, set current transaction state to "in progress" */
     s->state = TRANS_INPROGRESS;
 
-    CallXactCallbacks(XACT_EVENT_START);
+    if (!IsParallelWorker()) {
+        CallXactCallbacks(XACT_EVENT_START);
+    }
 
     if (module_logging_is_on(MOD_TRANS_XACT)) {
         ereport(LOG,
@@ -2782,18 +2784,17 @@ static void CommitTransaction(bool stpCommit)
     }
 
     /*
-     * For MOT, CallXactCallbacks should be called be called before RecordTransactionCommit.
-     *
-     * Commit MOT Engine - do this as late as possible to allow
-     * atomic cross transaction between PG tables and MOT tables
-     * in the future.
-     */
-    CallXactCallbacks(XACT_EVENT_COMMIT);
-
-    /*
      * Here is where we really truly local commit.
      */
     if (!is_parallel_worker) {
+        /*
+         * For MOT, CallXactCallbacks should be called be called before RecordTransactionCommit.
+         *
+         * Commit MOT Engine - do this as late as possible to allow
+         * atomic cross transaction between PG tables and MOT tables
+         * in the future.
+         */
+        CallXactCallbacks(XACT_EVENT_COMMIT);
         latestXid = RecordTransactionCommit();
     } else {
         /*
@@ -2894,8 +2895,10 @@ static void CommitTransaction(bool stpCommit)
 
     TRACE_POSTGRESQL_TRANSACTION_COMMIT(t_thrd.proc->lxid);
 
-    /* Release MOT locks */
-    CallXactCallbacks(XACT_EVENT_END_TRANSACTION);
+    if (!is_parallel_worker) {
+        /* Release MOT locks */
+        CallXactCallbacks(XACT_EVENT_END_TRANSACTION);
+    }
 
     /*
      * Let others know about no transaction in progress by me. Note that this
@@ -3875,7 +3878,9 @@ static void AbortTransaction(bool PerfectRollback, bool stpRollback)
      */
     AfterTriggerEndXact(false); /* 'false' means it's abort */
 
-    CallXactCallbacks(XACT_EVENT_PREROLLBACK_CLEANUP);
+    if (!is_parallel_worker) {
+        CallXactCallbacks(XACT_EVENT_PREROLLBACK_CLEANUP);
+    }
 
     AtAbort_Portals(stpRollback);
     AtEOXact_LargeObject(false);
@@ -3926,7 +3931,9 @@ static void AbortTransaction(bool PerfectRollback, bool stpRollback)
     if (t_thrd.utils_cxt.TopTransactionResourceOwner != NULL) {
         bool change_user_name = false;
         instr_report_workload_xact_info(false);
-        CallXactCallbacks(XACT_EVENT_ABORT);
+        if (!is_parallel_worker) {
+            CallXactCallbacks(XACT_EVENT_ABORT);
+        }
 
         ResourceOwnerRelease(t_thrd.utils_cxt.TopTransactionResourceOwner, RESOURCE_RELEASE_BEFORE_LOCKS, false, true);
         AtEOXact_Buffers(false);

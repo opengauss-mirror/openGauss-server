@@ -84,6 +84,7 @@
 #include "access/clog.h"
 #include "access/csnlog.h"
 #include "access/htup.h"
+#include "access/parallel.h"
 #include "access/subtrans.h"
 #include "access/transam.h"
 #include "access/twophase.h"
@@ -2063,10 +2064,12 @@ void FinishPreparedTransaction(const char* gid, bool isCommit)
         MOTProcessRecoveredTransaction(xid, isCommit);
     }
 
-    if (isCommit) {
-        CallXactCallbacks(XACT_EVENT_COMMIT_PREPARED);
-    } else {
-        CallXactCallbacks(XACT_EVENT_ROLLBACK_PREPARED);
+    if (!IsParallelWorker()) {
+        if (isCommit) {
+            CallXactCallbacks(XACT_EVENT_COMMIT_PREPARED);
+        } else {
+            CallXactCallbacks(XACT_EVENT_ROLLBACK_PREPARED);
+        }
     }
 
     /*
@@ -2099,8 +2102,10 @@ void FinishPreparedTransaction(const char* gid, bool isCommit)
             commitLibraryLen,
             hdr->initfileinval);
 
-        /* Release MOT locks */
-        CallXactCallbacks(XACT_EVENT_END_TRANSACTION);
+        if (!IsParallelWorker()) {
+            /* Release MOT locks */
+            CallXactCallbacks(XACT_EVENT_END_TRANSACTION);
+        }
     } else {
         RecordTransactionAbortPrepared(xid,
             hdr->nsubxacts,
