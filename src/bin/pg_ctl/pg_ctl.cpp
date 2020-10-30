@@ -669,6 +669,8 @@ static ServerMode get_runmode(void)
         return PRIMARY_MODE;
     if (!strncmp(run_mode, "Standby", MAXRUNMODE))
         return STANDBY_MODE;
+    if (!strncmp(run_mode, "Cascade Standby", MAXRUNMODE))
+        return CASCADE_STANDBY_MODE;
     if (!strncmp(run_mode, "Pending", MAXRUNMODE))
         return PENDING_MODE;
     if (!strncmp(run_mode, "Unknown", MAXRUNMODE))
@@ -1814,6 +1816,7 @@ static void do_failover(uint32 term)
     int cnt = 0;
     pgpid_t pid;
     ServerMode run_mode;
+    ServerMode origin_run_mode;
 
     int ret;
     char term_path[MAXPGPATH];
@@ -1848,7 +1851,7 @@ static void do_failover(uint32 term)
         exit(1);
     }
 
-    run_mode = get_runmode();
+    origin_run_mode = run_mode = get_runmode();
     if (run_mode == PRIMARY_MODE) {
         pg_log(PG_WARNING, _(" failover completed (%s)\n"), pg_data);
         return;
@@ -1859,10 +1862,10 @@ static void do_failover(uint32 term)
         exit(1);
     }
     /* failover executed only in standby server */
-    else if (run_mode != STANDBY_MODE) {
+    else if (run_mode != STANDBY_MODE && run_mode != CASCADE_STANDBY_MODE) {
         pg_log(PG_WARNING,
             _(" cannot failover server; "
-              "server is not in standby mode\n"));
+              "server is not in standby or cascade standby mode\n"));
         exit(1);
     }
 
@@ -1873,6 +1876,19 @@ static void do_failover(uint32 term)
     }
 
     for (cnt = 0;; cnt++) {
+        /* cascade standby only need to trigger once */
+        if (cnt > 0 && do_wait && origin_run_mode == CASCADE_STANDBY_MODE) {
+            pg_log(PG_PRINT, ".");
+            pg_usleep(1000000); /* 1 sec */
+
+            if (get_runmode() == STANDBY_MODE)
+                break;
+            else if (cnt >= wait_seconds) {
+                break;
+            }
+            continue;
+        }
+
         if ((fofile = fopen(failover_file, "w")) == NULL) {
             pg_log(
                 PG_WARNING, _(" could not create failover signal file \"%s\": %s\n"), failover_file, strerror(errno));
@@ -1909,11 +1925,13 @@ static void do_failover(uint32 term)
             break;
     }
 
-    if (get_runmode() != PRIMARY_MODE) {
+    if ((origin_run_mode == STANDBY_MODE && get_runmode() != PRIMARY_MODE) ||
+        (origin_run_mode == CASCADE_STANDBY_MODE && get_runmode() != STANDBY_MODE)) {
         pg_log(PG_WARNING, _(" failed\n"));
         pg_log(PG_WARNING, _(" failover failed (%s)\n"), pg_data);
         exit(1);
     }
+
     pg_log(PG_WARNING, _(" done\n"));
     pg_log(PG_WARNING, _(" failover completed (%s)\n"), pg_data);
 }
@@ -2302,6 +2320,7 @@ static void do_switchover(uint32 term)
     FILE* sofile = NULL;
     pgpid_t pid;
     ServerMode run_mode;
+    ServerMode origin_run_mode;
     int mode = switch_mode;
     int wait_count = 0;
     int ret;
@@ -2353,7 +2372,7 @@ static void do_switchover(uint32 term)
         exit(1);
     }
 
-    run_mode = get_runmode();
+    origin_run_mode = run_mode = get_runmode();
     if (run_mode == PRIMARY_MODE) {
         pg_log(PG_WARNING, _("switchover completed (%s)\n"), pg_data);
         return;
@@ -2364,10 +2383,10 @@ static void do_switchover(uint32 term)
         exit(1);
     }
     /* switchover executed only in standby server */
-    else if (run_mode != STANDBY_MODE) {
+    else if (run_mode != STANDBY_MODE && run_mode != CASCADE_STANDBY_MODE) {
         pg_log(PG_WARNING,
             _(" cannot switchover server; "
-              "server is not in standby mode\n"));
+              "server is not in standby or cascade standby mode\n"));
         exit(1);
     }
 
@@ -2409,7 +2428,7 @@ static void do_switchover(uint32 term)
          * again, after wait_seconds, gs_ctl will exit.
          */
         while (wait_count++ < wait_seconds) {
-            if ((run_mode = get_runmode()) == STANDBY_MODE) {
+            if ((run_mode = get_runmode()) == origin_run_mode) {
                 pg_log(PG_PRINT, ".");
                 pg_usleep(1000000); /* 1 sec */
             }
@@ -2426,7 +2445,8 @@ static void do_switchover(uint32 term)
             }
         }
         pg_log(PG_PRINT, _("\n"));
-        if (run_mode != PRIMARY_MODE) {
+        if ((origin_run_mode == STANDBY_MODE && run_mode != PRIMARY_MODE) ||
+            (origin_run_mode == CASCADE_STANDBY_MODE && run_mode != STANDBY_MODE)) {
             pg_log(PG_WARNING, _("\n switchover timeout after %d seconds. please manually check the cluster status.\n"), wait_seconds);
         } else {
             pg_log(PG_PROGRESS, _("done\n"));
@@ -3720,7 +3740,7 @@ static void do_build_stop(pgpid_t pid)
     }
 
     /* Standby DN build from Primary DN or CN/DN build from CN */
-    if (runmode != STANDBY_MODE && (conn_str == NULL)) {
+    if (runmode != STANDBY_MODE && runmode != CASCADE_STANDBY_MODE && (conn_str == NULL)) {
         pg_log(PG_WARNING, _("The local server run as %s,build cannot be executed.\n"), get_localrole_string(runmode));
         exit(1);
     }
@@ -3906,11 +3926,14 @@ static void do_incremental_build(uint32 term)
         streamConn = NULL;
     }
     if (status == BUILD_SUCCESS) {
-        /* pg_ctl start -M standby */
-        FREE_AND_RESET(pgha_opt);
-        pgha_opt = (char*)pg_malloc(sizeof(standbymode_str));
-        tnRet = snprintf_s(pgha_opt, sizeof(standbymode_str), sizeof(standbymode_str) - 1, "%s", standbymode_str);
-        securec_check_ss_c(tnRet, "\0", "\0");
+        /* cascade standby will use use pgha_opt directly */
+        if (pgha_opt == NULL || strstr(pgha_opt, "cascade_standby") == NULL) {
+            /* pg_ctl start -M standby */
+            FREE_AND_RESET(pgha_opt);
+            pgha_opt = (char*)pg_malloc(sizeof(standbymode_str));
+            tnRet = snprintf_s(pgha_opt, sizeof(standbymode_str), sizeof(standbymode_str) - 1, "%s", standbymode_str);
+            securec_check_ss_c(tnRet, "\0", "\0");
+        }
 
         if (needstartafterbuild == true) {
             do_start();
@@ -4027,11 +4050,14 @@ static void do_actual_build(uint32 term)
      * If connect string is not empty,CN/DN will be started by caller.
      */
     if (conn_str == NULL) {
-        /* pg_ctl start -M standby  */
-        FREE_AND_RESET(pgha_opt);
-        pgha_opt = (char*)pg_malloc(sizeof(standbymode_str));
-        tnRet = snprintf_s(pgha_opt, sizeof(standbymode_str), sizeof(standbymode_str) - 1, "%s", standbymode_str);
-        securec_check_ss_c(tnRet, "\0", "\0");
+        /* cascade standby will use use pgha_opt directly */
+        if (pgha_opt == NULL || strstr(pgha_opt, "cascade_standby") == NULL) {
+            /* pg_ctl start -M standby  */
+            FREE_AND_RESET(pgha_opt);
+            pgha_opt = (char*)pg_malloc(sizeof(standbymode_str));
+            tnRet = snprintf_s(pgha_opt, sizeof(standbymode_str), sizeof(standbymode_str) - 1, "%s", standbymode_str);
+            securec_check_ss_c(tnRet, "\0", "\0");
+        }
         start_time = time(NULL);
         if (needstartafterbuild == true) {
             if (0 != chdir(cwd)) {

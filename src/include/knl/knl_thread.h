@@ -571,6 +571,7 @@ typedef struct knl_t_xlog_context {
      */
     XLogRecPtr RedoStartLSN;
     ServerMode server_mode;
+    bool is_cascade_standby;
 
     /* Flags to tell if we are in an startup process */
     bool startup_processing;
@@ -2500,7 +2501,7 @@ typedef struct knl_t_postmaster_context {
 #ifdef ENABLE_MULTIPLE_NODES
 #define MAX_REPLNODE_NUM 8
 #else
-#define MAX_REPLNODE_NUM 5
+#define MAX_REPLNODE_NUM 9
 #endif
 #define MAXLISTEN 64
 #define IP_LEN 64

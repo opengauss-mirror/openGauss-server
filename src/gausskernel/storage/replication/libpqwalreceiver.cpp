@@ -227,6 +227,7 @@ bool libpqrcv_connect(char* conninfo, XLogRecPtr* startpoint, char* slotname, in
     ereport(LOG, (errmsg("Connecting to remote server :%s", conninfoRepl)));
 
 retry:
+    /* 1. try to connect to primary */
     t_thrd.libwalreceiver_cxt.streamConn = PQconnectdb(conninfoRepl);
     if (PQstatus(t_thrd.libwalreceiver_cxt.streamConn) != CONNECTION_OK) {
         /* If startupxlog shut down walreceiver, we need not to retry. */
@@ -257,6 +258,7 @@ retry:
 
     ereport(LOG, (errmsg("Connected to remote server :%s success.", conninfo)));
 
+    /* 2. identify version */
     res = libpqrcv_PQexec("IDENTIFY_VERSION");
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
         PQclear(res);
@@ -349,7 +351,7 @@ retry:
                         PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
             return false;
         }
-        if (PQnfields(res) != 1 || PQntuples(res) != 1) {
+        if (PQnfields(res) != 2 || PQntuples(res) != 1) {
             int num_tuples = PQntuples(res);
             int num_fields = PQnfields(res);
 
@@ -358,11 +360,13 @@ retry:
                 (errcode(ERRCODE_INVALID_STATUS),
                     errmsg("invalid response from remote server"),
                     errdetail(
-                        "Expected 1 tuple with 1 fields, got %d tuples with %d fields.", num_tuples, num_fields)));
+                        "Expected 1 tuple with 2 fields, got %d tuples with %d fields.", num_tuples, num_fields)));
             return false;
         }
         remoteMode = (ServerMode)pg_strtoint32(PQgetvalue(res, 0, 0));
-        if (!t_thrd.walreceiver_cxt.AmWalReceiverForFailover && remoteMode != PRIMARY_MODE) {
+        if (!t_thrd.walreceiver_cxt.AmWalReceiverForFailover && remoteMode != PRIMARY_MODE &&
+            /* remoteMode of cascade standby is a standby */
+            !t_thrd.xlog_cxt.is_cascade_standby) {
             PQclear(res);
 
             if (dummyStandbyMode) {
@@ -386,7 +390,26 @@ retry:
             ereport(ERROR,
                     (errcode(ERRCODE_INTERNAL_ERROR),
                      errmsg("the mode of the remote server must be standby, current is %s",
-                            wal_get_role_string(remoteMode))));
+                            wal_get_role_string(remoteMode, true))));
+            return false;
+        }
+
+        /* check remote az */
+        char remoteAZname[NAMEDATALEN];
+        nRet = snprintf_s(remoteAZname, NAMEDATALEN, NAMEDATALEN -1, "%s", PQgetvalue(res, 0, 1));
+        securec_check_ss(nRet, "", "");
+        if (t_thrd.xlog_cxt.is_cascade_standby &&
+            (strcmp(remoteAZname, g_instance.attr.attr_storage.available_zone) != 0)) {
+            PQclear(res);
+
+            SpinLockAcquire(&walrcv->mutex);
+            walrcv->conn_errno = REPL_INFO_ERROR;
+            SpinLockRelease(&walrcv->mutex);
+
+            ereport(ERROR,
+                    (errcode(ERRCODE_INTERNAL_ERROR),
+                     errmsg("the remote available zone should be same with local, remote is %s, local is %s",
+                            remoteAZname, g_instance.attr.attr_storage.available_zone)));
             return false;
         }
 
@@ -476,12 +499,21 @@ retry:
             }
             SpinLockRelease(&walrcv->mutex);
             ha_set_rebuild_connerror(SYSTEMID_REBUILD, REPL_INFO_ERROR);
-            ereport(ERROR,
-                (errcode(ERRCODE_INVALID_STATUS),
-                    errmsg("database system identifier differs between the primary and standby"),
-                    errdetail("The primary's identifier is %s, the standby's identifier is %s.",
-                        remoteSysid,
-                        localSysid)));
+            if (!t_thrd.xlog_cxt.is_cascade_standby) {
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_STATUS),
+                        errmsg("database system identifier differs between the primary and standby"),
+                        errdetail("The primary's identifier is %s, the standby's identifier is %s.",
+                            remoteSysid,
+                            localSysid)));
+            } else {
+                ereport(ERROR,
+                    (errcode(ERRCODE_INVALID_STATUS),
+                        errmsg("database system identifier differs between the standby and cascade standby"),
+                        errdetail("The standby's identifier is %s, the cascade standby's identifier is %s.",
+                            remoteSysid,
+                            localSysid)));
+            }
             return false;
         }
     }
