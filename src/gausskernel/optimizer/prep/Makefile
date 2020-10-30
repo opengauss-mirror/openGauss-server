@@ -16,6 +16,6 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS = prepjointree.o prepnonjointree.o prepqual.o preptlist.o prepunion.o
+OBJS = prepjointree.o prepnonjointree.o prepqual.o preprownum.o preptlist.o prepunion.o
 
 include $(top_srcdir)/src/gausskernel/common.mk
