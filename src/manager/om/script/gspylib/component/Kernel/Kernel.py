@@ -74,7 +74,9 @@ class Kernel(BaseComponent):
         if self.instInfo.instanceType == DefaultValue.MASTER_INSTANCE:
             if len(self.instInfo.peerInstanceInfos) > 0:
                 cmd += "-M primary"
-        else:
+        elif self.instInfo.instanceType == DefaultValue.CASCADE_STANDBY:
+            cmd += "-M cascade_standby"
+        elif self.instInfo.instanceType == DefaultValue.STANDBY_INSTANCE:
             cmd += "-M standby"
         if time_out is not None:
             cmd += " -t %s" % time_out
@@ -125,6 +127,15 @@ class Kernel(BaseComponent):
         """
         """
         cmd = "%s/gs_ctl build -D %s -M standby -b %s -r %d " % (
+            self.binPath, self.instInfo.datadir, buidMode, standByBuildTimeout)
+        (status, output) = subprocess.getstatusoutput(cmd)
+        if (status != 0):
+            raise Exception(ErrorCode.GAUSS_514["GAUSS_51400"] % cmd +
+                            " Error: \n%s " % output)
+    def build_cascade(self, buidMode="full", standByBuildTimeout=300):
+        """
+        """
+        cmd = "%s/gs_ctl build -D %s -M cascade_standby -b %s -r %d " % (
             self.binPath, self.instInfo.datadir, buidMode, standByBuildTimeout)
         (status, output) = subprocess.getstatusoutput(cmd)
         if (status != 0):
