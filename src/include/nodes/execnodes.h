@@ -1366,6 +1366,21 @@ typedef struct DistInsertSelectState {
     PageCompress* pcState;
 } DistInsertSelectState;
 
+/* Shared state for parallel-aware Append. */
+typedef struct ParallelAppendState {
+    int         plan_node_id;
+    LWLock      pa_lock;        /* mutual exclusion to choose next subplan */
+    int         pa_next_plan;   /* next plan to choose by any worker */
+ 
+    /*
+     * pa_finished[i] should be true if no more workers should select subplan
+     * i.  for a non-partial plan, this should be set to true as soon as a
+     * worker selects the plan; for a partial plan, it remains false until
+     * some worker executes the plan to completion.
+     */
+    bool        pa_finished[FLEXIBLE_ARRAY_MEMBER];
+} ParallelAppendState;
+
 /* ----------------
  *	 AppendState information
  *
@@ -1378,7 +1393,11 @@ typedef struct AppendState {
     PlanState** appendplans; /* array of PlanStates for my inputs */
     int as_nplans;
     int as_whichplan;
+    ParallelAppendState *as_pstate; /* parallel coordination info */
+    Size pstate_len;  /* size of parallel coordination info */
+    bool (*choose_next_subplan)(AppendState *);
 } AppendState;
+
 
 /* ----------------
  *	 MergeAppendState information

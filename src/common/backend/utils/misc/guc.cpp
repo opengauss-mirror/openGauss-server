@@ -2623,6 +2623,17 @@ static void init_configure_names_bool()
             NULL
         },
         {
+            {"enable_parallel_append", PGC_USERSET, QUERY_TUNING_METHOD,
+                gettext_noop("Enables the planner's use of parallel append plans."),
+                NULL
+            },
+            &u_sess->attr.attr_sql.enable_parallel_append,
+            true,
+            NULL,
+            NULL,
+            NULL
+        },
+        {
             {
                 "enable_analyze_check",
                 PGC_SUSET,

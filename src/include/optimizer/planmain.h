@@ -64,7 +64,7 @@ extern void copy_plan_costsize(Plan* dest, Plan* src);
 extern SubqueryScan* make_subqueryscan(List* qptlist, List* qpqual, Index scanrelid, Plan* subplan);
 extern ForeignScan* make_foreignscan(List* qptlist, List* qpqual, Index scanrelid, List* fdw_exprs, List* fdw_private,
     RemoteQueryExecType type = EXEC_ON_ALL_NODES);
-extern Append* make_append(List* appendplans, List* tlist);
+extern Append* make_append(List* appendplans, int first_partial_plan, List* tlist);
 extern RecursiveUnion* make_recursive_union(
     List* tlist, Plan* lefttree, Plan* righttree, int wtParam, List* distinctList, long numGroups);
 extern Sort* make_sort_from_pathkeys(

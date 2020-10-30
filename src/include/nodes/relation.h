@@ -887,7 +887,7 @@ typedef struct Path {
 
     bool parallel_aware; /* engage parallel-aware logic? */
     bool parallel_safe;  /* OK to use as part of parallel plan? */
-    int parallel_degree; /* desired parallel degree; 0 = not parallel */
+    int parallel_workers; /* desired parallel workers; 0 = not parallel */
 
     /* estimated size/costs for path (see costsize.c for more info) */
     double rows; /* estimated number of global result tuples */
@@ -1108,6 +1108,9 @@ typedef struct ExtensiblePath {
 typedef struct AppendPath {
     Path path;
     List* subpaths; /* list of component Paths */
+
+    /* Index of first partial path in subpaths */
+    int first_partial_path;
 } AppendPath;
 
 #define IS_DUMMY_PATH(p) (IsA((p), AppendPath) && ((AppendPath*)(p))->subpaths == NIL)

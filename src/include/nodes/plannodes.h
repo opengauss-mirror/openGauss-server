@@ -436,6 +436,7 @@ typedef struct ModifyTable {
 typedef struct Append {
     Plan plan;
     List* appendplans;
+    int first_partial_plan;
 } Append;
 
 typedef struct VecAppend : public Append {

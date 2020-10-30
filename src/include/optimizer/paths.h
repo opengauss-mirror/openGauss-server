@@ -152,4 +152,5 @@ extern bool has_useful_pathkeys(PlannerInfo* root, RelOptInfo* rel);
 extern void set_path_rows(Path* path, double rows, double multiple = 1);
 extern EquivalenceClass* get_expr_eqClass(PlannerInfo* root, Expr* expr);
 extern void delete_eq_member(PlannerInfo* root, List* tlist, List* collectiveGroupExpr);
+extern Path *get_cheapest_parallel_safe_total_inner(List *paths);
 #endif /* PATHS_H */
