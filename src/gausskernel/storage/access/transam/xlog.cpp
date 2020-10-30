@@ -12242,6 +12242,7 @@ XLogRecPtr do_pg_start_backup(const char* backupidstr, bool fast, char** labelfi
                 recptr = xlogctl->lastFpwDisableRecPtr;
                 SpinLockRelease(&xlogctl->info_lck);
 
+#ifdef ENABLE_MULTIPLE_NODES
                 if (!checkpointfpw || XLByteLE(startpoint, recptr)) {
                     ereport(ERROR,
                         (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -12252,6 +12253,7 @@ XLogRecPtr do_pg_start_backup(const char* backupidstr, bool fast, char** labelfi
                                     "Enable full_page_writes and run CHECKPOINT on the master, "
                                     "and then try an online backup again.")));
                 }
+#endif
 
                 /*
                  * During recovery, since we don't use the end-of-backup WAL
@@ -12690,6 +12692,7 @@ XLogRecPtr do_pg_stop_backup(char* labelfile, bool waitforarchive)
         recptr = xlogctl->lastFpwDisableRecPtr;
         SpinLockRelease(&xlogctl->info_lck);
 
+#ifdef ENABLE_MULTIPLE_NODES
         if (XLByteLE(startpoint, recptr)) {
             ereport(ERROR,
                 (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -12700,6 +12703,7 @@ XLogRecPtr do_pg_stop_backup(char* labelfile, bool waitforarchive)
                             "Enable full_page_writes and run CHECKPOINT on the master, "
                             "and then try an online backup again.")));
         }
+#endif
 
         LWLockAcquire(ControlFileLock, LW_SHARED);
         stoppoint = t_thrd.shemem_ptr_cxt.ControlFile->minRecoveryPoint;
