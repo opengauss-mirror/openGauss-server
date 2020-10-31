@@ -670,8 +670,9 @@ ReplConnInfo* GetRepConnArray(int* cur_idx)
         if (*cur_idx == MAX_REPLNODE_NUM)
             *cur_idx = 1;
 
-        if (t_thrd.postmaster_cxt.ReplConnArray[(*cur_idx)] != NULL)
+        if (t_thrd.postmaster_cxt.ReplConnArray[(*cur_idx)] != NULL) {
             break;
+        }
         (*cur_idx)++;
     }
 

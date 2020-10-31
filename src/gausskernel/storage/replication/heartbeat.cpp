@@ -493,7 +493,11 @@ static int create_client_and_server(int epollfd)
      * The heartbeat server and client can appear simultaneously.
      * To support dummy standby, only need add current_mode conditions.
      */
-    if (t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE) {
+    if (t_thrd.postmaster_cxt.HaShmData->current_mode == PRIMARY_MODE ||
+        /* To support cascade standby, a standby instance will also start heartbeat server */
+        (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE &&
+         !t_thrd.postmaster_cxt.HaShmData->is_cascade_standby))
+    {
         g_heartbeat_server = new (std::nothrow) HeartbeatServer(epollfd);
         if (g_heartbeat_server == NULL) {
             ereport(COMMERROR, (errmsg("Failed to cerate heartbeat server.")));

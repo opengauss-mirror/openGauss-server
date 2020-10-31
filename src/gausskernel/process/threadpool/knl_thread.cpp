@@ -431,6 +431,7 @@ static void knl_t_xlog_init(knl_t_xlog_context* xlog_cxt)
     xlog_cxt->doPageWrites = false;
     xlog_cxt->RedoStartLSN = InvalidXLogRecPtr;
     xlog_cxt->server_mode = UNKNOWN_MODE;
+    xlog_cxt->is_cascade_standby = false;
     xlog_cxt->startup_processing = false;
     xlog_cxt->openLogFile = -1;
     xlog_cxt->readfrombuffer = false;

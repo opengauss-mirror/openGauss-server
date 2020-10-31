@@ -89,6 +89,7 @@ typedef struct knl_instance_attr_storage {
     int extreme_rto_ab_type;
     int extreme_rto_ab_count;
 #endif
+    char* available_zone;
 } knl_instance_attr_storage;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_STORAGE_H_ */

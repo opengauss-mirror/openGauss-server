@@ -14573,6 +14573,53 @@ int ParallelXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, 
     return readLen;
 }
 
+static ReplConnTarget GetRepConntarget(void)
+{
+    if (t_thrd.xlog_cxt.is_cascade_standby) {
+        return REPCONNTARGET_STANDBY;
+    } else {
+        return REPCONNTARGET_PRIMARY;
+    }
+}
+
+static void HandleCascadeStandbyPromote(XLogRecPtr* recptr)
+{
+    if (!t_thrd.xlog_cxt.is_cascade_standby ||
+        t_thrd.xlog_cxt.server_mode != STANDBY_MODE ||
+        !IS_DN_MULTI_STANDYS_MODE()) {
+        return;
+    }
+
+    ShutdownWalRcv();
+
+    /* switchover */
+    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    t_thrd.xlog_cxt.receivedUpto = 0;
+    SpinLockAcquire(&walrcv->mutex);
+    walrcv->receivedUpto = 0;
+    SpinLockRelease(&walrcv->mutex);
+    t_thrd.xlog_cxt.is_cascade_standby = false;
+    t_thrd.xlog_cxt.switchover_triggered = false;
+
+    if (IsExtremeRtoRunning()) {
+        t_thrd.xlog_cxt.readfrombuffer = false;
+        /* restart from recvbuffer */
+        pg_atomic_write_u32(&(extreme_rto::g_recordbuffer->readWorkerState),
+                            extreme_rto::WORKER_STATE_STOP);
+    }
+
+    /* failover */
+    ResetFailoverTriggered();
+    t_thrd.xlog_cxt.failover_triggered = false;
+
+    SendPostmasterSignal(PMSIGNAL_UPDATE_NORMAL);
+
+    /* request postmaster to start walreceiver again. */
+    RequestXLogStreaming(recptr, t_thrd.xlog_cxt.PrimaryConnInfo,
+                         GetRepConntarget(),
+                         u_sess->attr.attr_storage.PrimarySlotName);
+}
+
 /*
  * Read the XLOG page containing RecPtr into readBuf (if not read already).
  * Returns number of bytes read, if the page is read successfully, or -1
@@ -14619,6 +14666,8 @@ int XLogPageRead(XLogReaderState* xlogreader, XLogRecPtr targetPagePtr, int reqL
     XLByteToSeg(targetPagePtr, targetSegNo);
 #endif
     targetPageOff = targetPagePtr % XLogSegSize;
+
+    load_server_mode();
 
     /*
      * See if we need to switch to a new segment because the requested record
@@ -14809,13 +14858,26 @@ retry:
                                 (uint32)(t_thrd.xlog_cxt.receivedUpto >> 32),
                                 (uint32)t_thrd.xlog_cxt.receivedUpto)));
 
-                        ereport(LOG,
-                            (errmsg("Secondary Standby has synchronized all the xlog and replication data, standby "
-                                    "promote to primary")));
+                        if (t_thrd.xlog_cxt.is_cascade_standby) {
+                            ereport(LOG,
+                                (errmsg("Cascade Standby has synchronized all the xlog and replication data, "
+                                        "promote to standby")));
+
+                        } else {
+                            ereport(LOG,
+                                (errmsg("Secondary Standby has synchronized all the xlog and replication data, standby "
+                                        "promote to primary")));
+                        }
 
                         ShutdownWalRcv();
                         ShutdownDataRcv();
-                        goto triggered;
+
+                        if (t_thrd.xlog_cxt.is_cascade_standby) {
+                            HandleCascadeStandbyPromote(fetching_ckpt ? &t_thrd.xlog_cxt.RedoStartLSN : &targetRecPtr);
+                            continue;
+                        } else {
+                            goto triggered;
+                        }
                     }
 
                     /*
@@ -14823,6 +14885,11 @@ retry:
                      * five seconds like in the WAL file polling case below.
                      */
                     if (CheckForSwitchoverTrigger() || CheckForFailoverTrigger()) {
+                        if (t_thrd.xlog_cxt.is_cascade_standby && t_thrd.xlog_cxt.server_mode == STANDBY_MODE) {
+                            HandleCascadeStandbyPromote(fetching_ckpt ? &t_thrd.xlog_cxt.RedoStartLSN : &targetRecPtr);
+                            continue;
+                        }
+
                         goto retry;
                     }
                     if (!processtrxn) {
@@ -14954,6 +15021,11 @@ retry:
 
                         /* Get xlog and data from DummyStandby */
                         if (CheckForFailoverTrigger()) {
+                            if (t_thrd.xlog_cxt.is_cascade_standby) {
+                                HandleCascadeStandbyPromote(fetching_ckpt ? &t_thrd.xlog_cxt.RedoStartLSN : &targetRecPtr);
+                                continue;
+                            }
+
                             if (!RecoveryFromDummyStandby()) {
                                 goto triggered;
                             }
@@ -15038,7 +15110,7 @@ retry:
                                                     extreme_rto::WORKER_STATE_STOP);
                             }
                             RequestXLogStreaming(fetching_ckpt ? &t_thrd.xlog_cxt.RedoStartLSN : &targetRecPtr,
-                                                 t_thrd.xlog_cxt.PrimaryConnInfo, REPCONNTARGET_PRIMARY,
+                                                 t_thrd.xlog_cxt.PrimaryConnInfo, GetRepConntarget(),
                                                  u_sess->attr.attr_storage.PrimarySlotName);
                             if (!g_instance.attr.attr_storage.enable_mix_replication && !IS_DN_MULTI_STANDYS_MODE()) {
                                 StartupDataStreaming();
@@ -15073,6 +15145,10 @@ retry:
                     }
 
                     if ((CheckForFailoverTrigger() && !RecoveryFromDummyStandby()) || CheckForSwitchoverTrigger()) {
+                        if (t_thrd.xlog_cxt.is_cascade_standby && t_thrd.xlog_cxt.server_mode == STANDBY_MODE) {
+                            HandleCascadeStandbyPromote(fetching_ckpt ? &t_thrd.xlog_cxt.RedoStartLSN : &targetRecPtr);
+                            continue;
+                        }
                         ereport(LOG,
                             (errmsg("read record failed when promoting, current lsn (%X/%X), received lsn(%X/%X),"
                                     "sources[%u], failedSources[%u], readSource[%u], readFile[%d], readId[%u],"
@@ -15663,6 +15739,7 @@ void load_server_mode(void)
 
     SpinLockAcquire(&hashmdata->mutex);
     t_thrd.xlog_cxt.server_mode = hashmdata->current_mode;
+    t_thrd.xlog_cxt.is_cascade_standby = hashmdata->is_cascade_standby;
     SpinLockRelease(&hashmdata->mutex);
 }
 

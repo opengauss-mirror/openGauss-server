@@ -235,7 +235,7 @@ extern void ProcessWalRcvInterrupts(void);
 extern ReplConnInfo* GetRepConnArray(int* cur_idx);
 extern void XLogWalRcvSendReply(bool force, bool requestReply);
 extern int GetSyncPercent(XLogRecPtr startLsn, XLogRecPtr maxLsn, XLogRecPtr nowLsn);
-extern const char* wal_get_role_string(ServerMode mode);
+extern const char* wal_get_role_string(ServerMode mode, bool getPeerRole = false);
 extern const char* wal_get_rebuild_reason_string(HaRebuildReason reason);
 extern Datum pg_stat_get_stream_replications(PG_FUNCTION_ARGS);
 extern void GetPrimaryServiceAddress(char* address, size_t address_len);

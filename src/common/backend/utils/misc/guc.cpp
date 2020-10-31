@@ -513,10 +513,11 @@ static void assign_replconninfo1(const char* newval, void* extra);
 static void assign_replconninfo2(const char* newval, void* extra);
 static void assign_replconninfo3(const char* newval, void* extra);
 static void assign_replconninfo4(const char* newval, void* extra);
-#ifdef ENABLE_MULTIPLE_NODES
 static void assign_replconninfo5(const char* newval, void* extra);
 static void assign_replconninfo6(const char* newval, void* extra);
 static void assign_replconninfo7(const char* newval, void* extra);
+#ifndef ENABLE_MULTIPLE_NODES
+static void assign_replconninfo8(const char* newval, void* extra);
 #endif
 static bool check_inlist2joininfo(char** newval, void** extra, GucSource source);
 static void assign_inlist2joininfo(const char* newval, void* extra);
@@ -11131,6 +11132,22 @@ static void init_configure_names_string()
             NULL,
             NULL
         },
+        /* availablezone of current instance, currently, it is only used in cascade standby */
+        {
+            {
+                "available_zone",
+                PGC_POSTMASTER,
+                AUDIT_OPTIONS,
+                gettext_noop("Sets the available zone of current instance."),
+                gettext_noop("The available zone is only used in cascade standby scenes"),
+                GUC_SUPERUSER_ONLY | GUC_IS_NAME
+            },
+            &g_instance.attr.attr_storage.available_zone,
+            "",
+            NULL,
+            NULL,
+            NULL
+        },
         /* Get the ReplConnInfo1 from postgresql.conf and assign to ReplConnArray1. */
         {
             {
@@ -11195,7 +11212,6 @@ static void init_configure_names_string()
             assign_replconninfo4,
             NULL
         },
-#ifdef ENABLE_MULTIPLE_NODES
         /* Get the ReplConnInfo5 from postgresql.conf and assign to ReplConnArray5. */
         {
             {
@@ -11242,6 +11258,23 @@ static void init_configure_names_string()
             "",
             check_replconninfo,
             assign_replconninfo7,
+            NULL
+        },
+#ifndef ENABLE_MULTIPLE_NODES
+        /* Get the ReplConnInfo8 from postgresql.conf and assign to ReplConnArray8. */
+        {
+            {
+                "replconninfo8",
+                PGC_SIGHUP,
+                REPLICATION_SENDING,
+                gettext_noop("Sets the replconninfo8 of the HA to listen and authenticate."),
+                NULL,
+                GUC_LIST_INPUT
+            },
+            &u_sess->attr.attr_storage.ReplConnInfoArr[8],
+            "",
+            check_replconninfo,
+            assign_replconninfo8,
             NULL
         },
 #endif
@@ -21009,7 +21042,6 @@ static void assign_replconninfo4(const char* newval, void* extra)
     }
 }
 
-#ifdef ENABLE_MULTIPLE_NODES
 static void assign_replconninfo5(const char* newval, void* extra)
 {
     int repl_length = 0;
@@ -21052,6 +21084,22 @@ static void assign_replconninfo7(const char* newval, void* extra)
     if (u_sess->attr.attr_storage.ReplConnInfoArr[7] != NULL && newval != NULL &&
         strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[7], newval) != 0) {
         t_thrd.postmaster_cxt.ReplConnChanged[7] = true;
+    }
+}
+
+#ifndef ENABLE_MULTIPLE_NODES
+static void assign_replconninfo8(const char* newval, void* extra)
+{
+    int repl_length = 0;
+
+    if (t_thrd.postmaster_cxt.ReplConnArray[8]) {
+        pfree(t_thrd.postmaster_cxt.ReplConnArray[8]);
+    }
+
+    t_thrd.postmaster_cxt.ReplConnArray[8] = parse_repl_conn_info(newval, &repl_length);
+    if (u_sess->attr.attr_storage.ReplConnInfoArr[8] != NULL && newval != NULL &&
+        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[8], newval) != 0) {
+        t_thrd.postmaster_cxt.ReplConnChanged[8] = true;
     }
 }
 #endif
