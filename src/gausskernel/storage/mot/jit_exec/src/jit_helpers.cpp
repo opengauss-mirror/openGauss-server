@@ -291,6 +291,10 @@ static Oid column_type_to_pg(MOT::MOT_CATALOG_FIELD_TYPES column_type)
             pg_type = TIMESTAMPOID;
             break;
 
+        case MOT::MOT_TYPE_TIMESTAMPTZ:
+            pg_type = TIMESTAMPTZOID;
+            break;
+
         case MOT::MOT_TYPE_INTERVAL:
             pg_type = INTERVALOID;
             break;

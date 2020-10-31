@@ -1492,8 +1492,10 @@ static MOT::RC TableFieldType(const ColumnDef* colDef, MOT::MOT_CATALOG_FIELD_TY
             type = MOT::MOT_CATALOG_FIELD_TYPES::MOT_TYPE_TIME;
             break;
         case TIMESTAMPOID:
-        case TIMESTAMPTZOID:
             type = MOT::MOT_CATALOG_FIELD_TYPES::MOT_TYPE_TIMESTAMP;
+            break;
+        case TIMESTAMPTZOID:
+            type = MOT::MOT_CATALOG_FIELD_TYPES::MOT_TYPE_TIMESTAMPTZ;
             break;
         case INTERVALOID:
             type = MOT::MOT_CATALOG_FIELD_TYPES::MOT_TYPE_INTERVAL;
@@ -2227,7 +2229,7 @@ void MOTAdaptor::CreateKeyBuffer(Relation rel, MOTFdwStateSt* festate, int start
                 }
 
                 DatumToMOTKey(col,
-                    expr->expr,
+                    expr,
                     val,
                     desc->attrs[orgCols[i] - 1]->atttypid,
                     buf + offset,
@@ -2451,7 +2453,7 @@ void MOTAdaptor::DatumToMOT(MOT::Column* col, Datum datum, Oid type, uint8_t* da
 }
 
 void MOTAdaptor::DatumToMOTKey(
-    MOT::Column* col, Expr* expr, Datum datum, Oid type, uint8_t* data, size_t len, KEY_OPER oper, uint8_t fill)
+    MOT::Column* col, ExprState* expr, Datum datum, Oid type, uint8_t* data, size_t len, KEY_OPER oper, uint8_t fill)
 {
     EnsureSafeThreadAccessInline();
     switch (type) {
@@ -2460,8 +2462,8 @@ void MOTAdaptor::DatumToMOTKey(
         case VARCHAROID:
         case CLOBOID:
         case BPCHAROID: {
-            if (expr && IsA(expr, Const)) {  // OA: LLVM passes nullptr for expr parameter
-                Const* c = (Const*)expr;
+            if (expr && expr->expr && IsA(expr->expr, Const)) {  // OA: LLVM passes nullptr for expr parameter
+                Const* c = (Const*)expr->expr;
 
                 if (c->constbyval) {
                     errno_t erc = memset_s(data, len, 0x00, len);
@@ -2500,8 +2502,8 @@ void MOTAdaptor::DatumToMOTKey(
             break;
         }
         case FLOAT4OID: {
-            if (expr && IsA(expr, Const)) {  // OA: LLVM passes nullptr for expr parameter
-                Const* c = (Const*)expr;
+            if (expr && expr->expr && IsA(expr->expr, Const)) {  // OA: LLVM passes nullptr for expr parameter
+                Const* c = (Const*)expr->expr;
 
                 if (c->consttype == FLOAT8OID) {
                     MOT::DoubleConvT dc;
@@ -2523,6 +2525,42 @@ void MOTAdaptor::DatumToMOTKey(
             PGNumericToMOT(n, *d);
             col->PackKey(data, (uintptr_t)d, DECIMAL_SIZE(d));
 
+            break;
+        }
+        case TIMESTAMPOID: {
+            if (expr->resultType == TIMESTAMPTZOID) {
+                Timestamp result = DatumGetTimestamp(DirectFunctionCall1(timestamptz_timestamp, datum));
+                col->PackKey(data, result, col->m_size);
+            } else if (expr->resultType == DATEOID) {
+                Timestamp result = DatumGetTimestamp(DirectFunctionCall1(date_timestamp, datum));
+                col->PackKey(data, result, col->m_size);
+            } else {
+                col->PackKey(data, datum, col->m_size);
+            }
+            break;
+        }
+        case TIMESTAMPTZOID: {
+            if (expr->resultType == TIMESTAMPOID) {
+                TimestampTz result = DatumGetTimestampTz(DirectFunctionCall1(timestamp_timestamptz, datum));
+                col->PackKey(data, result, col->m_size);
+            } else if (expr->resultType == DATEOID) {
+                TimestampTz result = DatumGetTimestampTz(DirectFunctionCall1(date_timestamptz, datum));
+                col->PackKey(data, result, col->m_size);
+            } else {
+                col->PackKey(data, datum, col->m_size);
+            }
+            break;
+        }
+        case DATEOID: {
+            if (expr->resultType == TIMESTAMPOID) {
+                DateADT result = DatumGetDateADT(DirectFunctionCall1(timestamp_date, datum));
+                col->PackKey(data, result, col->m_size);
+            } else if (expr->resultType == TIMESTAMPTZOID) {
+                DateADT result = DatumGetDateADT(DirectFunctionCall1(timestamptz_date, datum));
+                col->PackKey(data, result, col->m_size);
+            } else {
+                col->PackKey(data, datum, col->m_size);
+            }
             break;
         }
         default:

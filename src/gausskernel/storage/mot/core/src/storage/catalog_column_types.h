@@ -49,24 +49,25 @@ typedef union {
 #define ColumnClass(Name) Column##Name
 #define ColumnType(Type) MOT_TYPE_##Type
 
-#define TYPENAMES             \
-    X(CHAR, "Char")           \
-    X(TINY, "Tiny")           \
-    X(SHORT, "Short")         \
-    X(INT, "Int")             \
-    X(LONG, "Long")           \
-    X(FLOAT, "Float")         \
-    X(DOUBLE, "Double")       \
-    X(DATE, "Date")           \
-    X(TIME, "Time")           \
-    X(TIMESTAMP, "Timestamp") \
-    X(INTERVAL, "Interval")   \
-    X(TINTERVAL, "TInterval") \
-    X(TIMETZ, "TimeTZ")       \
-    X(DECIMAL, "Decimal")     \
-    X(VARCHAR, "Varchar")     \
-    X(BLOB, "Blob")           \
-    X(NULLBYTES, "NullBytes") \
+#define TYPENAMES                 \
+    X(CHAR, "Char")               \
+    X(TINY, "Tiny")               \
+    X(SHORT, "Short")             \
+    X(INT, "Int")                 \
+    X(LONG, "Long")               \
+    X(FLOAT, "Float")             \
+    X(DOUBLE, "Double")           \
+    X(DATE, "Date")               \
+    X(TIME, "Time")               \
+    X(TIMESTAMP, "Timestamp")     \
+    X(TIMESTAMPTZ, "TimestampTZ") \
+    X(INTERVAL, "Interval")       \
+    X(TINTERVAL, "TInterval")     \
+    X(TIMETZ, "TimeTZ")           \
+    X(DECIMAL, "Decimal")         \
+    X(VARCHAR, "Varchar")         \
+    X(BLOB, "Blob")               \
+    X(NULLBYTES, "NullBytes")     \
     X(UNKNOWN, "Unknown")
 
 typedef enum _mot_catalog_field_types : uint8_t {

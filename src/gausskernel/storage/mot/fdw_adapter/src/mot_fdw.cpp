@@ -49,7 +49,7 @@
 #include "optimizer/restrictinfo.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
-
+#include "utils/date.h"
 #include "utils/syscache.h"
 #include "utils/partitionkey.h"
 #include "catalog/heap.h"
@@ -2274,7 +2274,14 @@ inline bool GetKeyOperation(OpExpr* op, KEY_OPER& oper)
         case 5513:  // INT1EQ
         case BPCHAREQOID:
         case TEXTEQOID:
-        case 92:  // CHAREQ
+        case 92:    // CHAREQ
+        case 2536:  // timestampVStimestamptz
+        case 2542:  // timestamptzVStimestamp
+        case 2347:  // dateVStimestamp
+        case 2360:  // dateVStimestamptz
+        case 2373:  // timestampVSdate
+        case 2386:  // timestamptzVSdate
+        case TIMESTAMPEQOID:
             oper = KEY_OPER::READ_KEY_EXACT;
             break;
         case FLOAT8LTOID:
@@ -2294,6 +2301,13 @@ inline bool GetKeyOperation(OpExpr* op, KEY_OPER& oper)
         case 1058:  // BPCHARLT
         case 631:   // CHARLT
         case TEXTLTOID:
+        case 2534:  // timestampVStimestamptz
+        case 2540:  // timestamptzVStimestamp
+        case 2345:  // dateVStimestamp
+        case 2358:  // dateVStimestamptz
+        case 2371:  // timestampVSdate
+        case 2384:  // timestamptzVSdate
+        case TIMESTAMPLTOID:
             oper = KEY_OPER::READ_KEY_BEFORE;
             break;
         case FLOAT8LEOID:
@@ -2313,6 +2327,13 @@ inline bool GetKeyOperation(OpExpr* op, KEY_OPER& oper)
         case 1059:  // BPCHARLE
         case 632:   // CHARLE
         case 665:   // TEXTLE
+        case 2535:  // timestampVStimestamptz
+        case 2541:  // timestamptzVStimestamp
+        case 2346:  // dateVStimestamp
+        case 2359:  // dateVStimestamptz
+        case 2372:  // timestampVSdate
+        case 2385:  // timestamptzVSdate
+        case TIMESTAMPLEOID:
             oper = KEY_OPER::READ_KEY_OR_PREV;
             break;
         case FLOAT8GTOID:
@@ -2332,6 +2353,13 @@ inline bool GetKeyOperation(OpExpr* op, KEY_OPER& oper)
         case 1060:       // BPCHARGT
         case 633:        // CHARGT
         case TEXTGTOID:  // TEXTGT
+        case 2538:       // timestampVStimestamptz
+        case 2544:       // timestamptzVStimestamp
+        case 2349:       // dateVStimestamp
+        case 2362:       // dateVStimestamptz
+        case 2375:       // timestampVSdate
+        case 2388:       // timestamptzVSdate
+        case TIMESTAMPGTOID:
             oper = KEY_OPER::READ_KEY_AFTER;
             break;
         case FLOAT8GEOID:
@@ -2351,6 +2379,13 @@ inline bool GetKeyOperation(OpExpr* op, KEY_OPER& oper)
         case 1061:  // BPCHARGE
         case 634:   // CHARGE
         case 667:   // TEXTGE
+        case 2537:  // timestampVStimestamptz
+        case 2543:  // timestamptzVStimestamp
+        case 2348:  // dateVStimestamp
+        case 2361:  // dateVStimestamptz
+        case 2374:  // timestampVSdate
+        case 2387:  // timestamptzVSdate
+        case TIMESTAMPGEOID:
             oper = KEY_OPER::READ_KEY_OR_NEXT;
             break;
         case OID_TEXT_LIKE_OP:
@@ -2486,8 +2521,10 @@ bool IsMOTExpr(RelOptInfo* baserel, MOTFdwStateSt* state, MatchIndexArr* marr, E
         case T_FuncExpr: {
             FuncExpr* func = (FuncExpr*)expr;
 
-            if (func->funcformat == COERCE_IMPLICIT_CAST) {
+            if (func->funcformat == COERCE_IMPLICIT_CAST || func->funcformat == COERCE_EXPLICIT_CAST) {
                 isOperatorMOTReady = IsMOTExpr(baserel, state, marr, (Expr*)linitial(func->args), result, setLocal);
+            } else if (list_length(func->args) == 0) {
+                isOperatorMOTReady = true;
             }
 
             break;
@@ -2503,4 +2540,37 @@ bool IsMOTExpr(RelOptInfo* baserel, MOTFdwStateSt* state, MatchIndexArr* marr, E
     }
 
     return isOperatorMOTReady;
+}
+
+uint16_t MOTTimestampToStr(uintptr_t src, char* destBuf, size_t len)
+{
+    char* tmp = nullptr;
+    Timestamp timestamp = DatumGetTimestamp(src);
+    tmp = DatumGetCString(DirectFunctionCall1(timestamp_out, timestamp));
+    errno_t erc = snprintf_s(destBuf, len, len - 1, tmp);
+    pfree_ext(tmp);
+    securec_check_ss(erc, "\0", "\0");
+    return erc;
+}
+
+uint16_t MOTTimestampTzToStr(uintptr_t src, char* destBuf, size_t len)
+{
+    char* tmp = nullptr;
+    TimestampTz timestamp = DatumGetTimestampTz(src);
+    tmp = DatumGetCString(DirectFunctionCall1(timestamptz_out, timestamp));
+    errno_t erc = snprintf_s(destBuf, len, len - 1, tmp);
+    pfree_ext(tmp);
+    securec_check_ss(erc, "\0", "\0");
+    return erc;
+}
+
+uint16_t MOTDateToStr(uintptr_t src, char* destBuf, size_t len)
+{
+    char* tmp = nullptr;
+    DateADT date = DatumGetDateADT(src);
+    tmp = DatumGetCString(DirectFunctionCall1(date_out, date));
+    errno_t erc = snprintf_s(destBuf, len, len - 1, tmp);
+    pfree_ext(tmp);
+    securec_check_ss(erc, "\0", "\0");
+    return erc;
 }

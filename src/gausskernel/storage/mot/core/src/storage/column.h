@@ -29,6 +29,8 @@
 #include "utils/elog.h"
 #include "securec.h"
 
+#define MOT_MAXDATELEN 128
+
 namespace MOT {
 /**
  * @brief The Column class describes a single field in a row in a table.
