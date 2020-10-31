@@ -535,9 +535,11 @@ RelOptInfo* build_join_rel(PlannerInfo* root, Relids joinrelids, RelOptInfo* out
          */
         if (restrictlist_ptr != NULL)
             *restrictlist_ptr = build_joinrel_restrictlist(root, joinrel, outer_rel, inner_rel);
+
+#ifdef ENABLE_MULTIPLE_NODES
         /* set interesting distribute keys */
         build_joinrel_itst_diskeys(root, joinrel, outer_rel, inner_rel, sjinfo->jointype);
-
+#endif
         return joinrel;
     }
 
@@ -677,9 +679,10 @@ RelOptInfo* build_join_rel(PlannerInfo* root, Relids joinrelids, RelOptInfo* out
         root->join_rel_level[root->join_cur_level] = lappend(root->join_rel_level[root->join_cur_level], joinrel);
     }
 
+#ifdef ENABLE_MULTIPLE_NODES 
     /* set interesting distribute keys */
     build_joinrel_itst_diskeys(root, joinrel, outer_rel, inner_rel, sjinfo->jointype);
-
+#endif
     /* Adjust joinrel globle_rows according hint. */
     adjust_rows_according_to_hint(root->parse->hintState, joinrel, outer_rel->relids);
 
