@@ -432,6 +432,8 @@ class DefaultValue():
     STANDBY_INSTANCE = 1
     # dummy standby
     DUMMY_STANDBY_INSTANCE = 2
+    # cascade standby
+    CASCADE_STANDBY = 3
 
     ###########################
     # parallel number
@@ -5269,7 +5271,8 @@ class ClusterInstanceConfig():
         for pi in iter(peerInsts):
             if pi.instanceType == DefaultValue.MASTER_INSTANCE:
                 masterInst = pi
-            elif pi.instanceType == DefaultValue.STANDBY_INSTANCE:
+            elif pi.instanceType == DefaultValue.STANDBY_INSTANCE or \
+                    dbInst.instanceType == DefaultValue.CASCADE_STANDBY:
                 standbyInstIdLst.append(pi.instanceId)
 
         if dbInst.instanceType == DefaultValue.MASTER_INSTANCE:
@@ -5278,7 +5281,8 @@ class ClusterInstanceConfig():
             standbyInstIdLst.sort()
             for si in iter(standbyInstIdLst):
                 instancename += "_%d" % si
-        elif (dbInst.instanceType == DefaultValue.STANDBY_INSTANCE):
+        elif dbInst.instanceType == DefaultValue.STANDBY_INSTANCE or \
+              dbInst.instanceType == DefaultValue.CASCADE_STANDBY:
             instancename = "dn_%d" % masterInst.instanceId
             standbyInstIdLst.append(dbInst.instanceId)
             standbyInstIdLst.sort()
@@ -5335,6 +5339,7 @@ class ClusterInstanceConfig():
                                    (dbInst.port + 4), pj.haIps[i],
                                    pj.haPort, pj.port + 5,
                                    pj.port + 4)
+                    
                 connInfo1.append(chanalInfo)
         else:
             for pj in iter(peerInsts):
@@ -5356,6 +5361,7 @@ class ClusterInstanceConfig():
                                    (dbInst.port + 4), pj.haIps[i],
                                    pj.haPort, pj.port + 5,
                                    (pj.port + 4))
+
                 connInfo1.append(chanalInfo)
 
         return connInfo1, nodename
