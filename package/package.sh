@@ -173,6 +173,7 @@ done
 declare version_string="${server_name_for_package}-${version_number}"
 declare package_pre_name="${version_string}-${dist_version}-${PLATFORM}bit"
 declare server_package_name="${package_pre_name}.tar.gz"
+declare server_package_name_kernel_only="${package_pre_name}-kernel.tar.gz"
 declare symbol_package_name="${package_pre_name}-symbol.tar.gz"
 declare libpq_package_name="${package_pre_name}-Libpq.tar.gz"
 
@@ -518,7 +519,6 @@ function replace_omtools_version()
 
 }
 
-
 function make_package_srv()
 {
     cd $SCRIPT_DIR
@@ -597,13 +597,21 @@ function make_package_srv()
     rm -r ./install_tools
     mkdir simpleInstall
     cp -r $ROOT_DIR/simpleInstall/. ./simpleInstall
-        tar -zvcf "${server_package_name}" ./* >>"$LOG_FILE" 2>&1
+    tar -zvcf "${server_package_name}" ./* >>"$LOG_FILE" 2>&1
     if [ $? -ne 0 ]; then
-        die "$package_command ${server_package_name} failed"
+        die "tar ${server_package_name} failed"
     fi
     mv ${server_package_name} ${package_path}
     echo "install $pkgname tools is ${server_package_name} of ${package_path} directory " >> "$LOG_FILE" 2>&1
-    echo "success!"
+    echo "make server(all) package success!"
+
+    tar -zvcf "${server_package_name_kernel_only}"  ${sha256_name} ${tar_name}  >>"$LOG_FILE" 2>&1
+    if [ $? -ne 0 ]; then
+        die "tar ${server_package_name_kernel_only} failed"
+    fi
+    mv ${server_package_name_kernel_only} ${package_path}
+    echo "the kernel package is ${server_package_name_kernel_only} of ${package_path} directory " >> "$LOG_FILE" 2>&1        
+    echo "make kernel package success!"
 }
 
 function target_file_copy_for_non_server()
