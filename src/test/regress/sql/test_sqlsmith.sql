@@ -100,4 +100,4 @@ on (case when true then cast(null as circle)
     <> cast(coalesce(cast(null as circle),
        cast(null as circle)) as circle))
 where 
-    pg_catalog.now() <= pg_catalog.pg_systimestamp()
+    pg_catalog.now() - 1 <= pg_catalog.pg_systimestamp()
