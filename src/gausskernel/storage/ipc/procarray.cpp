@@ -904,6 +904,11 @@ RunningTransactions GetRunningTransactionData(void)
 
     oldestRunningXid = t_thrd.xact_cxt.ShmemVariableCache->nextXid;
 
+    /* xmax is always latestCompletedXid + 1 */
+    TransactionId xmax = latestCompletedXid;
+    TransactionIdAdvance(xmax);
+    TransactionId globalXmin = xmax;
+
     /*
      * Spin over procArray collecting all xids and subxids.
      */
@@ -913,6 +918,13 @@ RunningTransactions GetRunningTransactionData(void)
         volatile PGXACT* pgxact = &g_instance.proc_base_all_xacts[pgprocno];
         TransactionId xid;
         int nxids;
+
+        /* Update globalxmin to be the smallest valid xmin */
+        xid = pgxact->xmin; /* fetch just once */
+
+        if (TransactionIdIsNormal(xid) && TransactionIdPrecedes(xid, globalXmin)) {
+            globalXmin = xid;
+        }
 
         /* Fetch xid just once - see GetNewTransactionId */
         xid = pgxact->xid;
@@ -955,6 +967,16 @@ RunningTransactions GetRunningTransactionData(void)
              */
         }
     }
+
+    /*
+     * Update globalxmin to include actual process xids.  This is a slightly
+     * different way of computing it than GetOldestXmin uses, but should give
+     * the same result.
+     */
+    if (TransactionIdPrecedes(oldestRunningXid, globalXmin)) {
+        globalXmin = oldestRunningXid;
+    }
+
     /*
      * It's important *not* to include the limits set by slots here because
      * snapbuild.c uses oldestRunningXid to manage its xmin horizon. If those
@@ -968,6 +990,7 @@ RunningTransactions GetRunningTransactionData(void)
     CurrentRunningXacts->nextXid = t_thrd.xact_cxt.ShmemVariableCache->nextXid;
     CurrentRunningXacts->oldestRunningXid = oldestRunningXid;
     CurrentRunningXacts->latestCompletedXid = latestCompletedXid;
+    CurrentRunningXacts->globalXmin = globalXmin;
 
     Assert(TransactionIdIsValid(CurrentRunningXacts->nextXid));
     Assert(TransactionIdIsValid(CurrentRunningXacts->oldestRunningXid));
