@@ -2217,7 +2217,8 @@ static int _SPI_execute_plan(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot sn
                     ClearCreateStmtUUIDS((CreateStmt *)stmt);
                 }
 
-                if (IsA(stmt, CreateRoleStmt) || IsA(stmt, AlterRoleStmt)) {
+                if (IsA(stmt, CreateRoleStmt) || IsA(stmt, AlterRoleStmt) ||
+                    (IsA(stmt, VariableSetStmt) && ((VariableSetStmt *)stmt)->kind == VAR_SET_ROLEPWD)) {
                     stmt = (Node *)copyObject(stmt);
                 }
 
@@ -2263,7 +2264,8 @@ static int _SPI_execute_plan(SPIPlanPtr plan, ParamListInfo paramLI, Snapshot sn
                     res = SPI_OK_UTILITY;
                 }
 
-                if (IsA(stmt, CreateRoleStmt) || IsA(stmt, AlterRoleStmt)) {
+                if (IsA(stmt, CreateRoleStmt) || IsA(stmt, AlterRoleStmt) ||
+                    (IsA(stmt, VariableSetStmt) && ((VariableSetStmt *)stmt)->kind == VAR_SET_ROLEPWD)) {
                     pfree_ext(stmt);
                 }
             }
