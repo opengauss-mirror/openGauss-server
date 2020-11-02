@@ -6048,7 +6048,7 @@ static bool choose_hashed_grouping(PlannerInfo* root, double tuple_fraction, dou
         if (expression_returns_set((Node*)agg_costs->exprAggs)) {
             return true;
         }
-
+#ifdef ENABLE_MULTIPLE_NODES
         if (parse->groupClause) {
             bool grp_is_distributable = grouping_is_distributable(parse->groupClause, parse->targetList);
             bool expr_is_distributable = IsTypeDistributable(exprType((Node*)linitial(agg_costs->exprAggs)));
@@ -6064,6 +6064,7 @@ static bool choose_hashed_grouping(PlannerInfo* root, double tuple_fraction, dou
                 mark_stream_unsupport();
             }
         }
+#endif
     }
 
     /* Prefer hashagg or sort when guc is set */
