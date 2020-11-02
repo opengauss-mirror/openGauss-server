@@ -1127,7 +1127,6 @@ do_gucset(const char *action_type, const char *data_dir)
     FileLock filelock = {NULL, 0};
     UpdateOrAddParameter updateoradd = UPDATE_PARAMETER;
 
-
     /* check the status of postgresql.conf and postgresql.conf.bak */
     if (SUCCESS != check_config_file_status())
         return FAILURE;
