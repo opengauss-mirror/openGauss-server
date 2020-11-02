@@ -32,8 +32,8 @@ VERSION = 1
 override CPPFLAGS := -I$(LIBOPENSSL_INCLUDE_PATH) -I$(LIBOBS_INCLUDE_PATH) -I$(CJSON_INCLUDE_PATH) -I$(top_builddir)/src/common/port -DFRONTEND $(CPPFLAGS) $(CFLAGS_SSE42)
 LIBS += $(PTHREAD_LIBS)
 
-override CPPFLAGS := $(filter-out -fPIE, $(CPPFLAGS)) -fPIC
-override CFLAGS := $(filter-out -fPIE, $(CFLAGS)) -fPIC 
+override CPPFLAGS := $(filter-out -fPIE, $(CPPFLAGS)) -fPIC -fstack-protector --param ssp-buffer-size=4 -Wstack-protector
+override CFLAGS := $(filter-out -fPIE, $(CFLAGS)) -fPIC -fstack-protector --param ssp-buffer-size=4 -Wstack-protector
 
 override CPPSources=$(shell find -name "*.cpp" ! -name "path.cpp")
 ifneq "$(MAKECMDGOALS)" "clean"

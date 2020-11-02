@@ -63,6 +63,7 @@
 #include "port.h"
 
 #define STATIC_CONFIG_FILE "cluster_static_config"
+#define DYNAMIC_DNROLE_FILE "cluster_dnrole_config"
 #define CM_MAX_DATANODE_STANDBY_NUM 7
 
 #define MAX_VALUE_LEN 1024
@@ -74,6 +75,8 @@
 #define STADARD_SSH_PORT 22
 
 #define STD_FORMAT_ARG_POSITION 2
+
+#define CASCADE_STANDBY_TYPE 3
 
 extern char** cndn_param;
 extern char** cmserver_param;
@@ -555,6 +558,9 @@ char* get_nodename_list_by_AZ(const char* AZName, const char* data_dir)
                 if (dn->datanodeId == 0)
                     continue;
 
+                if (CASCADE_STANDBY_TYPE == dn->datanodeRole)
+                    continue;
+
                 for (n = 0; n < CM_MAX_DATANODE_STANDBY_NUM && !get_dn_in_same_shard; n++) {
                     peerDatanodeInfo* peer_datanode = &(dn->peerDatanodes[n]);
                     if (strlen(peer_datanode->datanodePeerHAIP[0]) == 0)
@@ -834,6 +840,49 @@ int32 get_local_datanode_dbpath(uint32 slot, char* dbpath, const uint32 dbpathle
     return CLUSTER_CONFIG_SUCCESS;
 }
 
+int get_dynamic_dn_role(void)
+{
+    char path[MAXPGPATH];
+    char gausshome[MAXPGPATH] = {0};
+    int nRet = 0;
+    FILE* fp = NULL;
+    char line_info[MAXPGPATH] = {0};
+    char* node_name = NULL;
+    char* dn_role = NULL;
+    uint32 nodeidx = 0;
+    struct stat statbuf;
+
+    if (!get_env_value("GAUSSHOME", gausshome, sizeof(gausshome) / sizeof(char)))
+        return 1;
+
+    check_env_value(gausshome);
+
+    nRet = snprintf_s(path, MAXPGPATH, MAXPGPATH - 1, "%s/bin/%s", gausshome, DYNAMIC_DNROLE_FILE);
+    securec_check_ss_c(nRet, "\0", "\0");
+
+    if (lstat(path, &statbuf) != 0) {
+        return 0;
+    }
+
+    fp = fopen(path, "r");
+    if (fp == NULL) {
+        write_stderr("ERROR: Failed to open file\"%s\"\n", path);
+        return 1;
+    }
+
+    while ((fgets(line_info, 1023 - 1, fp)) != NULL) {
+        line_info[(int)strlen(line_info) - 1] = '\0';
+        node_name = strtok_r(line_info, "=", &dn_role);
+        for (nodeidx = 0; nodeidx < g_node_num; nodeidx++) {
+            if (0 == strncmp(g_node[nodeidx].nodeName, node_name, strlen(node_name))){
+                g_node[nodeidx].datanode[0].datanodeRole = atoi(dn_role);
+            }
+        }
+    }
+
+    return 0;
+}
+
 /*
  ******************************************************************************
  Function    : init_gauss_cluster_config
@@ -895,6 +944,12 @@ int init_gauss_cluster_config(void)
 
     if (NULL == g_currentNode) {
         write_stderr("ERROR: failed to find current node by nodeid, curerent node id is:%u .\n", g_nodeHeader.node);
+        GS_FREE(g_node);
+        return 1;
+    }
+
+    if (0 != get_dynamic_dn_role()) {
+        write_stderr("ERROR: failed to get dynamic dn role.\n");
         GS_FREE(g_node);
         return 1;
     }
