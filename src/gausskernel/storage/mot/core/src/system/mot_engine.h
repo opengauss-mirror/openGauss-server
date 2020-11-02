@@ -53,8 +53,8 @@ typedef void (*CpSigFunc)(void);
 
 /**
  * @class MOTEngine
- * @brief The single entry point to the main memory engine.
- * @detail The main memory engine manages three sets of objects: tables (with indexes), sessions
+ * @brief The single entry point to the MOT engine.
+ * @detail The MOT engine manages three sets of objects: tables (with indexes), sessions
  * and transactions. Each object set is managed as a concurrent map. In addition The memory engine
  * provides access to configuration, logging and statistics.
  */
@@ -74,22 +74,22 @@ public:
     // Initialization/Termination/Configuration API
     /**********************************************************************/
     /**
-     * @brief Creates the single main memory engine instance. Use this variant when you have no external configuration
+     * @brief Creates the single MOT engine instance. Use this variant when you have no external configuration
      * loaders involved.
-     * @param[opt] configFilePath The path to the configuration file of the main memory engine.
+     * @param[opt] configFilePath The path to the configuration file of the MOT engine.
      * @param[opt] argc Command line argument count (excluding program name first argument).
      * @param[opt] argv Command line argument array (excluding program name first argument).
-     * @return A reference to the single main memory engine instance, or null if initialization failed.
+     * @return A reference to the single MOT engine instance, or null if initialization failed.
      */
     static MOTEngine* CreateInstance(const char* configFilePath = nullptr, int argc = 0, char* argv[] = nullptr);
 
     /**
-     * @brief Destroys the single main memory engine instance.
+     * @brief Destroys the single MOT engine instance.
      */
     static void DestroyInstance();
 
     /**
-     * @brief Retrieves a reference to the single main memory engine instance.
+     * @brief Retrieves a reference to the single MOT engine instance.
      */
     static inline MOTEngine* GetInstance()
     {
@@ -97,15 +97,15 @@ public:
     }
 
     /**
-     * @brief Creates the single main memory engine instance and loads configuration, but without
+     * @brief Creates the single MOT engine instance and loads configuration, but without
      * executing any other initialization code. A further call to @ref Initialize() is expected.
      * @note Use this variant when you wish to add more configuration loaders before actual
      * initialization takes place. In this case initialization has several steps: @ref CreateInstanceNoInit(), @ref
      * AddConfigLoader(), @ref AddConfigLoader(), ..., @ref LoadConfig(), @ref Initialize().
-     * @param[opt] configFilePath The path to the configuration file of the main memory engine.
+     * @param[opt] configFilePath The path to the configuration file of the MOT engine.
      * @param[opt] argc Command line argument count (excluding program name first argument).
      * @param[opt] argv Command line argument array (excluding program name first argument).
-     * @return A reference to the single main memory engine instance if configuration loading
+     * @return A reference to the single MOT engine instance if configuration loading
      * succeeded, otherwise nullptr.
      */
     static MOTEngine* CreateInstanceNoInit(const char* configFilePath = nullptr, int argc = 0, char* argv[] = nullptr);
@@ -133,7 +133,7 @@ public:
     bool LoadConfig();
 
     /**
-     * @brief Initializes the single main memory engine instance.
+     * @brief Initializes the single MOT engine instance.
      * @return True if initialization succeeded, otherwise false, in which case the singleton instance
      * of the engine is deleted and nullified.
      * @note Call this method only if the engine was created with @ref createInstanceNoInit().
@@ -448,7 +448,7 @@ private:
 
     /**
      * @brief Initializes global configuration.
-     * @param configFilePath The path to the configuration file of the main memory engine.
+     * @param configFilePath The path to the configuration file of the MOT engine.
      * @param argc Command line argument count.
      * @param argv Command line argument array.
      * @return True if configuration loading succeeded, or false if loading failed, or if the loaded

@@ -6646,15 +6646,14 @@ bool RelationIsCUFormatByOid(Oid relid)
 }
 
 /*
- * Brief        : check whether the relation is main memory table.
+ * Brief        : check whether the relation is MOT table.
  * Input        : relation oid
- * Return Value : ture if the relation is main memory table, else false
+ * Return Value : ture if the relation is MOT table, else false
  */
-bool RelationIsMMTableByOid(Oid relid)
+bool RelationIsMOTTableByOid(Oid relid)
 {
     return isMOTFromTblOid(relid);
 }
-
 
 /*
  * Brief        : Check Relation redistribution status in pg_class

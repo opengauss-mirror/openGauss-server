@@ -914,9 +914,9 @@ static void mark_dummy_rel(RelOptInfo* rel)
 
     /* Evict any previously chosen paths */
     rel->pathlist = NIL;
-	rel->partial_pathlist = NIL;
+    rel->partial_pathlist = NIL;
     /* Set up the dummy path */
-    Path* append_path = (Path*)create_append_path(NULL, rel, NIL, NULL, 0);
+    Path* append_path = (Path*)create_append_path(NULL, rel, NIL, NIL, NULL, 0, false, -1);
     if (append_path != NULL) {
         add_path(NULL, rel, append_path);
     }

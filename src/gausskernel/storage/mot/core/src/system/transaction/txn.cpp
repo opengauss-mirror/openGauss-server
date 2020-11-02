@@ -109,7 +109,8 @@ Row* TxnManager::RowLookup(const AccessType type, Sentinel* const& originalSenti
                     return m_accessMgr->GetReadCommitedRow(originalSentinel);
                 } else {
                     // Row is not in the cache,map it and return the local row
-                    return m_accessMgr->MapRowtoLocalTable(AccessType::RD, originalSentinel, rc);
+                    AccessType rd_type = (type != RD_FOR_UPDATE) ? RD : RD_FOR_UPDATE;
+                    return m_accessMgr->MapRowtoLocalTable(rd_type, originalSentinel, rc);
                 }
             } else
                 return nullptr;
@@ -136,12 +137,25 @@ RC TxnManager::DeleteLastRow()
     rc = m_accessMgr->UpdateRowState(AccessType::DEL, access);
     if (rc != RC_OK)
         return rc;
+    access->m_stmtCount = GetStmtCount();
     return rc;
 }
 
 RC TxnManager::UpdateLastRowState(AccessType state)
 {
     return m_accessMgr->UpdateRowState(state, m_accessMgr->GetLastAccess());
+}
+
+bool TxnManager::IsUpdatedInCurrStmt()
+{
+    Access* access = m_accessMgr->GetLastAccess();
+    if (access == nullptr) {
+        return false;
+    }
+    if (m_internalStmtCount == m_accessMgr->GetLastAccess()->m_stmtCount) {
+        return true;
+    }
+    return false;
 }
 
 RC TxnManager::StartTransaction(uint64_t transactionId, int isolationLevel)
@@ -248,7 +262,6 @@ RC TxnManager::CommitInternal(uint64_t csn)
     if (!GetGlobalConfiguration().m_enableRedoLog ||
         GetGlobalConfiguration().m_redoLogHandlerType == RedoLogHandlerType::ASYNC_REDO_LOG_HANDLER) {
         m_occManager.ReleaseLocks(this);
-        m_occManager.CleanRowsFromIndexes(this);
     }
     return RC_OK;
 }
@@ -313,7 +326,6 @@ RC TxnManager::CommitPrepared(uint64_t transactionId)
     if (!GetGlobalConfiguration().m_enableRedoLog ||
         GetGlobalConfiguration().m_redoLogHandlerType == RedoLogHandlerType::ASYNC_REDO_LOG_HANDLER) {
         m_occManager.ReleaseLocks(this);
-        m_occManager.CleanRowsFromIndexes(this);
     }
     MOT::DbSessionStatisticsProvider::GetInstance().AddCommitPreparedTxn();
     return RC_OK;
@@ -340,7 +352,6 @@ RC TxnManager::EndTransaction()
         GetGlobalConfiguration().m_redoLogHandlerType != RedoLogHandlerType::ASYNC_REDO_LOG_HANDLER &&
         IsFailedCommitPrepared() == false) {
         m_occManager.ReleaseLocks(this);
-        m_occManager.CleanRowsFromIndexes(this);
     }
     CleanDDLChanges();
     Cleanup();
@@ -638,7 +649,7 @@ Row* TxnManager::RemoveKeyFromIndex(Row* row, Sentinel* sentinel)
     Table* table = row->GetTable();
 
     Row* outputRow = nullptr;
-    if (row->GetStable() == nullptr) {
+    if (sentinel->GetStable() == nullptr) {
         outputRow = table->RemoveKeyFromIndex(row, sentinel, m_threadId, GetGcSession());
     } else {
         // Checkpoint works on primary-sentinel only!
@@ -783,8 +794,10 @@ RC TxnManager::OverwriteRow(Row* updatedRow, BitmapSet& modifiedColumns)
         return RC_ERROR;
 
     Access* access = m_accessMgr->GetLastAccess();
-    if (access->m_type == AccessType::WR)
+    if (access->m_type == AccessType::WR) {
         access->m_modifiedColumns |= modifiedColumns;
+        access->m_stmtCount = GetStmtCount();
+    }
     return RC_OK;
 }
 
@@ -925,7 +938,7 @@ RC TxnInsertAction::ExecuteOptimisticInsert(Row* row)
             MOT_ASSERT(pIndexInsertResult->GetCounter() != 0);
             // Reuse the row connected to header
             if (unlikely(pIndexInsertResult->GetData() != nullptr)) {
-                if (pIndexInsertResult->GetData()->IsAbsentRow()) {
+                if (pIndexInsertResult->IsCommited() == false) {
                     accessRow = m_manager->m_accessMgr->AddInsertToLocalAccess(pIndexInsertResult, row, rc, true);
                 }
             } else {
@@ -1109,6 +1122,13 @@ RC TxnManager::TruncateTable(Table* table)
         } else {
             it++;
         }
+    }
+
+    // clean all GC elements for the table, this call should actually release
+    // all elements into an appropriate object pool
+    for (uint16_t i = 0; i < table->GetNumIndexes(); i++) {
+        MOT::Index* index = table->GetIndex(i);
+        GcManager::ClearIndexElements(index->GetIndexId(), false);
     }
 
     TxnDDLAccess::DDLAccess* ddl_access = m_txnDdlAccess->GetByOid(table->GetTableExId());

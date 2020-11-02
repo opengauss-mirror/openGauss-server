@@ -358,6 +358,8 @@ typedef struct knl_g_ckpt_context {
     int64 ckpt_twophase_flush_num;
     volatile XLogRecPtr ckpt_current_redo_point;
 
+    struct CheckpointCallbackItem* ckptCallback;
+
     uint64 pad[TWO_UINT64_SLOT];
 } knl_g_ckpt_context;
 
@@ -517,6 +519,8 @@ typedef struct knl_g_executor_context {
 
 typedef struct knl_g_xlog_context {
     int num_locks_in_group;
+    struct WALCallbackItem* walCallback;
+    struct RedoCommitCallbackItem* redoCommitCallback;
 } knl_g_xlog_context;
 
 struct NumaMemAllocInfo {

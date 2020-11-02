@@ -40,7 +40,7 @@ TypedStatisticsGenerator<ThreadStatistics, EmptyGlobalStatistics> SystemStatisti
 SystemStatisticsProvider* SystemStatisticsProvider::m_provider = nullptr;
 
 SystemStatisticsProvider::SystemStatisticsProvider()
-    : StatisticsProvider("System", &m_generator, GetGlobalConfiguration().m_enableSystemStatistics)
+    : StatisticsProvider("System", &m_generator, GetGlobalConfiguration().m_enableSystemStatistics, true)
 {
     SnapshotCpuStats(m_lastTotalUser, m_lastTotalUserLow, m_lastTotalSys, m_lastTotalIdle);
 }

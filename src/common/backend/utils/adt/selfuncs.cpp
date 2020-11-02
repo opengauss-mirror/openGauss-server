@@ -5397,8 +5397,9 @@ static bool get_actual_variable_range(PlannerInfo* root, VariableStatData* var_d
         return false;
     }
 
-    if (rel->fdwroutine != NULL)
+    if (rel->fdwroutine != NULL) {
         return false;
+    }
 
     /* If it has indexes it must be a plain relation */
     rte = root->simple_rte_array[rel->relid];
@@ -8591,8 +8592,7 @@ void output_noanalyze_rellist_to_log(int lev)
         Oid relid = linitial_oid((List*)linitial(record));
         Relation rel = relation_open(relid, AccessShareLock);
 
-        if ((0 == rel->rd_rel->reltuples && check_relation_analyzed(relid)) ||
-            ((RELKIND_FOREIGN_TABLE == rel->rd_rel->relkind) && isMOTFromTblOid(relid))) {
+        if (RelationIsForeignTable(rel) && isMOTFromTblOid(relid)) {
             relation_close(rel, AccessShareLock);
             continue;
         }

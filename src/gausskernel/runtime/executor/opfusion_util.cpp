@@ -38,7 +38,6 @@
 #include "utils/dynahash.h"
 #include "utils/lsyscache.h"
 #include "utils/snapmgr.h"
-#include "parser/parse_coerce.h"
 
 const char *getBypassReason(FusionType result)
 {
@@ -785,12 +784,6 @@ FusionType getInsertFusionType(List *stmt_list, ParamListInfo params)
         Form_pg_type type_form = (Form_pg_type)GETSTRUCT(tuple);
         ReleaseSysCache(tuple);
         if (type_form->typtype != 'b') {
-            heap_close(rel, AccessShareLock);
-            return NOBYPASS_DML_TARGET_TYPE_INVALID;
-        }
-
-        if (TypeCategory(rel->rd_att->attrs[i]->atttypid) == TYPCATEGORY_STRING &&
-            rel->rd_att->attrs[i]->atttypid != TEXTOID) {
             heap_close(rel, AccessShareLock);
             return NOBYPASS_DML_TARGET_TYPE_INVALID;
         }

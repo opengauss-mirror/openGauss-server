@@ -38,7 +38,7 @@ TypedStatisticsGenerator<ThreadStatistics, EmptyGlobalStatistics> ProcessStatist
 ProcessStatisticsProvider* ProcessStatisticsProvider::m_provider = nullptr;
 
 ProcessStatisticsProvider::ProcessStatisticsProvider()
-    : StatisticsProvider("Process", &m_generator, GetGlobalConfiguration().m_enableProcessStatistics),
+    : StatisticsProvider("Process", &m_generator, GetGlobalConfiguration().m_enableProcessStatistics, true),
       m_lastCpu(0),
       m_lastSysCpu(0),
       m_lastUserCpu(0),

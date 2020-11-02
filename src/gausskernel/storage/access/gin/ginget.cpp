@@ -827,7 +827,7 @@ static void entryGetItem(GinState* ginstate, GinScanEntry entry, ItemPointerData
             (ginCompareItemPointers(&entry->curItem, &advancePast) <= 0 || (entry->reduceResult && dropItem(entry)));
     } else {
         /* A posting tree */
-        do {
+        for (;;) {
             /* If we've processed the current batch, load more items */
             while (entry->offset >= entry->nlist) {
                 entryLoadMoreItems(ginstate, entry, advancePast);
@@ -837,17 +837,26 @@ static void entryGetItem(GinState* ginstate, GinScanEntry entry, ItemPointerData
                     return;
                 }
             }
-
             entry->curItem = entry->list[entry->offset++];
 
-            if (ginCompareItemPointers(&entry->curItem, &advancePast) <= 0)
+            /* If we're not past advancePast, keep scanning */
+            if (ginCompareItemPointers(&entry->curItem, &advancePast) <= 0) {
                 continue;
+            }
 
+            /* Done unless we need to reduce the result */
+            if (!entry->reduceResult || !dropItem(entry)) {
+                break;
+            }
+
+            /*
+             * Advance advancePast (so that entryLoadMoreItems will load the
+             * right data), and keep scanning
+             */
             advancePast = entry->curItem;
-        } while (entry->reduceResult && dropItem(entry));
+        }
     }
 }
-
 /*
  * Identify the "current" item among the input entry streams for this scan key
  * that is greater than advancePast, and test whether it passes the scan key

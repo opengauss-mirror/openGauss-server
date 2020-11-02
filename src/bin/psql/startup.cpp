@@ -125,10 +125,14 @@ int main(int argc, char* argv[])
 
     if (strcmp(libpqVersionString, DEF_GS_VERSION) != 0) {
         fprintf(stderr,
-            "The \"libpq.so\" loaded mismatch the version of gsql, please check it.\nexpected: %s\nresult: %s\n",
+            "[Warning]: The \"libpq.so\" loaded mismatch the version of gsql, "
+            "please check it.\n"
+            "expected: %s\nresult: %s\n",
             DEF_GS_VERSION,
             libpqVersionString);
+#ifdef ENABLE_MULTIPLE_NODES
         exit(EXIT_FAILURE);
+#endif
     }
 
     if (argc > 1) {

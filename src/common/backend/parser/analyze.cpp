@@ -746,7 +746,7 @@ static Query* FindQueryContainForeignTbl(Query* qry)
  * brief: expression_tree_walker callback function.
  * checks the entire RTE used by a query to identify their storage engine type (MOT or PAGE)
  */
-static bool StorageEngineUsedWalker(Node* node, RTEDetectorContext* context) 
+static bool StorageEngineUsedWalker(Node* node, RTEDetectorContext* context)
 {
     if (node == nullptr)
         return false;
@@ -780,7 +780,7 @@ static bool StorageEngineUsedWalker(Node* node, RTEDetectorContext* context)
 
 /*
  * brief: Analyze a query to check which storage engines are being used
- * PG, MM, mixed PG & MM or Other type
+ * PG, MOT, mixed PG & MOT or Other type
  * input: query to be analyzed
  * output: type of storage engines
  */
@@ -807,9 +807,10 @@ void CheckTablesStorageEngine(Query* qry, StorageEngineType* type)
             }
         }
     }
-        
+
     /* add root query to query stack list*/
     context.queryNodes = lappend(context.queryNodes, qry);
+
     /* recursive walk on the query */
     (void)query_or_expression_tree_walker((Node*) qry, (bool (*)())StorageEngineUsedWalker, (void*) &context, 0);
 
@@ -818,11 +819,11 @@ void CheckTablesStorageEngine(Query* qry, StorageEngineType* type)
     } else if (context.isPageTable) {
         *type = SE_TYPE_PAGE_BASED;
     } else if (context.isMotTable) {
-        *type = SE_TYPE_MM;
+        *type = SE_TYPE_MOT;
     }
 }
 
-bool IsMMIndexedColumnUpdate(Query* qry)
+bool IsMOTIndexedColumnUpdate(Query* qry)
 {
     List* rtable = qry->rtable;
     ListCell* lc = NULL;

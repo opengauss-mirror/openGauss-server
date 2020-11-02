@@ -63,7 +63,9 @@
 namespace JitExec {
 DECLARE_LOGGER(LiteExecutor, JitExec);
 
-static pthread_spinlock_t jitConfigLock;
+#ifdef MOT_JIT_TEST
+static uint64_t totalExecCount = 0;
+#endif
 
 extern JitPlan* IsJittable(Query* query, const char* queryString)
 {
@@ -71,13 +73,13 @@ extern JitPlan* IsJittable(Query* query, const char* queryString)
     bool limitBreached = false;
 
     // when running under thread-pool, it is possible to be executed from a thread that hasn't yet executed any MOT code
-    // and thus lacking a thread id and numa node id. Nevertheless, we can be sure that a proper session context is set
+    // and thus lacking a thread id and NUMA node id. Nevertheless, we can be sure that a proper session context is set
     // up.
     EnsureSafeThreadAccess();
 
     // since we use session local allocations and a session context might have not been created yet, we make sure such
     // one exists now
-    GetSafeTxn();
+    GetSafeTxn(__FUNCTION__);
 
     // check limit not breached
     if (u_sess->mot_cxt.jit_context_count >= GetMotCodegenLimit()) {
@@ -135,17 +137,33 @@ extern JitPlan* IsJittable(Query* query, const char* queryString)
     return jitPlan;
 }
 
-static void ProcessJitResult(MOT::RC result, JitContext* jitContext)
+static void ProcessJitResult(MOT::RC result, JitContext* jitContext, int newScan)
 {
     // NOTE: errors might be reported in a better way, so this part can be reviewed sometime
     // we ignore "local row not found" in SELECT and DELETE scenarios
     if (result == MOT::RC_LOCAL_ROW_NOT_FOUND) {
-        if ((jitContext->m_commandType == JIT_COMMAND_DELETE) || (jitContext->m_commandType == JIT_COMMAND_SELECT) ||
-            (jitContext->m_commandType == JIT_COMMAND_RANGE_SELECT) ||
-            (jitContext->m_commandType == JIT_COMMAND_COMPOUND_SELECT)) {
-            // this is considered as successful execution
-            JitStatisticsProvider::GetInstance().AddExecQuery();
-            return;
+        switch (jitContext->m_commandType) {
+            case JIT_COMMAND_DELETE:
+            case JIT_COMMAND_SELECT:
+            case JIT_COMMAND_RANGE_SELECT:
+            case JIT_COMMAND_FULL_SELECT:
+            case JIT_COMMAND_POINT_JOIN:
+            case JIT_COMMAND_RANGE_JOIN:
+            case JIT_COMMAND_COMPOUND_SELECT:
+            case JIT_COMMAND_UPDATE:
+            case JIT_COMMAND_RANGE_UPDATE:
+                // this is considered as successful execution
+                JitStatisticsProvider::GetInstance().AddInvokeQuery();
+                if (newScan) {
+#ifdef MOT_JIT_TEST
+                    MOT_ATOMIC_INC(totalExecCount);
+                    MOT_LOG_INFO("JIT total queries executed: %" PRIu64, MOT_ATOMIC_LOAD(totalExecCount));
+#endif
+                    JitStatisticsProvider::GetInstance().AddExecQuery();
+                }
+                return;
+            default:
+                break;
         }
     }
 
@@ -164,8 +182,9 @@ static void ProcessJitResult(MOT::RC result, JitContext* jitContext)
     }
 
     if (result != MOT::RC_OK) {
-        if (MOT_CHECK_LOG_LEVEL(MOT::LogLevel::LL_DEBUG)) {
-            MOT_LOG_ERROR_STACK("Failed to execute jitted function");
+        if (MOT_CHECK_LOG_LEVEL(MOT::LogLevel::LL_TRACE)) {
+            MOT_LOG_ERROR_STACK(
+                "Failed to execute jitted function with error code: %d (%s)", (int)result, MOT::RcToString(result));
         }
         if (result == MOT::RC_ABORT) {
             JitStatisticsProvider::GetInstance().AddAbortExecQuery();
@@ -364,13 +383,16 @@ extern int JitExecQuery(
         report_pg_error(MOT::RC_MEMORY_ALLOCATION_ERROR, NULL);  // execution control ends, calls ereport(error,...)
     }
 
-    // during the very first invocation of the query we need to setup the reusable search key
-    // since during prepare we still don't have an MOT SessionContext for the calling thread
-    if (jitContext->m_argIsNull == nullptr && !PrepareJitContext(jitContext)) {
-        MOT_REPORT_ERROR(
-            MOT_ERROR_OOM, "Execute JIT", "Failed to prepare for executing jitted code, aborting transaction");
-        JitStatisticsProvider::GetInstance().AddFailExecQuery();
-        report_pg_error(MOT::RC_MEMORY_ALLOCATION_ERROR, NULL);  // execution control ends, calls ereport(error,...)
+    // during the very first invocation of the query we need to setup the reusable search keys
+    // This is also true after TRUNCATE TABLE, in which case we also need to re-fetch all index objects
+    if ((jitContext->m_argIsNull == nullptr) ||
+        ((jitContext->m_commandType != JIT_COMMAND_INSERT) && (jitContext->m_index == nullptr))) {
+        if (!PrepareJitContext(jitContext)) {
+            MOT_REPORT_ERROR(
+                MOT_ERROR_OOM, "Execute JIT", "Failed to prepare for executing jitted code, aborting transaction");
+            JitStatisticsProvider::GetInstance().AddFailExecQuery();
+            report_pg_error(MOT::RC_MEMORY_ALLOCATION_ERROR, NULL);  // execution control ends, calls ereport(error,...)
+        }
     }
 
     // setup current JIT context
@@ -380,7 +402,7 @@ extern int JitExecQuery(
     // in trace log-level we raise the log level to DEBUG on first few executions only
     bool firstExec = false;
     if ((++jitContext->m_execCount <= 2) && MOT_CHECK_LOG_LEVEL(MOT::LogLevel::LL_TRACE)) {
-        MOT_LOG_TRACE("Executing JIT context %p (exec: %" PRIu64 ", query: %" PRIu64 " iteration: %" PRIu64 "): %s",
+        MOT_LOG_TRACE("Executing JIT context %p (exec: %" PRIu64 ", query: %" PRIu64 ", iteration: %" PRIu64 "): %s",
             jitContext,
             jitContext->m_execCount,
             jitContext->m_queryCount,
@@ -442,22 +464,34 @@ extern int JitExecQuery(
     u_sess->mot_cxt.jit_context = NULL;
 
     if (result == 0) {
-        JitStatisticsProvider::GetInstance().AddExecQuery();
+        JitStatisticsProvider::GetInstance().AddInvokeQuery();
+        if (newScan) {
+#ifdef MOT_JIT_TEST
+            MOT_ATOMIC_INC(totalExecCount);
+            MOT_LOG_INFO("JIT total queries executed: %" PRIu64, MOT_ATOMIC_LOAD(totalExecCount));
+#endif
+            JitStatisticsProvider::GetInstance().AddExecQuery();
+        }
     } else {
-        ProcessJitResult((MOT::RC)result, jitContext);
+        ProcessJitResult((MOT::RC)result, jitContext, newScan);
     }
 
     return result;
 }
 
-extern void PurgeJitSourceCache(uint64_t relationId)
+extern void PurgeJitSourceCache(uint64_t relationId, bool purgeOnly)
 {
     MOT_LOG_TRACE("Purging JIT source map by relation id %" PRIu64, relationId);
-    (void)PurgeJitSourceMap(relationId);
+    (void)PurgeJitSourceMap(relationId, purgeOnly);
 }
 
 extern bool JitInitialize()
 {
+    if (!IsMotCodegenEnabled()) {
+        MOT_LOG_INFO("MOT JIT execution is disabled by user configuration");
+        return true;
+    }
+
     if (JitCanInitThreadCodeGen()) {
         if (IsMotPseudoCodegenForced()) {
             MOT_LOG_INFO("Forcing TVM on LLVM natively supported platform");

@@ -26,7 +26,7 @@
 #ifdef ENABLE_MULTIPLE_NODES
 #define MAX_REPLNODE_NUM 8
 #else
-#define MAX_REPLNODE_NUM 5
+#define MAX_REPLNODE_NUM 9
 #endif
 
 #define REPL_IDX_PRIMARY 1
@@ -36,7 +36,14 @@ typedef enum { NoDemote = 0, SmartDemote, FastDemote } DemoteMode;
 
 typedef enum { UNUSED_LISTEN_SOCKET = 0, PSQL_LISTEN_SOCKET, HA_LISTEN_SOCKET } ListenSocketType;
 
-typedef enum { UNKNOWN_MODE = 0, NORMAL_MODE, PRIMARY_MODE, STANDBY_MODE, PENDING_MODE } ServerMode;
+typedef enum {
+    UNKNOWN_MODE = 0,
+    NORMAL_MODE,
+    PRIMARY_MODE,
+    STANDBY_MODE,
+    CASCADE_STANDBY_MODE,
+    PENDING_MODE
+} ServerMode;
 
 typedef enum {
     UNKNOWN_STATE = 0,
@@ -102,6 +109,7 @@ typedef struct replconninfo {
  */
 typedef struct hashmemdata {
     ServerMode current_mode;
+    bool is_cascade_standby;
     HaRebuildReason repl_reason[MAX_REPLNODE_NUM];
     int disconnect_count[MAX_REPLNODE_NUM];
     int current_repl;

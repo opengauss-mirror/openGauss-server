@@ -215,7 +215,7 @@ Type typenameType(ParseState* pstate, const TypeName* typname, int32* typmod_p)
                 errmsg("type \"%s\" does not exist", TypeNameToString(typname)),
                 parser_errposition(pstate, typname->location)));
     }
-        
+
     if (!((Form_pg_type)GETSTRUCT(tup))->typisdefined) {
         ereport(ERROR,
             (errcode(ERRCODE_UNDEFINED_OBJECT),
@@ -512,7 +512,7 @@ Type typeidType(Oid id)
 /* given type (as type struct), return the type OID */
 Oid typeTypeId(Type tp)
 {
-    if (tp == NULL)  { /* probably useless */ 
+    if (tp == NULL) { /* probably useless */
         ereport(ERROR, (errcode(ERRCODE_UNRECOGNIZED_NODE_TYPE), errmsg("typeTypeId() called with NULL type struct")));
     }
     return HeapTupleGetOid(tp);
@@ -825,8 +825,6 @@ bool IsTypeInBlacklist(Oid typoid)
     bool isblack = false;
 
     switch (typoid) {
-        case LINEOID:
-       // case XMLOID:
         case PGNODETREEOID:
             isblack = true;
             break;

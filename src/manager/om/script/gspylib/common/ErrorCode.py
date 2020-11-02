@@ -349,7 +349,8 @@ class ErrorCode():
     GAUSS_510 = {
         'GAUSS_51000': "[GAUSS-51000] : THP services must be shut down.",
         'GAUSS_51001': "[GAUSS-51001] : Failed to obtain THP service.",
-        'GAUSS_51002': "[GAUSS-51002] : Failed to close THP service."
+        'GAUSS_51002': "[GAUSS-51002] : Failed to close THP service.",
+        'GAUSS_51003': "[GAUSS-51003] : Failed to set session process."
     }
 
     ###########################################################################

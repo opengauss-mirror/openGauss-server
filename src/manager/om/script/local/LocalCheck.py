@@ -233,9 +233,10 @@ def checkSysctlParameter(kernelParameter, isSet):
         # does not have vm.extfrag_threshold parameter, skip check
         if (patchlevel == "1" and key == "vm.extfrag_threshold"):
             continue
-        # Skip check net.ipv4.tcp_tw_recycle with ARM
-        if ((platform.machine() == "aarch64" or  platform.release().endswith("oe1.x86_64"))
-                and key == "net.ipv4.tcp_tw_recycle"):
+        sysFile = "/proc/sys/%s" % key.replace('.', '/')
+        # High version of linux no longer supports tcp_tw_recycle
+        if not os.path.exists(
+                sysFile) and key == "net.ipv4.tcp_tw_recycle":
             continue
         if (DefaultValue.checkDockerEnv() and key in docker_no_need_check):
             continue

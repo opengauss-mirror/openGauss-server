@@ -66,6 +66,7 @@ GatherState *ExecInitGather(Gather *node, EState *estate, int eflags)
     gatherstate->ps.state = estate;
     gatherstate->need_to_scan_locally = !node->single_copy &&
         u_sess->attr.attr_sql.parallel_leader_participation;
+    gatherstate->tuples_needed = -1;
 
     /*
      * Miscellaneous initialization
@@ -81,9 +82,10 @@ GatherState *ExecInitGather(Gather *node, EState *estate, int eflags)
     gatherstate->ps.qual = (List *)ExecInitExpr((Expr *)node->plan.qual, (PlanState *)gatherstate);
 
     /*
-     * tuple table initialization
+     * tuple table initialization, doesn't need tuple_mcxt
      */
-    gatherstate->funnel_slot = ExecInitExtraTupleSlot(estate);
+    gatherstate->funnel_slot = MakeTupleTableSlot(false);
+    estate->es_tupleTable = lappend(estate->es_tupleTable, gatherstate->funnel_slot);
     ExecInitResultTupleSlot(estate, &gatherstate->ps);
 
     /*
@@ -98,7 +100,12 @@ GatherState *ExecInitGather(Gather *node, EState *estate, int eflags)
      * Initialize result tuple type and projection info.
      */
     ExecAssignResultTypeFromTL(&gatherstate->ps);
-    ExecAssignProjectionInfo(&gatherstate->ps, NULL);
+    if (tlist_matches_tupdesc(&gatherstate->ps, gatherstate->ps.plan->targetlist,
+        OUTER_VAR, ExecGetResultType(outerPlanState(gatherstate)))) {
+        gatherstate->ps.ps_ProjInfo = NULL;
+    } else {
+        ExecAssignProjectionInfo(&gatherstate->ps, NULL);
+    }
 
     /*
      * Initialize funnel slot to same tuple descriptor as outer plan.
@@ -121,7 +128,6 @@ GatherState *ExecInitGather(Gather *node, EState *estate, int eflags)
 TupleTableSlot *ExecGather(GatherState *node)
 {
     TupleTableSlot *fslot = node->funnel_slot;
-    int i;
     TupleTableSlot *slot = NULL;
     TupleTableSlot *resultSlot = NULL;
     ExprDoneCond isDone;
@@ -143,12 +149,10 @@ TupleTableSlot *ExecGather(GatherState *node)
          * parallel mode is active then we can try to fire up some workers.
          */
         if (gather->num_workers > 0 && IsInParallelMode()) {
-            bool got_any_worker = false;
-
             /* Initialize the workers required to execute Gather node. */
-            if (!node->pei)
-                node->pei = ExecInitParallelPlan(node->ps.lefttree, estate, gather->num_workers);
-
+            if (!node->pei) {
+                node->pei = ExecInitParallelPlan(node->ps.lefttree, estate, gather->num_workers, node->tuples_needed);
+            }
             /*
              * Register backend workers. We might not get as many as we
              * requested, or indeed any at all.
@@ -157,31 +161,28 @@ TupleTableSlot *ExecGather(GatherState *node)
             LaunchParallelWorkers(pcxt);
 
             /* Set up tuple queue readers to read the results. */
-            if (pcxt->nworkers > 0) {
-                node->nreaders = 0;
-                node->reader = (TupleQueueReader **)palloc(pcxt->nworkers * sizeof(TupleQueueReader *));
+            if (pcxt->nworkers_launched > 0) {
+                ExecParallelCreateReaders(node->pei, fslot->tts_tupleDescriptor);
 
-                for (i = 0; i < pcxt->nworkers; ++i) {
-                    if (pcxt->worker[i].bgwhandle == NULL)
-                        continue;
+                /* Make a working array showing the active readers */
+                node->nreaders = pcxt->nworkers_launched;
+                Size readerSize = node->nreaders * sizeof(TupleQueueReader *);
+                node->reader = (TupleQueueReader **)palloc(readerSize);
 
-                    shm_mq_set_handle(node->pei->tqueue[i], pcxt->worker[i].bgwhandle);
-                    node->reader[node->nreaders++] =
-                        CreateTupleQueueReader(node->pei->tqueue[i], fslot->tts_tupleDescriptor);
-                    got_any_worker = true;
-                }
-            }
+                int rc = memcpy_s(node->reader, readerSize, node->pei->reader, readerSize);
+                securec_check(rc, "", "");
 
-            /* No workers?  Then never mind. */
-            if (!got_any_worker) {
-                ExecShutdownGatherWorkers(node);
-            } else {
                 t_thrd.subrole = BACKGROUND_LEADER;
+            } else {
+                /* No workers?  Then never mind. */
+                node->nreaders = 0;
+                node->reader = NULL;
             }
+            node->nextreader = 0;
         }
 
         /* Run plan locally if no workers or not single-copy. */
-        node->need_to_scan_locally = (node->reader == NULL) ||
+        node->need_to_scan_locally = (node->nreaders == 0) ||
             (!gather->single_copy && u_sess->attr.attr_sql.parallel_leader_participation);
         node->initialized = true;
     }
@@ -206,7 +207,6 @@ TupleTableSlot *ExecGather(GatherState *node)
      * returned by a TupleQueueReader; to make sure we don't leave a dangling
      * pointer around, clear the working slot first.
      */
-    (void)ExecClearTuple(node->funnel_slot);
     ExprContext *econtext = node->ps.ps_ExprContext;
     ResetExprContext(econtext);
 
@@ -217,8 +217,14 @@ TupleTableSlot *ExecGather(GatherState *node)
          * plan ourselves.
          */
         slot = gather_getnext(node);
-        if (TupIsNull(slot))
+        if (TupIsNull(slot)) {
             return NULL;
+        }
+
+        /* If no projection is required, we're done. */
+        if (node->ps.ps_ProjInfo == NULL) {
+            return slot;
+        }
 
         /*
          * form the result tuple using ExecProject(), and return it --- unless
@@ -261,10 +267,10 @@ static TupleTableSlot *gather_getnext(GatherState *gatherstate)
     PlanState *outerPlan = outerPlanState(gatherstate);
     TupleTableSlot *fslot = gatherstate->funnel_slot;
 
-    while (gatherstate->reader != NULL || gatherstate->need_to_scan_locally) {
+    while (gatherstate->nreaders > 0 || gatherstate->need_to_scan_locally) {
         CHECK_FOR_INTERRUPTS();
 
-        if (gatherstate->reader != NULL) {
+        if (gatherstate->nreaders > 0) {
             HeapTuple tup = gather_readnext(gatherstate);
             if (HeapTupleIsValid(tup)) {
                 (void)ExecStoreTuple(tup,   /* tuple to store */
@@ -306,15 +312,13 @@ static HeapTuple gather_readnext(GatherState *gatherstate)
         HeapTuple tup = TupleQueueReaderNext(reader, true, &readerdone);
 
         /*
-         * If this reader is done, remove it.  If all readers are done,
-         * clean up remaining worker state.
+         * If this reader is done, remove it from our working array of active
+         * readers. If all readers are done, we're outta here.
          */
         if (readerdone) {
             Assert(!tup);
-            DestroyTupleQueueReader(reader);
             --gatherstate->nreaders;
             if (gatherstate->nreaders == 0) {
-                ExecShutdownGatherWorkers(gatherstate);
                 return NULL;
             }
             Size remainSize = sizeof(TupleQueueReader *) * (gatherstate->nreaders - gatherstate->nextreader);
@@ -366,25 +370,17 @@ static HeapTuple gather_readnext(GatherState *gatherstate)
 /* ----------------------------------------------------------------
  * 		ExecShutdownGatherWorkers
  *
- * 		Destroy the parallel workers.  Collect all the stats after
- * 		workers are stopped, else some work done by workers won't be
- * 		accounted.
+ * 		Stop all the parallel workers.
  * ----------------------------------------------------------------
  */
 static void ExecShutdownGatherWorkers(GatherState *node)
 {
-    /* Shut down tuple queue readers before shutting down workers. */
-    if (node->reader != NULL) {
-        for (int i = 0; i < node->nreaders; ++i)
-            DestroyTupleQueueReader(node->reader[i]);
-
-        pfree(node->reader);
-        node->reader = NULL;
-    }
-
-    /* Now shut down the workers. */
+    /* wait for the workers to finish first */
     if (node->pei != NULL)
         ExecParallelFinish(node->pei);
+
+    /* Flush local copy of reader array */
+    pfree_ext(node->reader);
 }
 
 /* ----------------------------------------------------------------

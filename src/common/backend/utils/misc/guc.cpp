@@ -142,6 +142,7 @@
 #include "utils/xml.h"
 #include "workload/cpwlm.h"
 #include "workload/workload.h"
+#include "miscadmin.h"
 
 #ifndef PG_KRB_SRVTAB
 #define PG_KRB_SRVTAB ""
@@ -188,6 +189,7 @@
 #define MS_PER_D (1000 * 60 * 60 * 24)
 #define H_PER_D 24
 
+
 /* max reuse time interval and times */
 #define MAX_PASSWORD_REUSE_TIME 3650
 #define MAX_PASSWORD_REUSE_MAX 1000
@@ -197,8 +199,6 @@
 #define MAX_PASSWORD_NOTICE_TIME 999
 /* max num of assign character in password */
 #define MAX_PASSWORD_ASSIGNED_CHARACTER 999
-/* max length of password */
-#define MAX_PASSWORD_LENGTH 999
 /*
  * Precision with which REAL type guc values are to be printed for GUC
  * serialization.
@@ -513,10 +513,11 @@ static void assign_replconninfo1(const char* newval, void* extra);
 static void assign_replconninfo2(const char* newval, void* extra);
 static void assign_replconninfo3(const char* newval, void* extra);
 static void assign_replconninfo4(const char* newval, void* extra);
-#ifdef ENABLE_MULTIPLE_NODES
 static void assign_replconninfo5(const char* newval, void* extra);
 static void assign_replconninfo6(const char* newval, void* extra);
 static void assign_replconninfo7(const char* newval, void* extra);
+#ifndef ENABLE_MULTIPLE_NODES
+static void assign_replconninfo8(const char* newval, void* extra);
 #endif
 static bool check_inlist2joininfo(char** newval, void** extra, GucSource source);
 static void assign_inlist2joininfo(const char* newval, void* extra);
@@ -899,6 +900,7 @@ static const struct config_enum_entry autovacuum_mode_options[] = {{"analyze", A
 static const struct config_enum_entry synchronous_commit_options[] = {{"local", SYNCHRONOUS_COMMIT_LOCAL_FLUSH, false},
     {"remote_receive", SYNCHRONOUS_COMMIT_REMOTE_RECEIVE, false},
     {"remote_write", SYNCHRONOUS_COMMIT_REMOTE_WRITE, false},
+    {"remote_apply", SYNCHRONOUS_COMMIT_REMOTE_APPLY, false},
     {"on", SYNCHRONOUS_COMMIT_ON, false},
     {"off", SYNCHRONOUS_COMMIT_OFF, false},
     {"true", SYNCHRONOUS_COMMIT_ON, true},
@@ -907,8 +909,7 @@ static const struct config_enum_entry synchronous_commit_options[] = {{"local", 
     {"no", SYNCHRONOUS_COMMIT_OFF, true},
     {"1", SYNCHRONOUS_COMMIT_ON, true},
     {"0", SYNCHRONOUS_COMMIT_OFF, true},
-    {"2", SYNCHRONOUS_COMMIT_REMOTE_REPLAY, false},
-    {"remote_apply", SYNCHRONOUS_COMMIT_REMOTE_REPLAY, false},
+    {"2", SYNCHRONOUS_COMMIT_REMOTE_APPLY, true},
     {NULL, 0, false}};
 
 static const struct config_enum_entry force_parallel_mode_options[] = {
@@ -2617,6 +2618,17 @@ static void init_configure_names_bool()
                 NULL
             },
             &u_sess->attr.attr_storage.autovacuum_start_daemon,
+            true,
+            NULL,
+            NULL,
+            NULL
+        },
+        {
+            {"enable_parallel_append", PGC_USERSET, QUERY_TUNING_METHOD,
+                gettext_noop("Enables the planner's use of parallel append plans."),
+                NULL
+            },
+            &u_sess->attr.attr_sql.enable_parallel_append,
             true,
             NULL,
             NULL,
@@ -7528,8 +7540,8 @@ static void init_configure_names_int()
                 GUC_SUPERUSER_ONLY
             },
             &u_sess->attr.attr_security.Password_min_length,
-            8,
-            6,
+            DEFAULT_PASSWORD_MIN_LENGTH,
+            MIN_PASSWORD_LENGTH,
             MAX_PASSWORD_LENGTH,
             check_int_parameter,
             NULL,
@@ -7545,8 +7557,8 @@ static void init_configure_names_int()
                 GUC_SUPERUSER_ONLY
             },
             &u_sess->attr.attr_security.Password_max_length,
-            32,
-            6,
+            DEFAULT_PASSWORD_MAX_LENGTH,
+            MIN_PASSWORD_LENGTH,
             MAX_PASSWORD_LENGTH,
             check_int_parameter,
             NULL,
@@ -9287,7 +9299,7 @@ static void init_configure_names_int()
                 NULL
             },
             &u_sess->attr.attr_sql.max_parallel_workers_per_gather,
-            0,
+            2,
             0,
             MAX_PARALLEL_WORKER_LIMIT,
             NULL,
@@ -10642,11 +10654,11 @@ static void init_configure_names_string()
         {
             {
                 "mot_config_file",
-                 PGC_POSTMASTER,
-                 FILE_LOCATIONS,
-                 gettext_noop("Sets mot main configuration file."),
-                 NULL,
-                 GUC_DISALLOW_IN_FILE | GUC_SUPERUSER_ONLY
+                PGC_POSTMASTER,
+                FILE_LOCATIONS,
+                gettext_noop("Sets mot main configuration file."),
+                NULL,
+                GUC_DISALLOW_IN_FILE | GUC_SUPERUSER_ONLY
             },
             &g_instance.attr.attr_common.MOTConfigFileName,
             NULL,
@@ -11120,6 +11132,22 @@ static void init_configure_names_string()
             NULL,
             NULL
         },
+        /* availablezone of current instance, currently, it is only used in cascade standby */
+        {
+            {
+                "available_zone",
+                PGC_POSTMASTER,
+                AUDIT_OPTIONS,
+                gettext_noop("Sets the available zone of current instance."),
+                gettext_noop("The available zone is only used in cascade standby scenes"),
+                GUC_SUPERUSER_ONLY | GUC_IS_NAME
+            },
+            &g_instance.attr.attr_storage.available_zone,
+            "",
+            NULL,
+            NULL,
+            NULL
+        },
         /* Get the ReplConnInfo1 from postgresql.conf and assign to ReplConnArray1. */
         {
             {
@@ -11184,7 +11212,6 @@ static void init_configure_names_string()
             assign_replconninfo4,
             NULL
         },
-#ifdef ENABLE_MULTIPLE_NODES
         /* Get the ReplConnInfo5 from postgresql.conf and assign to ReplConnArray5. */
         {
             {
@@ -11231,6 +11258,23 @@ static void init_configure_names_string()
             "",
             check_replconninfo,
             assign_replconninfo7,
+            NULL
+        },
+#ifndef ENABLE_MULTIPLE_NODES
+        /* Get the ReplConnInfo8 from postgresql.conf and assign to ReplConnArray8. */
+        {
+            {
+                "replconninfo8",
+                PGC_SIGHUP,
+                REPLICATION_SENDING,
+                gettext_noop("Sets the replconninfo8 of the HA to listen and authenticate."),
+                NULL,
+                GUC_LIST_INPUT
+            },
+            &u_sess->attr.attr_storage.ReplConnInfoArr[8],
+            "",
+            check_replconninfo,
+            assign_replconninfo8,
             NULL
         },
 #endif
@@ -20998,7 +21042,6 @@ static void assign_replconninfo4(const char* newval, void* extra)
     }
 }
 
-#ifdef ENABLE_MULTIPLE_NODES
 static void assign_replconninfo5(const char* newval, void* extra)
 {
     int repl_length = 0;
@@ -21041,6 +21084,22 @@ static void assign_replconninfo7(const char* newval, void* extra)
     if (u_sess->attr.attr_storage.ReplConnInfoArr[7] != NULL && newval != NULL &&
         strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[7], newval) != 0) {
         t_thrd.postmaster_cxt.ReplConnChanged[7] = true;
+    }
+}
+
+#ifndef ENABLE_MULTIPLE_NODES
+static void assign_replconninfo8(const char* newval, void* extra)
+{
+    int repl_length = 0;
+
+    if (t_thrd.postmaster_cxt.ReplConnArray[8]) {
+        pfree(t_thrd.postmaster_cxt.ReplConnArray[8]);
+    }
+
+    t_thrd.postmaster_cxt.ReplConnArray[8] = parse_repl_conn_info(newval, &repl_length);
+    if (u_sess->attr.attr_storage.ReplConnInfoArr[8] != NULL && newval != NULL &&
+        strcmp(u_sess->attr.attr_storage.ReplConnInfoArr[8], newval) != 0) {
+        t_thrd.postmaster_cxt.ReplConnChanged[8] = true;
     }
 }
 #endif

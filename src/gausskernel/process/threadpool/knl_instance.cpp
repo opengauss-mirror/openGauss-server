@@ -92,7 +92,8 @@ static void knl_g_counters_init(knl_g_counters_context* counters_cxt)
 static void knl_g_ckpt_init(knl_g_ckpt_context* ckpt_cxt)
 {
     Assert(ckpt_cxt != NULL);
-    memset_s(ckpt_cxt, sizeof(knl_g_ckpt_context), 0, sizeof(knl_g_ckpt_context));
+    errno_t rc = memset_s(ckpt_cxt, sizeof(knl_g_ckpt_context), 0, sizeof(knl_g_ckpt_context));
+    securec_check(rc, "\0", "\0");
 }
 
 static void knl_g_bgwriter_init(knl_g_bgwriter_context *bgwriter_cxt)
@@ -241,6 +242,8 @@ static void knl_g_executor_init(knl_g_executor_context* exec_cxt)
 static void knl_g_xlog_init(knl_g_xlog_context *xlog_cxt)
 {
     xlog_cxt->num_locks_in_group = 0;
+    xlog_cxt->walCallback = NULL;
+    xlog_cxt->redoCommitCallback = NULL;
 }
 
 static void knl_g_libpq_init(knl_g_libpq_context* libpq_cxt)

@@ -63,6 +63,7 @@ ACTION_CHECK_THP_SERVICE = "Check_THP_Service"
 ACTION_SET_BLOCKDEV_CONFIGURE = "Set_BlockDev_Configure"
 ACTION_SET_IO_CONFIGURE = "Set_IO_Configure"
 ACTION_SET_REMOVEIPC_VALUE = "Set_RemoveIPC_Value"
+ACTION_SET_SESSION_PROCESS = "Set_Session_Process"
 ACTION_SET_NETWORK_CONFIGURE = "Set_Network_Configure"
 ACTION_SET_THP_SERVICE = "Set_THP_Service"
 ACTION_SET_LOGICAL_BLOCK = "Set_Logical_Block"
@@ -281,7 +282,7 @@ def collectUnicode():
     output : Instantion
     """
     data = codename()
-    cmd = "source /etc/profile; locale | grep '^LANG='"
+    cmd = "locale | grep '^LANG='"
     status, output = subprocess.getstatusoutput(cmd)
     if status != 0:
         raise Exception((ErrorCode.GAUSS_505["GAUSS_50502"] % "Unicode") +
@@ -840,7 +841,6 @@ def disRemoveIPC():
                                " cannot be all no")
     g_logger.debug("Successfully change RemoveIPC to no.")
 
-
 def disableRemoveIPCLog(cmd):
     """
     function : disable remove IPCLog
@@ -854,6 +854,38 @@ def disableRemoveIPCLog(cmd):
         g_logger.logExit(ErrorCode.GAUSS_510["GAUSS_51002"]
                          + " Error: \n%s" % output)
     return output
+
+
+
+def CheckSessionProcess():
+    """
+    function : Set User Session Process Control
+    input  : NA
+    output : NA
+    """
+    g_logger.debug("Setting User Session Process Control.")
+    etcFile = "/etc/pam.d/sshd"
+    if os.path.exists(etcFile):
+        set_cmd = "sed -i '/.*session\+.*pam_limits\.so/d' /etc/pam.d/sshd;" \
+                  "echo 'session    required     pam_limits.so' >> " \
+                  "/etc/pam.d/sshd;  "
+        setSeesionProcess(set_cmd)
+    g_logger.debug("Successfully Set Session Process.")
+
+def setSeesionProcess(cmd):
+    """
+    function : Set User Session Process Control
+    input  : cmd
+    output : NA
+    """
+    (status, output) = subprocess.getstatusoutput(cmd)
+    if status != 0:
+        g_logger.debug("Failed to set session process. Commands"
+                       " for set session process: %s." % cmd)
+        g_logger.logExit(ErrorCode.GAUSS_510["GAUSS_51003"]
+                         + " Error: \n%s" % output)
+    return output
+
 
 
 def disTHPServer():
@@ -2170,6 +2202,7 @@ def checkParameter():
             and g_opts.action != ACTION_SET_NETWORK_CONFIGURE
             and g_opts.action != ACTION_SET_IO_CONFIGURE
             and g_opts.action != ACTION_SET_REMOVEIPC_VALUE
+            and g_opts.action != ACTION_SET_SESSION_PROCESS
             and g_opts.action != ACTION_SET_THP_SERVICE
             and g_opts.action != ACTION_SET_LOGICAL_BLOCK
             and g_opts.action != ACTION_SET_IO_REQUEST
@@ -2219,6 +2252,7 @@ def doLocalCheck():
                      ACTION_CHECK_TIME_CONSISTENCY: CheckNtp,
                      ACTION_CHECK_FIREWALL_SERVICE: CheckFirewallServer,
                      ACTION_SET_REMOVEIPC_VALUE: disRemoveIPC,
+                     ACTION_SET_SESSION_PROCESS: CheckSessionProcess,
                      ACTION_CHECK_THP_SERVICE: CheckTHPServer,
                      ACTION_SET_THP_SERVICE: disTHPServer}
     function_keys = list(function_dict.keys())

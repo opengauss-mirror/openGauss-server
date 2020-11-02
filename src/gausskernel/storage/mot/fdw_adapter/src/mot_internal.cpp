@@ -70,8 +70,6 @@
 #include "mm_cfg.h"
 #include "jit_statistics.h"
 
-#define MOT_MIN_MEMORY_USAGE_MB 128
-
 #define IS_CHAR_TYPE(oid) (oid == VARCHAROID || oid == BPCHAROID || oid == TEXTOID || oid == CLOBOID || oid == BYTEAOID)
 #define IS_INT_TYPE(oid)                                                                                           \
     (oid == BOOLOID || oid == CHAROID || oid == INT8OID || oid == INT2OID || oid == INT4OID || oid == FLOAT4OID || \
@@ -202,7 +200,7 @@ static void GetSessionDetails(MOT::SessionId sessionId, ::ThreadId* gaussSession
 // This mechanism relies on the fact that when a session ends, eventually its thread is terminated
 // ATTENTION: in thread-pooled envelopes this assumption no longer holds true, since the container thread keeps
 // running after the session ends, and a session might run each time on a different thread, so we
-// disable this feature, instead we use this mechanism to generate thread-ended event into the MM Engine
+// disable this feature, instead we use this mechanism to generate thread-ended event into the MOT Engine
 static pthread_key_t sessionCleanupKey;
 
 static void SessionCleanup(void* key)
@@ -334,10 +332,10 @@ private:
         uint64_t maxReserveMemoryMb = globalMemoryMb + localMemoryMb + sessionLargeStoreMb;
 
         // if the total memory is less than the required minimum, then issue a warning, fix it and return
-        if (maxReserveMemoryMb < MOT_MIN_MEMORY_USAGE_MB) {
+        if (maxReserveMemoryMb < motCfg.MOT_MIN_MEMORY_USAGE_MB) {
             MOT_LOG_WARN("MOT memory limits are too low, adjusting values");
             // we use current total as zero to force session large store zero value
-            result = ConfigureMemoryLimits(MOT_MIN_MEMORY_USAGE_MB, 0, globalMemoryMb, localMemoryMb);
+            result = ConfigureMemoryLimits(motCfg.MOT_MIN_MEMORY_USAGE_MB, 0, globalMemoryMb, localMemoryMb);
             return result;
         }
 
@@ -393,14 +391,14 @@ private:
                 // this can happen only if system memory is less than 2GB, we still allow minor breach
                 MOT_LOG_WARN("Using minimal memory limits in MOT Engine due to system total memory restrictions");
                 // we use current total as zero to force session large store zero value
-                result = ConfigureMemoryLimits(MOT_MIN_MEMORY_USAGE_MB, 0, globalMemoryMb, localMemoryMb);
+                result = ConfigureMemoryLimits(motCfg.MOT_MIN_MEMORY_USAGE_MB, 0, globalMemoryMb, localMemoryMb);
             } else {
                 newTotalMemoryMb = upperLimitMb - dynamicGapMb;
-                if (newTotalMemoryMb < MOT_MIN_MEMORY_USAGE_MB) {
+                if (newTotalMemoryMb < motCfg.MOT_MIN_MEMORY_USAGE_MB) {
                     // in extreme cases we allow a minor breach of the dynamic gap
                     MOT_LOG_TRACE("Using minimal memory limits in MOT Engine due to GaussDB memory usage restrictions");
                     // we use current total as zero to force session large store zero value
-                    result = ConfigureMemoryLimits(MOT_MIN_MEMORY_USAGE_MB, 0, globalMemoryMb, localMemoryMb);
+                    result = ConfigureMemoryLimits(motCfg.MOT_MIN_MEMORY_USAGE_MB, 0, globalMemoryMb, localMemoryMb);
                 } else {
                     MOT_LOG_TRACE("Adjusting memory limits in MOT Engine due to GaussDB memory usage restrictions");
                     result = ConfigureMemoryLimits(newTotalMemoryMb, maxReserveMemoryMb, globalMemoryMb, localMemoryMb);
@@ -421,23 +419,37 @@ private:
         uint64_t newSessionLargeStoreMemoryMb = 0;
 
         // compute new configuration values
+        MOT::MOTConfiguration& motCfg = MOT::GetGlobalConfiguration();
         if (currentTotalMemoryMb > 0) {
             // we preserve the existing ratio between global and local memory, but reduce the total sum as required
             double ratio = ((double)newTotalMemoryMb) / ((double)currentTotalMemoryMb);
             newGlobalMemoryMb = (uint64_t)(currentGlobalMemoryMb * ratio);
-            if (MOT::GetGlobalConfiguration().m_sessionLargeBufferStoreSizeMB > 0) {
+            if (motCfg.m_sessionLargeBufferStoreSizeMB > 0) {
                 newLocalMemoryMb = (uint64_t)(currentLocalMemoryMb * ratio);
-                newSessionLargeStoreMemoryMb = newTotalMemoryMb - newGlobalMemoryMb - newLocalMemoryMb;
+                newSessionLargeStoreMemoryMb = newTotalMemoryMb - (newGlobalMemoryMb + newLocalMemoryMb);
             } else {
                 // if the user configured zero for the session large store, then we want to keep it this way
                 newSessionLargeStoreMemoryMb = 0;
                 newLocalMemoryMb = newTotalMemoryMb - newGlobalMemoryMb;
             }
-        } else {
-            // when current total memory is zero we split the new total between global and local in ratio of 4:1
-            newGlobalMemoryMb = (uint64_t)(newTotalMemoryMb * 0.8f);  // 80% to global memory
-            newLocalMemoryMb = newTotalMemoryMb - newGlobalMemoryMb;  // 20% to local memory
-            //  session large store remains zero!
+
+            MOT_LOG_TRACE("Attempting to use adjusted values for MOT memory limits: global = %" PRIu64
+                          " MB, local = %" PRIu64 " MB, session large store = %" PRIu64 " MB, total = %" PRIu64 " MB",
+                newGlobalMemoryMb,
+                newLocalMemoryMb,
+                newSessionLargeStoreMemoryMb,
+                newGlobalMemoryMb + newLocalMemoryMb + newSessionLargeStoreMemoryMb);
+        }
+
+        // when current total memory is zero we use the minimum allowed, and also when minimum values are breached
+        if ((newGlobalMemoryMb < motCfg.MIN_MAX_MOT_GLOBAL_MEMORY_MB) ||
+            (newLocalMemoryMb < motCfg.MIN_MAX_MOT_LOCAL_MEMORY_MB)) {
+            if (currentTotalMemoryMb > 0) {
+                MOT_LOG_TRACE("Adjusted values breach minimum restrictions, falling back to minimum values");
+            }
+            newGlobalMemoryMb = motCfg.MIN_MAX_MOT_GLOBAL_MEMORY_MB;
+            newLocalMemoryMb = motCfg.MIN_MAX_MOT_LOCAL_MEMORY_MB;
+            newSessionLargeStoreMemoryMb = 0;
         }
 
         MOT_LOG_WARN("Adjusting MOT memory limits: global = %" PRIu64 " MB, local = %" PRIu64
@@ -445,7 +457,7 @@ private:
             newGlobalMemoryMb,
             newLocalMemoryMb,
             newSessionLargeStoreMemoryMb,
-            newTotalMemoryMb);
+            newGlobalMemoryMb + newLocalMemoryMb + newSessionLargeStoreMemoryMb);
 
         // stream into MOT new definitions
         MOT::mot_string memCfg;
@@ -475,7 +487,7 @@ private:
 
 static GaussdbConfigLoader* gaussdbConfigLoader = nullptr;
 
-// Error code mapping array from MM to PG
+// Error code mapping array from MOT to PG
 static const MotErrToPGErrSt MM_ERRCODE_TO_PG[] = {
     // RC_OK
     {ERRCODE_SUCCESSFUL_COMPLETION, "Success", nullptr},
@@ -553,7 +565,7 @@ static const MotErrToPGErrSt MM_ERRCODE_TO_PG[] = {
     {ERRCODE_FDW_ERROR, "Unknown error has occurred", nullptr}};
 
 static_assert(sizeof(MM_ERRCODE_TO_PG) / sizeof(MotErrToPGErrSt) == MOT::RC_MAX_VALUE + 1,
-    "Not all MM engine error codes (RC) is mapped to PG error codes");
+    "Not all MOT engine error codes (RC) is mapped to PG error codes");
 
 void report_pg_error(MOT::RC rc, MOT::TxnManager* txn, void* arg1, void* arg2, void* arg3, void* arg4, void* arg5)
 {
@@ -718,7 +730,8 @@ void MOTAdaptor::Init()
         elog(FATAL, "Failed to create MOT engine");
     }
 
-    MOT::GetGlobalConfiguration().SetTotalMemoryMb(g_instance.attr.attr_memory.max_process_memory / KILO_BYTE);
+    MOT::MOTConfiguration& motCfg = MOT::GetGlobalConfiguration();
+    motCfg.SetTotalMemoryMb(g_instance.attr.attr_memory.max_process_memory / KILO_BYTE);
 
     gaussdbConfigLoader = new (std::nothrow) GaussdbConfigLoader();
     if (gaussdbConfigLoader == nullptr) {
@@ -741,17 +754,18 @@ void MOTAdaptor::Init()
         elog(FATAL, "Failed to load configuration for MOT engine.");
     }
 
-    // check max process memory here - we do it anyway to protect ourselves from miscalculations
+    // Check max process memory here - we do it anyway to protect ourselves from miscalculations.
+    // Attention: the following values are configured during the call to MOTEngine::LoadConfig() just above
     uint64_t globalMemoryKb = MOT::g_memGlobalCfg.m_maxGlobalMemoryMb * KILO_BYTE;
     uint64_t localMemoryKb = MOT::g_memGlobalCfg.m_maxLocalMemoryMb * KILO_BYTE;
     uint64_t maxReserveMemoryKb = globalMemoryKb + localMemoryKb;
 
+    // check whether the 2GB gap between MOT and envelope is still kept
     if ((g_instance.attr.attr_memory.max_process_memory < (int32)maxReserveMemoryKb) ||
         ((g_instance.attr.attr_memory.max_process_memory - maxReserveMemoryKb) < MIN_DYNAMIC_PROCESS_MEMORY)) {
         // we allow one extreme case: GaussDB is configured to its limit, and zero memory is left for us
-        if ((g_instance.attr.attr_memory.max_process_memory == MIN_DYNAMIC_PROCESS_MEMORY) &&
-            (maxReserveMemoryKb <= MOT_MIN_MEMORY_USAGE_MB * KILO_BYTE)) {
-            MOT_LOG_INFO("Allowing MOT to work in minimal memory mode");
+        if (maxReserveMemoryKb <= motCfg.MOT_MIN_MEMORY_USAGE_MB * KILO_BYTE) {
+            MOT_LOG_WARN("Allowing MOT to work in minimal memory mode");
         } else {
             m_engine->RemoveConfigLoader(gaussdbConfigLoader);
             delete gaussdbConfigLoader;
@@ -787,8 +801,7 @@ void MOTAdaptor::Init()
     // make sure current thread is cleaned up properly when thread pool is enabled
     EnsureSafeThreadAccessInline();
 
-    if (MOT::GetGlobalConfiguration().m_enableRedoLog &&
-        MOT::GetGlobalConfiguration().m_loggerType == MOT::LoggerType::EXTERNAL_LOGGER) {
+    if (motCfg.m_enableRedoLog && motCfg.m_loggerType == MOT::LoggerType::EXTERNAL_LOGGER) {
         m_engine->GetRedoLogHandler()->SetLogger(&xlogger);
         m_engine->GetRedoLogHandler()->SetWalWakeupFunc(WakeupWalWriter);
     }
@@ -884,7 +897,8 @@ void MOTAdaptor::Destroy()
     m_initialized = false;
 }
 
-MOT::TxnManager* MOTAdaptor::InitTxnManager(MOT::ConnectionId connection_id /* = INVALID_CONNECTION_ID */)
+MOT::TxnManager* MOTAdaptor::InitTxnManager(
+    const char* callerSrc, MOT::ConnectionId connection_id /* = INVALID_CONNECTION_ID */)
 {
     if (!u_sess->mot_cxt.txn_manager) {
         bool attachCleanFunc =
@@ -900,8 +914,9 @@ MOT::TxnManager* MOTAdaptor::InitTxnManager(MOT::ConnectionId connection_id /* =
         MOT::SessionContext* session_ctx =
             MOT::GetSessionManager()->CreateSessionContext(IS_PGXC_COORDINATOR, 0, nullptr, connection_id);
         if (session_ctx == nullptr) {
-            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Session Initialization", "Failed to create session context");
-            ereport(FATAL, (errmsg("Session startup: failed to create session context.")));
+            MOT_REPORT_ERROR(
+                MOT_ERROR_INTERNAL, "Session Initialization", "Failed to create session context in %s", callerSrc);
+            ereport(ERROR, (errmsg("Session startup: failed to create session context.")));
             return nullptr;
         }
         MOT_ASSERT(u_sess->mot_cxt.session_context == session_ctx);
@@ -1044,7 +1059,7 @@ void MOTAdaptor::DestroyTxn(int status, Datum ptr)
 MOT::RC MOTAdaptor::Commit(::TransactionId tid)
 {
     EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     if (!IS_PGXC_COORDINATOR) {
         return txn->Commit(tid);
     } else {
@@ -1055,7 +1070,7 @@ MOT::RC MOTAdaptor::Commit(::TransactionId tid)
 MOT::RC MOTAdaptor::EndTransaction(::TransactionId tid)
 {
     EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     if (!IS_PGXC_COORDINATOR) {
         return txn->EndTransaction();
     } else {
@@ -1067,7 +1082,7 @@ MOT::RC MOTAdaptor::EndTransaction(::TransactionId tid)
 MOT::RC MOTAdaptor::Rollback(::TransactionId tid)
 {
     EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     if (!IS_PGXC_COORDINATOR) {
         return txn->Rollback(tid);
     } else {
@@ -1078,7 +1093,7 @@ MOT::RC MOTAdaptor::Rollback(::TransactionId tid)
 MOT::RC MOTAdaptor::Prepare(::TransactionId tid)
 {
     EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     if (!IS_PGXC_COORDINATOR) {
         return txn->Prepare(tid);
     } else {
@@ -1089,7 +1104,7 @@ MOT::RC MOTAdaptor::Prepare(::TransactionId tid)
 MOT::RC MOTAdaptor::CommitPrepared(::TransactionId tid)
 {
     EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     if (!IS_PGXC_COORDINATOR) {
         return txn->CommitPrepared(tid);
     } else {
@@ -1100,7 +1115,7 @@ MOT::RC MOTAdaptor::CommitPrepared(::TransactionId tid)
 MOT::RC MOTAdaptor::RollbackPrepared(::TransactionId tid)
 {
     EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     if (!IS_PGXC_COORDINATOR) {
         return txn->RollbackPrepared(tid);
     } else {
@@ -1111,7 +1126,7 @@ MOT::RC MOTAdaptor::RollbackPrepared(::TransactionId tid)
 MOT::RC MOTAdaptor::FailedCommitPrepared(::TransactionId tid)
 {
     EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     return txn->FailedCommitPrepared(tid);
 }
 
@@ -1477,8 +1492,10 @@ static MOT::RC TableFieldType(const ColumnDef* colDef, MOT::MOT_CATALOG_FIELD_TY
             type = MOT::MOT_CATALOG_FIELD_TYPES::MOT_TYPE_TIME;
             break;
         case TIMESTAMPOID:
-        case TIMESTAMPTZOID:
             type = MOT::MOT_CATALOG_FIELD_TYPES::MOT_TYPE_TIMESTAMP;
+            break;
+        case TIMESTAMPTZOID:
+            type = MOT::MOT_CATALOG_FIELD_TYPES::MOT_TYPE_TIMESTAMPTZ;
             break;
         case INTERVALOID:
             type = MOT::MOT_CATALOG_FIELD_TYPES::MOT_TYPE_INTERVAL;
@@ -1528,7 +1545,7 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* index, ::TransactionId tid)
 {
     MOT::RC res;
     EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     txn->SetTransactionId(tid);
     MOT::Table* table = txn->GetTableByExternalId(index->relation->foreignOid);
 
@@ -1686,7 +1703,7 @@ MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* table, ::TransactionId t
     bool hasBlob = false;
     MOT::Index* primaryIdx = nullptr;
     EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn(tid);
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__, tid);
     MOT::Table* currentTable = nullptr;
     MOT::RC res = MOT::RC_ERROR;
     std::string tname("");
@@ -1909,7 +1926,7 @@ MOT::RC MOTAdaptor::DropIndex(DropForeignStmt* stmt, ::TransactionId tid)
 {
     MOT::RC res = MOT::RC_OK;
     EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     txn->SetTransactionId(tid);
 
     elog(LOG, "dropping index %s, ixoid: %u, taboid: %u", stmt->name, stmt->indexoid, stmt->reloid);
@@ -1929,7 +1946,7 @@ MOT::RC MOTAdaptor::DropIndex(DropForeignStmt* stmt, ::TransactionId tid)
         } else {
             MOT::Table* table = index->GetTable();
             uint64_t table_relid = table->GetTableExId();
-            JitExec::PurgeJitSourceCache(table_relid);
+            JitExec::PurgeJitSourceCache(table_relid, false);
             table->WrLock();
             res = txn->DropIndex(index);
             table->Unlock();
@@ -1943,7 +1960,7 @@ MOT::RC MOTAdaptor::DropTable(DropForeignStmt* stmt, ::TransactionId tid)
 {
     MOT::RC res = MOT::RC_OK;
     MOT::Table* tab = nullptr;
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     txn->SetTransactionId(tid);
 
     elog(LOG, "dropping table %s, oid: %u", stmt->name, stmt->reloid);
@@ -1954,7 +1971,7 @@ MOT::RC MOTAdaptor::DropTable(DropForeignStmt* stmt, ::TransactionId tid)
             elog(LOG, "Drop table %s error, table oid %u not found.", stmt->name, stmt->reloid);
         } else {
             uint64_t table_relid = tab->GetTableExId();
-            JitExec::PurgeJitSourceCache(table_relid);
+            JitExec::PurgeJitSourceCache(table_relid, false);
             res = txn->DropTable(tab);
         }
     } while (0);
@@ -1969,7 +1986,7 @@ MOT::RC MOTAdaptor::TruncateTable(Relation rel, ::TransactionId tid)
 
     EnsureSafeThreadAccessInline();
 
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     txn->SetTransactionId(tid);
 
     elog(LOG, "truncating table %s, oid: %u", NameStr(rel->rd_rel->relname), rel->rd_id);
@@ -1980,6 +1997,7 @@ MOT::RC MOTAdaptor::TruncateTable(Relation rel, ::TransactionId tid)
             break;
         }
 
+        JitExec::PurgeJitSourceCache(rel->rd_id, true);
         tab->WrLock();
         res = txn->TruncateTable(tab);
         tab->Unlock();
@@ -1993,7 +2011,7 @@ MOT::RC MOTAdaptor::VacuumTable(Relation rel, ::TransactionId tid)
     MOT::RC res = MOT::RC_OK;
     MOT::Table* tab = nullptr;
     EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     txn->SetTransactionId(tid);
 
     elog(LOG, "vacuuming table %s, oid: %u", NameStr(rel->rd_rel->relname), rel->rd_id);
@@ -2014,7 +2032,7 @@ uint64_t MOTAdaptor::GetTableIndexSize(uint64_t tabId, uint64_t ixId)
 {
     uint64_t res = 0;
     EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     MOT::Table* tab = nullptr;
     MOT::Index* ix = nullptr;
 
@@ -2211,7 +2229,7 @@ void MOTAdaptor::CreateKeyBuffer(Relation rel, MOTFdwStateSt* festate, int start
                 }
 
                 DatumToMOTKey(col,
-                    expr->expr,
+                    expr,
                     val,
                     desc->attrs[orgCols[i] - 1]->atttypid,
                     buf + offset,
@@ -2435,7 +2453,7 @@ void MOTAdaptor::DatumToMOT(MOT::Column* col, Datum datum, Oid type, uint8_t* da
 }
 
 void MOTAdaptor::DatumToMOTKey(
-    MOT::Column* col, Expr* expr, Datum datum, Oid type, uint8_t* data, size_t len, KEY_OPER oper, uint8_t fill)
+    MOT::Column* col, ExprState* expr, Datum datum, Oid type, uint8_t* data, size_t len, KEY_OPER oper, uint8_t fill)
 {
     EnsureSafeThreadAccessInline();
     switch (type) {
@@ -2444,8 +2462,8 @@ void MOTAdaptor::DatumToMOTKey(
         case VARCHAROID:
         case CLOBOID:
         case BPCHAROID: {
-            if (expr && IsA(expr, Const)) {  // OA: LLVM passes nullptr for expr parameter
-                Const* c = (Const*)expr;
+            if (expr && expr->expr && IsA(expr->expr, Const)) {  // OA: LLVM passes nullptr for expr parameter
+                Const* c = (Const*)expr->expr;
 
                 if (c->constbyval) {
                     errno_t erc = memset_s(data, len, 0x00, len);
@@ -2462,10 +2480,18 @@ void MOTAdaptor::DatumToMOTKey(
 
             size -= VARHDRSZ;
             if (oper == KEY_OPER::READ_KEY_LIKE) {
-                if (src[size - 1] == '%')
+                if (src[size - 1] == '%') {
                     size -= 1;
-                else
-                    fill = 0x00;  // switch to equal
+                } else {
+                    // switch to equal
+                    if (type == BPCHAROID) {
+                        fill = 0x20;  // space ' ' == 0x20
+                    } else {
+                        fill = 0x00;
+                    }
+                }
+            } else if (type == BPCHAROID) {  // handle padding for blank-padded type
+                fill = 0x20;
             }
             col->PackKey(data, (uintptr_t)src, size, fill);
 
@@ -2476,8 +2502,8 @@ void MOTAdaptor::DatumToMOTKey(
             break;
         }
         case FLOAT4OID: {
-            if (expr && IsA(expr, Const)) {  // OA: LLVM passes nullptr for expr parameter
-                Const* c = (Const*)expr;
+            if (expr && expr->expr && IsA(expr->expr, Const)) {  // OA: LLVM passes nullptr for expr parameter
+                Const* c = (Const*)expr->expr;
 
                 if (c->consttype == FLOAT8OID) {
                     MOT::DoubleConvT dc;
@@ -2499,6 +2525,42 @@ void MOTAdaptor::DatumToMOTKey(
             PGNumericToMOT(n, *d);
             col->PackKey(data, (uintptr_t)d, DECIMAL_SIZE(d));
 
+            break;
+        }
+        case TIMESTAMPOID: {
+            if (expr->resultType == TIMESTAMPTZOID) {
+                Timestamp result = DatumGetTimestamp(DirectFunctionCall1(timestamptz_timestamp, datum));
+                col->PackKey(data, result, col->m_size);
+            } else if (expr->resultType == DATEOID) {
+                Timestamp result = DatumGetTimestamp(DirectFunctionCall1(date_timestamp, datum));
+                col->PackKey(data, result, col->m_size);
+            } else {
+                col->PackKey(data, datum, col->m_size);
+            }
+            break;
+        }
+        case TIMESTAMPTZOID: {
+            if (expr->resultType == TIMESTAMPOID) {
+                TimestampTz result = DatumGetTimestampTz(DirectFunctionCall1(timestamp_timestamptz, datum));
+                col->PackKey(data, result, col->m_size);
+            } else if (expr->resultType == DATEOID) {
+                TimestampTz result = DatumGetTimestampTz(DirectFunctionCall1(date_timestamptz, datum));
+                col->PackKey(data, result, col->m_size);
+            } else {
+                col->PackKey(data, datum, col->m_size);
+            }
+            break;
+        }
+        case DATEOID: {
+            if (expr->resultType == TIMESTAMPOID) {
+                DateADT result = DatumGetDateADT(DirectFunctionCall1(timestamp_date, datum));
+                col->PackKey(data, result, col->m_size);
+            } else if (expr->resultType == TIMESTAMPTZOID) {
+                DateADT result = DatumGetDateADT(DirectFunctionCall1(timestamptz_date, datum));
+                col->PackKey(data, result, col->m_size);
+            } else {
+                col->PackKey(data, datum, col->m_size);
+            }
             break;
         }
         default:
@@ -2887,7 +2949,7 @@ void MatchIndex::Serialize(List** list) const
 
 void MatchIndex::Deserialize(ListCell* cell, uint64_t exTableID)
 {
-    MOT::TxnManager* txn = GetSafeTxn();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
 
     m_ixPosition = (int32_t)((Const*)lfirst(cell))->constvalue;
     MOT::Table* table = txn->GetTableByExternalId(exTableID);

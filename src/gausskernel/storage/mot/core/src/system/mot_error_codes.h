@@ -27,16 +27,16 @@
 
 // Severity Levels
 /**
- * @define Normal severity level. Some operation failed, but nevertheless the status of MM Engine
+ * @define Normal severity level. Some operation failed, but nevertheless the status of MOT Engine
  * and the current session is still fine (e.g. transaction aborted due to conflict or unique
  * violation). No action is required by the user.
  */
 #define MOT_SEVERITY_NORMAL 0
 
 /**
- * @define Warning severity level. Some operation failed. The status of the MM Engine is fine. The
+ * @define Warning severity level. Some operation failed. The status of the MOT Engine is fine. The
  * current session can continue to operate, but severity is higher (e.g. configuration file is
- * missing, but the engine can operate with defaults). The user should note the MM Engine condition
+ * missing, but the engine can operate with defaults). The user should note the MOT Engine condition
  * and might fix it.
  */
 #define MOT_SEVERITY_WARN 1
@@ -49,7 +49,7 @@
  */
 #define MOT_SEVERITY_ERROR 2
 
-/** @define Fatal severity level. Indicates that the MM Engine is inoperable. */
+/** @define Fatal severity level. Indicates that the MOT Engine is inoperable. */
 #define MOT_SEVERITY_FATAL 3
 
 // Error Codes

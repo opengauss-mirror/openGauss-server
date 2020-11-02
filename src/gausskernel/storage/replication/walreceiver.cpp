@@ -90,6 +90,7 @@ bool wal_catchup = false;
 const char* g_reserve_param[RESERVE_SIZE] = {"application_name",
     "archive_command",
     "audit_directory",
+    "available_zone",
     "comm_control_port",
     "comm_sctp_port",
     "listen_addresses",
@@ -102,6 +103,7 @@ const char* g_reserve_param[RESERVE_SIZE] = {"application_name",
     "replconninfo5",
     "replconninfo6",
     "replconninfo7",
+    "replconninfo8",
     "ssl",
     "ssl_ca_file",
     "ssl_cert_file",
@@ -111,8 +113,6 @@ const char* g_reserve_param[RESERVE_SIZE] = {"application_name",
     "ssl_renegotiation_limit",
     "synchronous_standby_names",
     "local_bind_address",
-    NULL,
-    NULL,
     NULL,
     NULL,
     NULL,
@@ -313,6 +313,8 @@ void WalReceiverMain(void)
     /* Initialize walrcv buffer for walreceive optimization */
     walRcvCtlBlockInit();
 
+    load_server_mode();
+
     /*
      * Mark walreceiver as running in shared memory.
      *
@@ -373,7 +375,7 @@ void WalReceiverMain(void)
     walrcv->walRcvCtlBlock = t_thrd.walreceiver_cxt.walRcvCtlBlock;
 
     t_thrd.walreceiver_cxt.AmWalReceiverForFailover = (walrcv->conn_target == REPCONNTARGET_DUMMYSTANDBY ||
-        walrcv->conn_target == REPCONNTARGET_STANDBY) ? true : false;
+        (walrcv->conn_target == REPCONNTARGET_STANDBY && !t_thrd.xlog_cxt.is_cascade_standby)) ? true : false;
 
     t_thrd.walreceiver_cxt.AmWalReceiverForStandby = (walrcv->conn_target == REPCONNTARGET_STANDBY) ? true : false;
 
@@ -1936,10 +1938,20 @@ int GetSyncPercent(XLogRecPtr startLsn, XLogRecPtr totalLsn, XLogRecPtr hasCompl
     return haveCompletePer;
 }
 
+static bool am_cascade_standby(void)
+{
+    if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE &&
+        t_thrd.postmaster_cxt.HaShmData->is_cascade_standby) {
+        return true;
+    }
+
+    return false;
+}
+
 /*
  * transfer the server mode to string.
  */
-const char* wal_get_role_string(ServerMode mode)
+const char* wal_get_role_string(ServerMode mode, bool getPeerRole)
 {
     switch (mode) {
         case NORMAL_MODE:
@@ -1947,7 +1959,15 @@ const char* wal_get_role_string(ServerMode mode)
         case PRIMARY_MODE:
             return "Primary";
         case STANDBY_MODE:
-            return "Standby";
+        {
+            if (am_cascade_standby() && !getPeerRole) {
+                return "Cascade Standby";
+            } else {
+                return "Standby";
+            }
+        }
+        case CASCADE_STANDBY_MODE:
+            return "Cascade Standby";
         case PENDING_MODE:
             return "Pending";
         case UNKNOWN_MODE:
@@ -2043,7 +2063,7 @@ static void wal_get_ha_rebuild_reason_with_multi(char* buildReason, ServerMode l
     }
 
     if (t_thrd.postmaster_cxt.ReplConnArray[hashmdata->current_repl] != NULL &&
-        walrcv->conn_target == REPCONNTARGET_PRIMARY) {
+        (walrcv->conn_target == REPCONNTARGET_PRIMARY || am_cascade_standby())) {
         if (hashmdata->repl_reason[hashmdata->current_repl] == NONE_REBUILD && isRunning) {
             rcs = snprintf_s(buildReason, MAXFNAMELEN, MAXFNAMELEN - 1, "%s", "Normal");
             securec_check_ss(rcs, "\0", "\0");
@@ -2193,7 +2213,7 @@ Datum pg_stat_get_wal_receiver(PG_FUNCTION_ARGS)
         /* local_role */
         values[1] = CStringGetTextDatum(wal_get_role_string(local_role));
         /* peer_role */
-        values[2] = CStringGetTextDatum(wal_get_role_string(peer_role));
+        values[2] = CStringGetTextDatum(wal_get_role_string(peer_role, true));
         /* peer_state */
         values[3] = CStringGetTextDatum(wal_get_db_state_string(peer_state));
         /* state */

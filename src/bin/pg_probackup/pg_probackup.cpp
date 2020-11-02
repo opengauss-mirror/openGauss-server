@@ -74,6 +74,7 @@ bool		no_sync = false;
 char	   *replication_slot = NULL;
 #endif
 bool		temp_slot = false;
+char	   *password = NULL;
 
 /* backup options */
 bool         backup_logs = false;
@@ -100,6 +101,9 @@ IncrRestoreMode incremental_mode = INCR_NONE;
 
 bool skip_block_validation = false;
 bool skip_external_dirs = false;
+
+bool specify_extdir = false;
+bool specify_tbsdir = false;
 
 /* delete options */
 bool		delete_wal = false;
@@ -190,7 +194,7 @@ static ConfigOption cmd_options[] =
 	{ 'b', 147, "force",			&force,				SOURCE_CMD_STRICT },
 	{ 'b', 148, "compress",			&compress_shortcut,	SOURCE_CMD_STRICT },
 	{ 'B', 'w', "no-password",		&prompt_password,	SOURCE_CMD_STRICT },
-	{ 'b', 'W', "password",			&force_password,	SOURCE_CMD_STRICT },
+	{ 's', 'W', "password",			&password,			SOURCE_CMD_STRICT },
 	{ 's', 149, "instance",			&instance_name,		SOURCE_CMD_STRICT },
 	{ 's', 150, "wal-file-path",	&wal_file_path,		SOURCE_CMD_STRICT },
 	{ 's', 151, "wal-file-name",	&wal_file_name,		SOURCE_CMD_STRICT },
@@ -234,8 +238,7 @@ setMyLocation(void)
 /*
  * Entry point of pg_probackup command.
  */
-int
-main(int argc, char *argv[])
+int main(int argc, char *argv[])
 {
 	char	   *command = NULL,
 			   *command_name;
@@ -381,6 +384,18 @@ main(int argc, char *argv[])
 	optind += 1;
 	/* Parse command line only arguments */
 	config_get_opt(argc, argv, cmd_options, instance_options);
+	
+	if (password) {
+		if (!prompt_password) {
+			elog(ERROR, "You cannot specify --password and --no-password options together");
+		}
+		replace_password(argc, argv, "-W");
+		replace_password(argc, argv, "--password");
+	}
+
+	if (specify_tbsdir && !specify_extdir) {
+		elog(ERROR, "If specify --tablespace-mapping option, you must specify --external-mapping option together");
+	}
 
 	pgut_init();
 

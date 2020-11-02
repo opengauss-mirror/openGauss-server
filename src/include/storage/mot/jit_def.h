@@ -36,13 +36,22 @@
 /** @define The maximum number of registers used in a pseudo-function execution. */
 #define MOT_JIT_MAX_FUNC_REGISTERS 4096
 
+/** @define The maximum number of arguments in a Boolean expression. */
+#define MOT_JIT_MAX_BOOL_EXPR_ARGS 2
+
+/** @define The maximum number of arguments in a function call expression. */
+#define MOT_JIT_MAX_FUNC_EXPR_ARGS 3
+
 namespace JitExec {
 
-// uncomment this to debug lite execution
+// uncomment this to debug JIT execution
 //#define MOT_JIT_DEBUG
 
 // uncomment this to use advanced WHERE clause operators
 //#define MOT_JIT_ADVANCED_WHERE_OP
+
+// uncomment to enable features required for JIT testing
+//#define MOT_JIT_TEST
 
 /** @enum JitCommandType Command types supported by jitted queries. */
 enum JitCommandType : uint8_t {
@@ -66,6 +75,9 @@ enum JitCommandType : uint8_t {
 
     /** @var Unordered range select command. */
     JIT_COMMAND_RANGE_SELECT,
+
+    /** @var Unordered full-scan select command. */
+    JIT_COMMAND_FULL_SELECT,
 
     /** @var Aggregate range select command. */
     JIT_COMMAND_AGGREGATE_RANGE_SELECT,

@@ -432,6 +432,8 @@ class DefaultValue():
     STANDBY_INSTANCE = 1
     # dummy standby
     DUMMY_STANDBY_INSTANCE = 2
+    # cascade standby
+    CASCADE_STANDBY = 3
 
     ###########################
     # parallel number
@@ -926,10 +928,7 @@ class DefaultValue():
             if (str(minor) == '6'):
                 return (True, "3.6")
             else:
-                if (int(patchlevel) < 9):
-                    return (True, "3.6")
-                else:
-                    return (True, "3.7")
+                return (True, "3.7")
         else:
             return (False, "%s.%s.%s" % (str(major), str(minor),
                                          str(patchlevel)))
@@ -1059,12 +1058,20 @@ class DefaultValue():
                 g_file.removeFile(omToolsCffiPath)
                 g_file.removeFile(inspectToolsCffiPath)
                 # copy the correct version
-                newPythonDependCryptoPath = "%s_UCS%d" % (omToolsCffiPath,
+                newPythonDependCryptoPath = "%s_UCS%d_%s" % (omToolsCffiPath,
+                                                          flagNum,version)
+                if os.path.exists(newPythonDependCryptoPath):
+                    g_file.cpFile(newPythonDependCryptoPath, omToolsCffiPath,
+                                  "shell")
+                    g_file.cpFile(newPythonDependCryptoPath, inspectToolsCffiPath,
+                                  "shell")
+                else:
+                    newPythonDependCryptoPath = "%s_UCS%d" % (omToolsCffiPath,
                                                           flagNum)
-                g_file.cpFile(newPythonDependCryptoPath, omToolsCffiPath,
-                              "shell")
-                g_file.cpFile(newPythonDependCryptoPath, inspectToolsCffiPath,
-                              "shell")
+                    g_file.cpFile(newPythonDependCryptoPath, omToolsCffiPath,
+                                  "shell")
+                    g_file.cpFile(newPythonDependCryptoPath, inspectToolsCffiPath,
+                                  "shell")
             except Exception as e:
                 print(ErrorCode.GAUSS_516["GAUSS_51632"] %
                       ("config depend file for paramiko 2.6.0. "
@@ -5264,7 +5271,8 @@ class ClusterInstanceConfig():
         for pi in iter(peerInsts):
             if pi.instanceType == DefaultValue.MASTER_INSTANCE:
                 masterInst = pi
-            elif pi.instanceType == DefaultValue.STANDBY_INSTANCE:
+            elif pi.instanceType == DefaultValue.STANDBY_INSTANCE or \
+                    dbInst.instanceType == DefaultValue.CASCADE_STANDBY:
                 standbyInstIdLst.append(pi.instanceId)
 
         if dbInst.instanceType == DefaultValue.MASTER_INSTANCE:
@@ -5273,7 +5281,8 @@ class ClusterInstanceConfig():
             standbyInstIdLst.sort()
             for si in iter(standbyInstIdLst):
                 instancename += "_%d" % si
-        elif (dbInst.instanceType == DefaultValue.STANDBY_INSTANCE):
+        elif dbInst.instanceType == DefaultValue.STANDBY_INSTANCE or \
+              dbInst.instanceType == DefaultValue.CASCADE_STANDBY:
             instancename = "dn_%d" % masterInst.instanceId
             standbyInstIdLst.append(dbInst.instanceId)
             standbyInstIdLst.sort()
@@ -5330,6 +5339,7 @@ class ClusterInstanceConfig():
                                    (dbInst.port + 4), pj.haIps[i],
                                    pj.haPort, pj.port + 5,
                                    pj.port + 4)
+                    
                 connInfo1.append(chanalInfo)
         else:
             for pj in iter(peerInsts):
@@ -5351,6 +5361,7 @@ class ClusterInstanceConfig():
                                    (dbInst.port + 4), pj.haIps[i],
                                    pj.haPort, pj.port + 5,
                                    (pj.port + 4))
+
                 connInfo1.append(chanalInfo)
 
         return connInfo1, nodename

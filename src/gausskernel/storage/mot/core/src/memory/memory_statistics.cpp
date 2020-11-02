@@ -251,7 +251,7 @@ TypedStatisticsGenerator<MemoryThreadStatistics, MemoryGlobalStatistics> MemoryS
 MemoryStatisticsProvider* MemoryStatisticsProvider::m_provider = nullptr;
 
 MemoryStatisticsProvider::MemoryStatisticsProvider()
-    : StatisticsProvider("Memory", &m_generator, GetGlobalConfiguration().m_enableMemoryStatistics)
+    : StatisticsProvider("Memory", &m_generator, GetGlobalConfiguration().m_enableMemoryStatistics, true)
 {}
 
 MemoryStatisticsProvider::~MemoryStatisticsProvider()

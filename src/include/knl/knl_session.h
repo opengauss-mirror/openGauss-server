@@ -1961,16 +1961,6 @@ typedef struct knl_u_regex_context {
     struct pg_ctype_cache* pg_ctype_cache_list;
 } knl_u_regex_context;
 
-typedef struct knl_u_pgxccache_context {
-    void* grpname_to_grpid;
-    void* pgxc_global_version;
-    void* grpid_to_nodeids;
-    void* relid_to_loc;
-    void* nodename_to_id;
-    void* relid_version;
-    void* relid_to_groupid;
-} knl_u_pgxccache_context;
-
 namespace MOT {
   class SessionContext;
   class TxnManager;
@@ -2043,9 +2033,36 @@ typedef struct knl_u_ext_fdw_context {
     pg_on_exit_callback fdwExitFunc;    /* Exit callback, will be called when session exit */
 } knl_u_ext_fdw_context;
 
+struct ParallelAppendState;
+typedef struct ParallelAppendState ParallelAppendState;
+
 /* Info need to pass from leader to worker */
 struct ParallelHeapScanDescData;
 typedef uint64 XLogRecPtr;
+typedef struct ParallelQueryInfo {
+    struct SharedExecutorInstrumentation *instrumentation;
+    BufferUsage *bufUsage;
+    char *tupleQueue;
+    char *pstmt_space;
+    char *param_space;
+    Size param_len;
+    int64 tuples_needed; /* tuple bound, see ExecSetTupleBound */
+    int eflags;
+    int pscan_num;
+    ParallelHeapScanDescData **pscan;
+    int pappend_num;
+    ParallelAppendState **pappend;
+} ParallelQueryInfo;
+
+struct BTShared;
+struct SharedSort;
+typedef struct ParallelBtreeInfo {
+    char *queryText;
+    BTShared *btShared;
+    SharedSort *sharedSort;
+    SharedSort *sharedSort2;
+} ParallelBtreeInfo;
+
 typedef struct ParallelInfoContext {
     Oid database_id;
     Oid authenticated_user_id;
@@ -2060,14 +2077,7 @@ typedef struct ParallelInfoContext {
     BackendId parallel_master_backend_id;
     TimestampTz xact_ts;
     TimestampTz stmt_ts;
-    char *pstmt_space;
-    char *param_space;
-    Size param_len;
-    int pscan_num;
-    ParallelHeapScanDescData **pscan;
     int usedComboCids;
-    int sizeComboCids;
-    HTAB *comboHash;
     struct ComboCidKeyData *comboCids;
     char *tsnapspace;
     Size tsnapspace_len;
@@ -2080,19 +2090,31 @@ typedef struct ParallelInfoContext {
     bool xactDeferrable;
     TransactionId topTransactionId;
     TransactionId currentTransactionId;
+    TransactionId RecentGlobalXmin;
+    TransactionId TransactionXmin;
+    TransactionId RecentXmin;
+    /* CurrentSnapshot */
+    TransactionId xmin;
+    TransactionId xmax;
+    CommandId curcid;
+    uint32 timeline;
+    CommitSeqNo snapshotcsn;
     CommandId currentCommandId;
     int nParallelCurrentXids;
     TransactionId *ParallelCurrentXids;
     char *library_name;
     char *function_name;
-    BufferUsage *bufUsage;
-    char *tupleQueue;
-    struct SharedExecutorInstrumentation *instrumentation;
     char *namespace_search_path;
 #ifdef __USE_NUMA
     int numaNode;
     cpu_set_t *cpuset;
 #endif
+
+    union {
+        ParallelQueryInfo queryInfo; /* parameters for parallel query only */
+        ParallelBtreeInfo btreeInfo; /* parameters for parallel create index(btree) only */
+    };
+
     /* Mutex protects remaining fields. */
     slock_t mutex;
     /* Maximum XactLastRecEnd of any worker. */
@@ -2101,8 +2123,9 @@ typedef struct ParallelInfoContext {
 
 typedef struct knl_u_parallel_context {
     ParallelInfoContext *pwCtx;
-    MemoryContext memCtx;
-    bool used;
+    MemoryContext memCtx; /* memory context used to malloc memory */
+    slist_head on_detach; /* On-detach callbacks. */
+    bool used; /* used or not */
 } knl_u_parallel_context;
 
 enum knl_session_status {
@@ -2187,7 +2210,6 @@ typedef struct knl_session_context {
     knl_u_typecache_context tycache_cxt;
     knl_u_upgrade_context upg_cxt;
     knl_u_utils_context utils_cxt;
-    knl_u_pgxccache_context pgxccache_cxt;
     knl_u_mot_context mot_cxt;
 
     /* instrumentation */

@@ -48,7 +48,7 @@ class Row;
 class TxnManager;
 
 /** @var Transaction State Machine size. */
-constexpr uint8_t TSM_SIZE = 5;
+constexpr uint8_t TSM_SIZE = 6;
 /** @var default access size   */
 constexpr uint32_t DEFAULT_ACCESS_SIZE = 500;
 

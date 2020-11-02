@@ -49,7 +49,7 @@ typedef struct ParallelWorkerContext {
 #define IsParallelWorker() (t_thrd.bgworker_cxt.ParallelWorkerNumber >= 0)
 
 extern ParallelContext *CreateParallelContext(const char *library_name, const char *function_name, int nworkers);
-extern void InitializeParallelDSM(ParallelContext *pcxt);
+extern void InitializeParallelDSM(ParallelContext *pcxt, const void *snap);
 extern void ReinitializeParallelDSM(ParallelContext *pcxt);
 extern void LaunchParallelWorkers(ParallelContext *pcxt);
 extern void WaitForParallelWorkersToAttach(ParallelContext *pcxt);

@@ -70,14 +70,14 @@ bool OccTransactionManager::QuickVersionCheck(const Access* access)
 bool OccTransactionManager::QuickHeaderValidation(const Access* access)
 {
     if (access->m_type != INS) {
-        // For WR/DEL lets verify CSN
+        // For WR/DEL/RD_FOR_UPDATE lets verify CSN
         return QuickVersionCheck(access);
     } else {
         // Lets verify the inserts
         // For upgrade we verify  the row
         // csn has not changed!
         Sentinel* sent = access->m_origSentinel;
-        if (access->m_params.IsUpgradeInsert()) {
+        if (access->m_params.IsUpgradeInsert() and access->m_params.IsDummyDeletedRow() == false) {
             if (sent->GetData()->GetCommitSequenceNumber() != access->m_tid) {
                 return false;
             }
@@ -227,6 +227,7 @@ RC OccTransactionManager::ValidateOcc(TxnManager* txMan)
 {
     uint32_t numSentinelLock = 0;
     m_rowsLocked = false;
+    int isolationLevel = txMan->GetTxnIsoLevel();
     TxnAccess* tx = txMan->m_accessMgr.Get();
     RC rc = RC_OK;
     const uint32_t rowCount = tx->m_rowCnt;
@@ -252,6 +253,7 @@ RC OccTransactionManager::ValidateOcc(TxnManager* txMan)
             m_rowsSetSize++;
         }
         switch (ac->m_type) {
+            case RD_FOR_UPDATE:
             case WR:
                 m_writeSetSize++;
                 break;
@@ -264,7 +266,11 @@ RC OccTransactionManager::ValidateOcc(TxnManager* txMan)
                 m_writeSetSize++;
                 break;
             case RD:
-                readSetSize++;
+                if (isolationLevel > READ_COMMITED) {
+                    readSetSize++;
+                } else {
+                    continue;
+                }
                 break;
             default:
                 break;
@@ -373,7 +379,9 @@ bool OccTransactionManager::WriteChanges(TxnManager* txMan)
                     access->m_origSentinel->SetNextPtr(access->m_auxRow->GetPrimarySentinel());
                 }
                 // upgrade should not change the reference count!
-                access->m_origSentinel->SetUpgradeCounter();
+                if (access->m_origSentinel->IsCommited()) {
+                    access->m_origSentinel->SetUpgradeCounter();
+                }
             }
         }
     }
@@ -402,6 +410,8 @@ bool OccTransactionManager::WriteChanges(TxnManager* txMan)
             access->m_origSentinel->UnSetDirty();
         }
     }
+
+    CleanRowsFromIndexes(txMan);
 
     if (cfg.m_enableCheckpoint) {
         GetCheckpointManager()->CommitTransaction(txMan, m_rowsSetSize);

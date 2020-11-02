@@ -4266,6 +4266,12 @@ const char* pgstat_get_wait_io(WaitEventIO w)
         case WAIT_EVENT_WAL_WRITE:
             event_name = "WALWrite";
             break;
+        case WAIT_EVENT_WAL_BUFFER_FULL:
+            event_name = "WALBufferFull";
+            break;
+        case WAIT_EVENT_WAL_BUFFER_ACCESS:
+            event_name = "WALBufferAccess";
+            break;
         case WAIT_EVENT_DW_READ:
             event_name = "DoubleWriteFileRead";
             break;
@@ -7396,41 +7402,8 @@ void getThrdID(char* thrdid, pg_time_t startTime, ThreadId Threadid)
     securec_check_ss(rc, "\0", "\0");
 }
 
-static void recursiveThreadMemoryContext(volatile PGPROC* proc, const MemoryContext context,
-                                         ThreadMemoryDetailPad* data, int grpcnt, bool isShared);
-static void calculateThreadMemoryContextStats(
-    volatile PGPROC* proc, const MemoryContext context, ThreadMemoryDetailPad* data, int grpcnt);
-static void createThreadTempSmallContextGroup(volatile PGPROC* proc, ThreadMemoryDetailPad* data);
-
-/*
- * @@GaussDB@@
- * Target       : pv_thread_memory_detail view
- * Brief        :
- * Description  :
- * Notes        :
- * Author       :
- */
-ThreadMemoryDetail* getThreadMemoryDetail(uint32* num)
-{
-    ThreadMemoryDetailPad* data = NULL;
-    ThreadMemoryDetail* returnDetailArray = NULL;
-
-    data = (ThreadMemoryDetailPad*)palloc0(sizeof(ThreadMemoryDetailPad));
-    *num = 0;
-
-    /* collect all the Memory Context status,put in data */
-    getThreadMemoryContextDetail(data);
-
-    if (0 < data->nelements) {
-        *num = data->nelements;
-        returnDetailArray = data->threadMemoryDetail;
-    }
-
-    return returnDetailArray;
-}
-
 MotSessionMemoryDetail* getMotSessionMemoryDetail(uint32* num)
-{  	
+{
     MotSessionMemoryDetail* returnDetailArray = NULL;
     ForeignDataWrapper* fdw = NULL;
     FdwRoutine* fdwroutine = NULL;
@@ -7462,6 +7435,39 @@ MotMemoryDetail* getMotMemoryDetail(uint32* num, bool isGlobal)
         if (fdwroutine != NULL) {
             returnDetailArray = fdwroutine->GetForeignMemSize(num, isGlobal);
         }
+    }
+
+    return returnDetailArray;
+}
+
+static void recursiveThreadMemoryContext(volatile PGPROC* proc, const MemoryContext context,
+                                         ThreadMemoryDetailPad* data, int grpcnt, bool isShared);
+static void calculateThreadMemoryContextStats(
+    volatile PGPROC* proc, const MemoryContext context, ThreadMemoryDetailPad* data, int grpcnt);
+static void createThreadTempSmallContextGroup(volatile PGPROC* proc, ThreadMemoryDetailPad* data);
+
+/*
+ * @@GaussDB@@
+ * Target       : pv_thread_memory_detail view
+ * Brief        :
+ * Description  :
+ * Notes        :
+ * Author       :
+ */
+ThreadMemoryDetail* getThreadMemoryDetail(uint32* num)
+{
+    ThreadMemoryDetailPad* data = NULL;
+    ThreadMemoryDetail* returnDetailArray = NULL;
+
+    data = (ThreadMemoryDetailPad*)palloc0(sizeof(ThreadMemoryDetailPad));
+    *num = 0;
+
+    /* collect all the Memory Context status,put in data */
+    getThreadMemoryContextDetail(data);
+
+    if (0 < data->nelements) {
+        *num = data->nelements;
+        returnDetailArray = data->threadMemoryDetail;
     }
 
     return returnDetailArray;

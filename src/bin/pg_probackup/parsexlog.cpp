@@ -459,13 +459,6 @@ validate_wal(pgBackup *backup, const char *archivedir,
 	}
 
 	/*
-	 * If recovery target is provided, ensure that archive files exist in
-	 * archive directory.
-	 */
-	if (dir_is_empty(archivedir, FIO_LOCAL_HOST))
-		elog(ERROR, "WAL archive is empty. You cannot restore backup to a recovery target without WAL archive.");
-
-	/*
 	 * Check if we have in archive all files needed to restore backup
 	 * up to the given recovery target.
 	 * In any case we cannot restore to the point before stop_lsn.

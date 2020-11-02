@@ -49,7 +49,7 @@
 #include "optimizer/restrictinfo.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
-
+#include "utils/date.h"
 #include "utils/syscache.h"
 #include "utils/partitionkey.h"
 #include "catalog/heap.h"
@@ -84,7 +84,7 @@
 #include "ext_config_loader.h"
 #include "utilities.h"
 
-// allow MM Engine logging facilities
+// allow MOT Engine logging facilities
 DECLARE_LOGGER(ExternalWrapper, FDW);
 
 /*
@@ -335,7 +335,7 @@ void MOTProcessRecoveredTransaction(uint64_t txid, bool isCommit)
 
     if (MOT::MOTEngine::GetInstance()->IsInProcessTx(txid)) {
         elog(LOG, "MOTProcessRecoveredTransaction: %lu - %s", txid, isCommit ? "commit" : "abort");
-        MOT::TxnManager* mgr = GetSafeTxn();
+        MOT::TxnManager* mgr = GetSafeTxn(__FUNCTION__);
         uint64_t inTxId = MOT::MOTEngine::GetInstance()->PerformInProcessTx(txid, isCommit);
         if (inTxId == InvalidTransactionId) {
             ereport(ERROR,
@@ -392,7 +392,15 @@ Datum mot_fdw_handler(PG_FUNCTION_ARGS)
         u_sess->mot_cxt.callbacks_set = true;
     }
 
-    MOTAdaptor::InitTxnManager();
+    PG_TRY();
+    {
+        MOTAdaptor::InitTxnManager(__FUNCTION__);
+    }
+    PG_CATCH();
+    {
+        elog(LOG, "Failed to init MOT transaction manager in FDW initializer");
+    }
+    PG_END_TRY();
     PG_RETURN_POINTER(fdwroutine);
 }
 
@@ -483,7 +491,7 @@ static void MOTGetForeignRelSize(PlannerInfo* root, RelOptInfo* baserel, Oid for
 {
     MOTFdwStateSt* planstate = (MOTFdwStateSt*)palloc0(sizeof(MOTFdwStateSt));
     ForeignTable* ftable = GetForeignTable(foreigntableid);
-    MOT::TxnManager* currTxn = GetSafeTxn(/*GetCurrentTransactionId()*/);
+    MOT::TxnManager* currTxn = GetSafeTxn(__FUNCTION__);
     Bitmapset* attrs = nullptr;
     ListCell* lc = nullptr;
     bool needWholeRow = false;
@@ -696,12 +704,14 @@ static void MOTGetForeignPaths(PlannerInfo* root, RelOptInfo* baserel, Oid forei
     set_cheapest(baserel);
 
     if (!IS_PGXC_COORDINATOR && list_length(baserel->cheapest_parameterized_paths) > 0) {
-        bestPath = (Path*)linitial(baserel->cheapest_parameterized_paths);
-        if (IsA(bestPath, IndexPath) && bestPath->param_info) {
-            IndexPath* ip = (IndexPath*)bestPath;
-            bestClause = ip->indexclauses;
+        foreach (lc, baserel->cheapest_parameterized_paths) {
+            bestPath = (Path*)lfirst(lc);
+            if (IsA(bestPath, IndexPath) && bestPath->param_info) {
+                IndexPath* ip = (IndexPath*)bestPath;
+                bestClause = ip->indexclauses;
+                break;
+            }
         }
-
         usablePathkeys = nullptr;
     }
 
@@ -925,7 +935,7 @@ static void MOTBeginForeignScan(ForeignScanState* node, int eflags)
     festate = InitializeFdwState(fscan->fdw_private, &fscan->fdw_exprs, RelationGetRelid(node->ss.ss_currentRelation));
     MOTAdaptor::GetCmdOper(festate);
     festate->m_txnId = GetCurrentTransactionIdIfAny();
-    festate->m_currTxn = GetSafeTxn(/*festate->txnId*/);
+    festate->m_currTxn = GetSafeTxn(__FUNCTION__);
     festate->m_currTxn->IncStmtCount();
     festate->m_currTxn->m_queryState[(uint64_t)festate] = (uint64_t)festate;
     festate->m_table = festate->m_currTxn->GetTableByExternalId(RelationGetRelid(node->ss.ss_currentRelation));
@@ -956,7 +966,7 @@ static void MOTBeginForeignModify(
         festate = InitializeFdwState(fdwPrivate, nullptr, RelationGetRelid(resultRelInfo->ri_RelationDesc));
         festate->m_allocInScan = false;
         festate->m_txnId = GetCurrentTransactionIdIfAny();
-        festate->m_currTxn = GetSafeTxn(/*festate->txnId*/);
+        festate->m_currTxn = GetSafeTxn(__FUNCTION__);
         festate->m_currTxn->m_queryState[(uint64_t)festate] = (uint64_t)festate;
         festate->m_table = festate->m_currTxn->GetTableByExternalId(RelationGetRelid(resultRelInfo->ri_RelationDesc));
         resultRelInfo->ri_FdwState = festate;
@@ -1210,7 +1220,7 @@ static int MOTAcquireSampleRowsFunc(Relation relation, int elevel, HeapTuple* ro
     double samplerows = 0;                              /* # of rows fetched */
     double rowstoskip = -1;                             /* # of rows to skip before next sample */
     double rstate = anl_init_selection_state(targrows); /* random state */
-    MOT::TxnManager* currTxn = GetSafeTxn(/*GetCurrentTransactionId()*/);
+    MOT::TxnManager* currTxn = GetSafeTxn(__FUNCTION__);
     MOT::Table* table = currTxn->GetTableByExternalId(RelationGetRelid(relation));
     if (table == nullptr) {
         abortParentTransactionParamsNoDetail(
@@ -1342,7 +1352,7 @@ List* MOTPlanForeignModify(PlannerInfo* root, ModifyTable* plan, ::Index resultR
     TupleDesc desc = RelationGetDescr(rel);
     uint8_t attrsModify[BITMAP_GETLEN(desc->natts)];
     uint8_t* ptrAttrsModify = attrsModify;
-    MOT::TxnManager* currTxn = GetSafeTxn(/*GetCurrentTransactionId()*/);
+    MOT::TxnManager* currTxn = GetSafeTxn(__FUNCTION__);
     MOT::Table* table = currTxn->GetTableByExternalId(RelationGetRelid(rel));
 
     if ((int)resultRelation < root->simple_rel_array_size && root->simple_rel_array[resultRelation] != nullptr) {
@@ -1423,7 +1433,7 @@ static TupleTableSlot* MOTExecForeignInsert(
     if (fdwState == nullptr) {
         fdwState = (MOTFdwStateSt*)palloc0(sizeof(MOTFdwStateSt));
         fdwState->m_txnId = GetCurrentTransactionIdIfAny();
-        fdwState->m_currTxn = GetSafeTxn(/*fdwState->txnId*/);
+        fdwState->m_currTxn = GetSafeTxn(__FUNCTION__);
         fdwState->m_table = fdwState->m_currTxn->GetTableByExternalId(RelationGetRelid(resultRelInfo->ri_RelationDesc));
         if (fdwState->m_table == nullptr) {
             pfree(fdwState);
@@ -1498,6 +1508,10 @@ static TupleTableSlot* MOTExecForeignUpdate(
         return nullptr;
     }
 
+    // This case handle multiple updates of the same row in one query
+    if (fdwState->m_currTxn->IsUpdatedInCurrStmt()) {
+        return nullptr;
+    }
     if ((rc = MOTAdaptor::UpdateRow(fdwState, planSlot, currRow)) == MOT::RC_OK) {
         if (resultRelInfo->ri_projectReturning) {
             return planSlot;
@@ -1542,6 +1556,10 @@ static TupleTableSlot* MOTExecForeignDelete(
     }
 
     if (currRow == nullptr) {
+        // This case handle multiple updates of the same row in one query
+        if (fdwState->m_currTxn->IsUpdatedInCurrStmt()) {
+            return nullptr;
+        }
         elog(ERROR, "MOTExecForeignDelete failed to fetch row");
         CleanQueryStatesOnError(fdwState->m_currTxn);
         report_pg_error(((rc == MOT::RC_OK) ? MOT::RC_ERROR : rc), fdwState->m_currTxn);
@@ -1583,7 +1601,27 @@ static void MOTEndForeignModify(EState* estate, ResultRelInfo* resultRelInfo)
 static void MOTXactCallback(XactEvent event, void* arg)
 {
     int rc = MOT::RC_OK;
-    MOT::TxnManager* mgr = GetSafeTxn(/*tid*/);
+    MOT::TxnManager* mgr = nullptr;
+
+    PG_TRY();
+    {
+        mgr = GetSafeTxn(__FUNCTION__);
+    }
+    PG_CATCH();
+    {
+        switch (event) {
+            case XACT_EVENT_ABORT:
+            case XACT_EVENT_ROLLBACK_PREPARED:
+            case XACT_EVENT_PREROLLBACK_CLEANUP:
+                elog(LOG, "Failed to get MOT transaction manager during abort.");
+                return;
+            default:
+                PG_RE_THROW();
+                return;
+        }
+    }
+    PG_END_TRY();
+
     ::TransactionId tid = GetCurrentTransactionIdIfAny();
     MOT::TxnState txnState = mgr->GetTxnState();
 
@@ -1621,7 +1659,7 @@ static void MOTXactCallback(XactEvent event, void* arg)
             }
             PG_CATCH();
             {
-                elog(FATAL, "Error during MM commit prepared, could not write to WAL. Aborting transaction");
+                elog(FATAL, "Error during MOT commit prepared, could not write to WAL. Aborting transaction");
                 return;
             }
             PG_END_TRY();
@@ -1896,7 +1934,17 @@ static void MOTVacuumForeignTable(VacuumStmt* stmt, Relation rel)
         return;
     }
     ::TransactionId tid = GetCurrentTransactionId();
-    MOTAdaptor::VacuumTable(rel, tid);
+
+    PG_TRY();
+    {
+        MOTAdaptor::VacuumTable(rel, tid);
+    }
+    PG_CATCH();
+    {
+        elog(LOG, "Vacuum of table %s failed", NameStr(rel->rd_rel->relname));
+        return;
+    }
+    PG_END_TRY();
 }
 
 static uint64_t MOTGetForeignRelationMemSize(Oid reloid, Oid ixoid)
@@ -1945,7 +1993,7 @@ static void InitMOTHandler()
                 elog(WARNING, "MOT Checkpoint is disabled");
             }
 
-            RegisterRedoCommitCallback(RedoTransactionCommit);
+            RegisterRedoCommitCallback(RedoTransactionCommit, NULL);
         }
 
         // Register CLOG callback to our recovery manager.
@@ -2193,6 +2241,20 @@ inline bool IsNotEqualOper(OpExpr* op)
     }
 }
 
+inline void RevertKeyOperation(KEY_OPER& oper)
+{
+    if (oper == KEY_OPER::READ_KEY_BEFORE) {
+        oper = KEY_OPER::READ_KEY_AFTER;
+    } else if (oper == KEY_OPER::READ_KEY_OR_PREV) {
+        oper = KEY_OPER::READ_KEY_OR_NEXT;
+    } else if (oper == KEY_OPER::READ_KEY_AFTER) {
+        oper = KEY_OPER::READ_KEY_BEFORE;
+    } else if (oper == KEY_OPER::READ_KEY_OR_NEXT) {
+        oper = KEY_OPER::READ_KEY_OR_PREV;
+    }
+    return;
+}
+
 inline bool GetKeyOperation(OpExpr* op, KEY_OPER& oper)
 {
     switch (op->opno) {
@@ -2212,7 +2274,14 @@ inline bool GetKeyOperation(OpExpr* op, KEY_OPER& oper)
         case 5513:  // INT1EQ
         case BPCHAREQOID:
         case TEXTEQOID:
-        case 92:  // CHAREQ
+        case 92:    // CHAREQ
+        case 2536:  // timestampVStimestamptz
+        case 2542:  // timestamptzVStimestamp
+        case 2347:  // dateVStimestamp
+        case 2360:  // dateVStimestamptz
+        case 2373:  // timestampVSdate
+        case 2386:  // timestamptzVSdate
+        case TIMESTAMPEQOID:
             oper = KEY_OPER::READ_KEY_EXACT;
             break;
         case FLOAT8LTOID:
@@ -2232,6 +2301,13 @@ inline bool GetKeyOperation(OpExpr* op, KEY_OPER& oper)
         case 1058:  // BPCHARLT
         case 631:   // CHARLT
         case TEXTLTOID:
+        case 2534:  // timestampVStimestamptz
+        case 2540:  // timestamptzVStimestamp
+        case 2345:  // dateVStimestamp
+        case 2358:  // dateVStimestamptz
+        case 2371:  // timestampVSdate
+        case 2384:  // timestamptzVSdate
+        case TIMESTAMPLTOID:
             oper = KEY_OPER::READ_KEY_BEFORE;
             break;
         case FLOAT8LEOID:
@@ -2251,6 +2327,13 @@ inline bool GetKeyOperation(OpExpr* op, KEY_OPER& oper)
         case 1059:  // BPCHARLE
         case 632:   // CHARLE
         case 665:   // TEXTLE
+        case 2535:  // timestampVStimestamptz
+        case 2541:  // timestamptzVStimestamp
+        case 2346:  // dateVStimestamp
+        case 2359:  // dateVStimestamptz
+        case 2372:  // timestampVSdate
+        case 2385:  // timestamptzVSdate
+        case TIMESTAMPLEOID:
             oper = KEY_OPER::READ_KEY_OR_PREV;
             break;
         case FLOAT8GTOID:
@@ -2270,6 +2353,13 @@ inline bool GetKeyOperation(OpExpr* op, KEY_OPER& oper)
         case 1060:       // BPCHARGT
         case 633:        // CHARGT
         case TEXTGTOID:  // TEXTGT
+        case 2538:       // timestampVStimestamptz
+        case 2544:       // timestamptzVStimestamp
+        case 2349:       // dateVStimestamp
+        case 2362:       // dateVStimestamptz
+        case 2375:       // timestampVSdate
+        case 2388:       // timestamptzVSdate
+        case TIMESTAMPGTOID:
             oper = KEY_OPER::READ_KEY_AFTER;
             break;
         case FLOAT8GEOID:
@@ -2289,6 +2379,13 @@ inline bool GetKeyOperation(OpExpr* op, KEY_OPER& oper)
         case 1061:  // BPCHARGE
         case 634:   // CHARGE
         case 667:   // TEXTGE
+        case 2537:  // timestampVStimestamptz
+        case 2543:  // timestamptzVStimestamp
+        case 2348:  // dateVStimestamp
+        case 2361:  // dateVStimestamptz
+        case 2374:  // timestampVSdate
+        case 2387:  // timestamptzVSdate
+        case TIMESTAMPGEOID:
             oper = KEY_OPER::READ_KEY_OR_NEXT;
             break;
         case OID_TEXT_LIKE_OP:
@@ -2371,11 +2468,13 @@ bool IsMOTExpr(RelOptInfo* baserel, MOTFdwStateSt* state, MatchIndexArr* marr, E
                         } else {
                             v = (Var*)r;
                             e = l;
+                            RevertKeyOperation(oper);
                         }
                     }
                 } else if (IsA(r, Var)) {
                     v = (Var*)r;
                     e = l;
+                    RevertKeyOperation(oper);
                 } else {
                     isOperatorMOTReady = false;
                     break;
@@ -2422,8 +2521,10 @@ bool IsMOTExpr(RelOptInfo* baserel, MOTFdwStateSt* state, MatchIndexArr* marr, E
         case T_FuncExpr: {
             FuncExpr* func = (FuncExpr*)expr;
 
-            if (func->funcformat == COERCE_IMPLICIT_CAST) {
+            if (func->funcformat == COERCE_IMPLICIT_CAST || func->funcformat == COERCE_EXPLICIT_CAST) {
                 isOperatorMOTReady = IsMOTExpr(baserel, state, marr, (Expr*)linitial(func->args), result, setLocal);
+            } else if (list_length(func->args) == 0) {
+                isOperatorMOTReady = true;
             }
 
             break;
@@ -2439,4 +2540,37 @@ bool IsMOTExpr(RelOptInfo* baserel, MOTFdwStateSt* state, MatchIndexArr* marr, E
     }
 
     return isOperatorMOTReady;
+}
+
+uint16_t MOTTimestampToStr(uintptr_t src, char* destBuf, size_t len)
+{
+    char* tmp = nullptr;
+    Timestamp timestamp = DatumGetTimestamp(src);
+    tmp = DatumGetCString(DirectFunctionCall1(timestamp_out, timestamp));
+    errno_t erc = snprintf_s(destBuf, len, len - 1, tmp);
+    pfree_ext(tmp);
+    securec_check_ss(erc, "\0", "\0");
+    return erc;
+}
+
+uint16_t MOTTimestampTzToStr(uintptr_t src, char* destBuf, size_t len)
+{
+    char* tmp = nullptr;
+    TimestampTz timestamp = DatumGetTimestampTz(src);
+    tmp = DatumGetCString(DirectFunctionCall1(timestamptz_out, timestamp));
+    errno_t erc = snprintf_s(destBuf, len, len - 1, tmp);
+    pfree_ext(tmp);
+    securec_check_ss(erc, "\0", "\0");
+    return erc;
+}
+
+uint16_t MOTDateToStr(uintptr_t src, char* destBuf, size_t len)
+{
+    char* tmp = nullptr;
+    DateADT date = DatumGetDateADT(src);
+    tmp = DatumGetCString(DirectFunctionCall1(date_out, date));
+    errno_t erc = snprintf_s(destBuf, len, len - 1, tmp);
+    pfree_ext(tmp);
+    securec_check_ss(erc, "\0", "\0");
+    return erc;
 }

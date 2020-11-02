@@ -55,14 +55,14 @@ static double numericToDouble(Datum numeric_value)
 /** @brief Allocates and initializes a distinct set of integers. */
 static void* prepareDistinctIntSet()
 {
-    void* buf = palloc(sizeof(DistinctIntSetType));
+    void* buf = MOT::MemSessionAlloc(sizeof(DistinctIntSetType));
     return new (buf) DistinctIntSetType();
 }
 
 /** @brief Allocates and initializes a distinct set of double-precision values. */
 static void* prepareDistinctDoubleSet()
 {
-    void* buf = palloc(sizeof(DistinctDoubleSetType));
+    void* buf = MOT::MemSessionAlloc(sizeof(DistinctDoubleSetType));
     return new (buf) DistinctDoubleSetType();
 }
 
@@ -93,7 +93,7 @@ static void destroyDistinctIntSet(void* distinct_set)
 {
     DistinctIntSetType* int_set = (DistinctIntSetType*)distinct_set;
     int_set->~DistinctIntSetType();
-    pfree(distinct_set);
+    MOT::MemSessionFree(distinct_set);
 }
 
 /** @brief Destroys and frees a distinct set of double-precision values. */
@@ -101,7 +101,7 @@ static void destroyDistinctDoubleSet(void* distinct_set)
 {
     DistinctDoubleSetType* double_set = (DistinctDoubleSetType*)distinct_set;
     double_set->~DistinctDoubleSetType();
-    pfree(distinct_set);
+    MOT::MemSessionFree(distinct_set);
 }
 
 /*---------------------------  DEBUG Print Helpers ---------------------------*/
@@ -289,6 +289,10 @@ static Oid column_type_to_pg(MOT::MOT_CATALOG_FIELD_TYPES column_type)
 
         case MOT::MOT_TYPE_TIMESTAMP:
             pg_type = TIMESTAMPOID;
+            break;
+
+        case MOT::MOT_TYPE_TIMESTAMPTZ:
+            pg_type = TIMESTAMPTZOID;
             break;
 
         case MOT::MOT_TYPE_INTERVAL:
@@ -748,6 +752,11 @@ MOT::IndexIterator* searchIterator(MOT::Index* index, MOT::Key* key, int forward
     }
 
     return itr;
+}
+
+MOT::IndexIterator* beginIterator(MOT::Index* index)
+{
+    return index->Begin(MOTCurrThreadId);
 }
 
 MOT::IndexIterator* createEndIterator(MOT::Index* index, MOT::Key* key, int forward_scan, int include_bound)

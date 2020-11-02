@@ -141,6 +141,9 @@ public:
      */
     void Normalize();
 
+    /** @brief Queries whether there are valid samples in this statistics container. */
+    bool HasValidSamples() const;
+
     /**
      * @brief Utility method for generating per-thread statistic variable names.
      * @param baseName The name of the statistic variable.

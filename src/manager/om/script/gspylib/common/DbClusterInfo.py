@@ -105,6 +105,8 @@ MASTER_INSTANCE = 0
 STANDBY_INSTANCE = 1
 # dummy standby 
 DUMMY_STANDBY_INSTANCE = 2
+#cascade standby
+CASCADE_STANDBY = 3
 
 ###########################
 # instance number
@@ -890,6 +892,7 @@ class instanceInfo():
         self.localRole = ""
         self.peerInstanceInfos = []
         self.syncNum = -1
+        self.cascadeRole = "off"
 
     def __cmp__(self, target):
         """
@@ -985,6 +988,7 @@ class dbNodeInfo():
         self.azPriority = 1
         self.standbyDnNum = 0
         self.dummyStandbyDnNum = 0
+        self.cascadeRole = "off"
 
     def __cmp__(self, target):
         """
@@ -1226,6 +1230,7 @@ class dbClusterInfo():
 
         # add azName
         self.azName = ""
+        self.cascadeRole = "off"
 
         self.version = 0
         self.installTime = 0
@@ -1781,7 +1786,8 @@ class dbClusterInfo():
                         primaryDbState = dbState
                     else:
                         if roleStatus != "Standby" and \
-                                roleStatus != "Secondary":
+                                roleStatus != "Secondary" and \
+                                roleStatus != "Cascade":
                             clusterState = 'Degraded'
                         if dbState != "Normal":
                             clusterState = 'Degraded'
@@ -1875,6 +1881,8 @@ class dbClusterInfo():
             return "P"
         elif instanceType == STANDBY_INSTANCE:
             return "S"
+        elif instanceType == CASCADE_STANDBY:
+            return "C"
         elif instanceType == DUMMY_STANDBY_INSTANCE:
             return "R"
         else:
@@ -1996,7 +2004,8 @@ class dbClusterInfo():
                         syncInfo.secondPeerRole = columnRes[9].strip()
                 else:
                     if dnInst.localRole != "Standby" and \
-                            dnInst.localRole != "Secondary":
+                            dnInst.localRole != "Secondary" and \
+                            dnInst.localRole != "Cascade Standby":
                         clusterState = "Degraded"
                     if dnInst.state != "Normal":
                         clusterState = "Degraded"
@@ -2137,6 +2146,34 @@ class dbClusterInfo():
                                                       environmentParameterName)
         (status, output) = subprocess.getstatusoutput(cmd)
         if (status != 0):
+            raise Exception(ErrorCode.GAUSS_514["GAUSS_51400"]
+                            % cmd + " Error: \n%s" % output)
+        return output.split("\n")[0]
+    def __getStatusByOM(self, user):
+        """
+        function :Get the environment parameter.
+        !!!!Do not call this function in preinstall.py script.
+        because we determine if we are using env separate version by the
+        value of MPPDB_ENV_SEPARATE_PATH
+        input : String,String
+        output : String
+        """
+        # get mpprc file
+        mpprcFile = os.getenv('MPPDB_ENV_SEPARATE_PATH')
+        if mpprcFile is not None and mpprcFile != "":
+            mpprcFile = mpprcFile.replace("\\", "\\\\").replace('"', '\\"\\"')
+            checkPathVaild(mpprcFile)
+            userProfile = mpprcFile
+        else:
+            userProfile = "~/.bashrc"
+        # build shell command
+        if os.getuid() == 0:
+            cmd = "su - %s -c 'source %s;gs_om -t status --detail|tail -1" % (
+                user, userProfile)
+        else:
+            cmd = "source %s;gs_om -t status --detail|tail -1" % (userProfile)
+        (status, output) = subprocess.getstatusoutput(cmd)
+        if status != 0:
             raise Exception(ErrorCode.GAUSS_514["GAUSS_51400"]
                             % cmd + " Error: \n%s" % output)
         return output.split("\n")[0]
@@ -2477,7 +2514,7 @@ class dbClusterInfo():
             if (dnInst.instanceType == MASTER_INSTANCE):
                 dbNode.dataNum += 1
             elif (dnInst.instanceType in [STANDBY_INSTANCE,
-                                          DUMMY_STANDBY_INSTANCE]):
+                                          DUMMY_STANDBY_INSTANCE, CASCADE_STANDBY]):
                 pass
             else:
                 raise Exception(ErrorCode.GAUSS_512["GAUSS_51204"]
@@ -3634,6 +3671,9 @@ class dbClusterInfo():
         # Get az Priority
         dbNode.azPriority = self.__readNodeIntValue(dbNode.name, "azPriority",
                                                     True, 0)
+        #get cascadeRole
+        dbNode.cascadeRole = self.__readNodeStrValue(dbNode.name, "cascadeRole",
+                                                    True, "off")
         if (dbNode.azPriority < AZPRIORITY_MIN or
                 dbNode.azPriority > AZPRIORITY_MAX):
             raise Exception(ErrorCode.GAUSS_532["GAUSS_53206"] % "azPriority")
@@ -3980,6 +4020,10 @@ class dbClusterInfo():
                                               xlogdir=xlogInfoList[
                                                   nodeLen + 1],
                                               syncNum=syncNumList[i])
+                if dbNode.cascadeRole == "on":
+                    for inst in dbNode.datanodes:
+                        inst.instanceType = CASCADE_STANDBY
+
                 instIndex += 1
 
         for inst in masterNode.datanodes:
@@ -4310,8 +4354,6 @@ class dbClusterInfo():
         input : NA
         output : NA
         """
-        # AZ list
-        FirstAZ = [azName1]
 
         # Get DB standys num
         # The number of standbys for each DB instance must be the same
@@ -4325,17 +4367,12 @@ class dbClusterInfo():
                     elif (peerNum != len(peerInsts)):
                         raise Exception(ErrorCode.GAUSS_532["GAUSS_53200"])
 
-        if peerNum > 4:
+        if peerNum > 8:
             raise Exception(ErrorCode.GAUSS_512["GAUSS_51230"] % \
                             ("database node standbys", "be less than 5")
                             + " Please set it.")
 
-        # Get AZ names in cluster
-        azNames = self.getazNames()
-        azNames.sort()
-        if (azNames not in [FirstAZ]):
-            raise Exception(ErrorCode.GAUSS_532["GAUSS_53202"]
-                            + " Only single AZ is supported now.")
+
 
     def __checkAZNamesWithDNReplication(self):
         """
@@ -6090,6 +6127,43 @@ class dbClusterInfo():
             raise Exception(ErrorCode.GAUSS_502["GAUSS_50205"] % \
                             "dynamic configuration file" +
                             " Error: \n%s" % str(e))
+        simpleDNConfig = self.__getDynamicSimpleDNConfig(user)
+        if os.path.exists(simpleDNConfig):
+            cmd = "rm -f %s" % simpleDNConfig
+            (status, output) = subprocess.getstatusoutput(cmd)
+            if status != 0:
+                raise Exception(ErrorCode.GAUSS_504["GAUSS_50407"] +
+                                " Error: \n%s." % str(output) +
+                                "The cmd is %s" % cmd)
+        tempstatus = self.__getStatusByOM(user).split("|")
+        statusdic = {'Primary': 0, 'Standby': 1, 'Cascade': 3, 'Unknown': 9}
+        try:
+            with open(simpleDNConfig, "w") as fp:
+                for dninfo in tempstatus:
+                    dnstatus = dninfo.split()[-2]
+                    dnname = dninfo.split()[1]
+                    if dnstatus not in statusdic:
+                        fp.write("%s=%d\n" %
+                                 (dnname, statusdic['Unknown']))
+                    else:
+                        fp.write("%s=%d\n" %
+                                 (dnname, statusdic[dnstatus]))
+        except Exception as e:
+            cmd = "rm -f %s" % simpleDNConfig
+            subprocess.getstatusoutput(cmd)
+            raise Exception(ErrorCode.GAUSS_502["GAUSS_50205"] %
+                            "dynamic configuration file"
+                            + " Error: \n%s" % str(e))
+        try:
+            self.__sendDynamicCfgToAllNodes(localHostName,
+                                            simpleDNConfig,
+                                            simpleDNConfig)
+        except Exception as e:
+            cmd = "rm -f %s" % simpleDNConfig
+            sshtool.getSshStatusOutput(cmd, self.getClusterNodeNames())
+            raise Exception(ErrorCode.GAUSS_502["GAUSS_50205"] %
+                            "dynamic configuration file" +
+                            " Error: \n%s" % str(e))
 
     def __packDynamicNodeInfo(self, dbNode, localHostName, sshtool):
         # node id
@@ -6104,6 +6178,8 @@ class dbClusterInfo():
             if dnInst.localRole == "Primary":
                 instanceType = MASTER_INSTANCE
                 primaryNum += 1
+            elif dnInst.localRole == "Cascade Standby":
+                instanceType = CASCADE_STANDBY
             else:
                 instanceType = STANDBY_INSTANCE
             info += struct.pack("I", dnInst.instanceId)
@@ -6150,6 +6226,17 @@ class dbClusterInfo():
         gaussHome = os.path.realpath(gaussHome)
         dynamicConfigFile = "%s/bin/cluster_dynamic_config" % gaussHome
         return dynamicConfigFile
+    def __getDynamicSimpleDNConfig(self, user):
+        gaussHome = self.__getEnvironmentParameterValue("GAUSSHOME", user)
+        if gaussHome == "":
+            raise Exception(ErrorCode.GAUSS_502["GAUSS_50201"] % \
+                            ("installation path of designated user [%s]"
+                             % user))
+        # if under upgrade, and use chose strategy, we may get a wrong path,
+        # so we will use the realpath of gausshome
+        gaussHome = os.path.realpath(gaussHome)
+        dynamicSimpleDNConfigFile = "%s/bin/cluster_dnrole_config" % gaussHome
+        return dynamicSimpleDNConfigFile
 
     def dynamicConfigExists(self, user):
         dynamicConfigFile = self.__getDynamicConfig(user)
@@ -6293,7 +6380,7 @@ class dbClusterInfo():
             if dnInst.instanceType == MASTER_INSTANCE:
                 materDnNum += 1
             elif dnInst.instanceType not in [STANDBY_INSTANCE,
-                                             DUMMY_STANDBY_INSTANCE]:
+                                             DUMMY_STANDBY_INSTANCE, CASCADE_STANDBY]:
                 raise Exception(ErrorCode.GAUSS_512["GAUSS_51204"] %
                                 ("DN", dnInst.instanceType))
             info = fp.read(1024)

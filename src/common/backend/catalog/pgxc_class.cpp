@@ -33,11 +33,6 @@
 #include "utils/syscache.h"
 #include "utils/tqual.h"
 
-#ifdef ENABLE_MULTIPLE_NODES
-extern bool RelidVersion_Create(Oid relid);
-extern void RelidVersion_Bump(Oid relid);
-extern void RelidVersion_DeleteRelid(Oid relid);
-#endif
 
 /*
  * PgxcClassCreate
@@ -168,10 +163,6 @@ void PgxcClassCreate(Oid pcrelid, char pclocatortype, int2* pcattnum, int pchash
 
     CatalogUpdateIndexes(pgxcclassrel, htup);
 
-#ifdef ENABLE_MULTIPLE_NODES
-    RelidVersion_Create(pcrelid);
-#endif
-
     heap_close(pgxcclassrel, RowExclusiveLock);
 }
 
@@ -294,11 +285,6 @@ void PgxcClassAlter(Oid pcrelid, char pclocatortype, int2* pcattnum, int numpcat
     simple_heap_update(rel, &oldtup->t_self, newtup);
     CatalogUpdateIndexes(rel, newtup);
     pfree_ext(nodes_array);
-
-#ifdef ENABLE_MULTIPLE_NODES
-    RelidVersion_Bump(pcrelid);
-#endif
-
     heap_close(rel, RowExclusiveLock);
 }
 
@@ -323,10 +309,6 @@ void RemovePgxcClass(Oid pcrelid)
     simple_heap_delete(relation, &tup->t_self);
 
     ReleaseSysCache(tup);
-
-#ifdef ENABLE_MULTIPLE_NODES
-    RelidVersion_DeleteRelid(pcrelid);
-#endif
 
     heap_close(relation, RowExclusiveLock);
 }

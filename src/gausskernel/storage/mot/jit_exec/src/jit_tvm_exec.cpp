@@ -1699,6 +1699,46 @@ private:
     int m_subQueryIndex;
 };
 
+/** @class BeginIteratorInstruction */
+class BeginIteratorInstruction : public Instruction {
+public:
+    BeginIteratorInstruction(JitRangeScanType rangeScanType, int subQueryIndex)
+        : m_rangeScanType(rangeScanType), m_subQueryIndex(subQueryIndex)
+    {}
+
+    ~BeginIteratorInstruction() final
+    {}
+
+protected:
+    uint64_t ExecImpl(ExecContext* exec_context) final
+    {
+        MOT::IndexIterator* iterator = nullptr;
+        if (m_rangeScanType == JIT_RANGE_SCAN_INNER) {
+            iterator = beginIterator(exec_context->_jit_context->m_innerIndex);
+        } else if (m_rangeScanType == JIT_RANGE_SCAN_MAIN) {
+            iterator = beginIterator(exec_context->_jit_context->m_index);
+        } else if (m_rangeScanType == JIT_RANGE_SCAN_SUB_QUERY) {
+            iterator = beginIterator(exec_context->_jit_context->m_subQueryData[m_subQueryIndex].m_index);
+        }
+        return (uint64_t)iterator;
+    }
+
+    void DumpImpl() final
+    {
+        if (m_rangeScanType == JIT_RANGE_SCAN_INNER) {
+            (void)fprintf(stderr, "beginIterator(%%inner_index)");
+        } else if (m_rangeScanType == JIT_RANGE_SCAN_MAIN) {
+            (void)fprintf(stderr, "beginIterator(%%index)");
+        } else if (m_rangeScanType == JIT_RANGE_SCAN_SUB_QUERY) {
+            (void)fprintf(stderr, "beginIterator(%%sub_query[%d].index)", m_subQueryIndex);
+        }
+    }
+
+private:
+    JitRangeScanType m_rangeScanType;
+    int m_subQueryIndex;
+};
+
 /** @class CreateEndIteratorInstruction */
 class CreateEndIteratorInstruction : public Instruction {
 public:
@@ -3029,6 +3069,11 @@ static Instruction* AddSearchIterator(JitTvmCodeGenContext* ctx, JitIndexScanDir
             SearchIteratorInstruction(index_scan_direction, range_bound_mode, range_scan_type, subQueryIndex));
 }
 
+static Instruction* AddBeginIterator(JitTvmCodeGenContext* ctx, JitRangeScanType rangeScanType, int subQueryIndex)
+{
+    return ctx->_builder->addInstruction(new (std::nothrow) BeginIteratorInstruction(rangeScanType, subQueryIndex));
+}
+
 static Instruction* AddCreateEndIterator(JitTvmCodeGenContext* ctx, JitIndexScanDirection index_scan_direction,
     JitRangeBoundMode range_bound_mode, JitRangeScanType range_scan_type, int subQueryIndex = -1)
 {
@@ -3589,6 +3634,24 @@ static Instruction* buildSearchIterator(JitTvmCodeGenContext* ctx, JitIndexScanD
     return itr;
 }
 
+/** @brief Adds code to search for an iterator. */
+static Instruction* buildBeginIterator(
+    JitTvmCodeGenContext* ctx, JitRangeScanType rangeScanType, int subQueryIndex = -1)
+{
+    // search the row
+    IssueDebugLog("Getting begin iterator for full-scan");
+    Instruction* itr = AddBeginIterator(ctx, rangeScanType, subQueryIndex);
+
+    JIT_IF_BEGIN(check_itr_found)
+    JIT_IF_EVAL_NOT(itr)
+    IssueDebugLog("Begin iterator not found");
+    JIT_RETURN_CONST(MOT::RC_LOCAL_ROW_NOT_FOUND);
+    JIT_IF_END()
+
+    IssueDebugLog("Range start found");
+    return itr;
+}
+
 static Instruction* buildGetRowFromIterator(JitTvmCodeGenContext* ctx, BasicBlock* endLoopBlock,
     MOT::AccessType access_mode, JitIndexScanDirection index_scan_direction, JitTvmRuntimeCursor* cursor,
     JitRangeScanType range_scan_type, int subQueryIndex = -1)
@@ -3928,9 +3991,8 @@ static Expression* ProcessVarExpr(JitTvmCodeGenContext* ctx, Instruction* row, J
 static Expression* ProcessOpExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitOpExpr* expr, int* max_arg)
 {
     Expression* result = nullptr;
-    const int exp_args_num = 3;
 
-    Expression* args[exp_args_num] = {nullptr, nullptr, nullptr};
+    Expression* args[MOT_JIT_MAX_FUNC_EXPR_ARGS] = {nullptr, nullptr, nullptr};
 
     for (int i = 0; i < expr->_arg_count; ++i) {
         args[i] = ProcessExpr(ctx, row, expr->_args[i], max_arg);
@@ -3958,9 +4020,8 @@ static Expression* ProcessOpExpr(JitTvmCodeGenContext* ctx, Instruction* row, Ji
 static Expression* ProcessFuncExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitFuncExpr* expr, int* max_arg)
 {
     Expression* result = nullptr;
-    const int exp_args_num = 3;
 
-    Expression* args[exp_args_num] = {nullptr, nullptr, nullptr};
+    Expression* args[MOT_JIT_MAX_FUNC_EXPR_ARGS] = {nullptr, nullptr, nullptr};
 
     for (int i = 0; i < expr->_arg_count; ++i) {
         args[i] = ProcessExpr(ctx, row, expr->_args[i], max_arg);
@@ -4014,9 +4075,8 @@ static Expression* ProcessFuncExpr(JitTvmCodeGenContext* ctx, Instruction* row, 
 static Expression* ProcessFilterExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitFilter* filter, int* max_arg)
 {
     Expression* result = nullptr;
-    const int exp_args_num = 3;
 
-    Expression* args[exp_args_num] = {nullptr, nullptr, nullptr};
+    Expression* args[MOT_JIT_MAX_FUNC_EXPR_ARGS] = {nullptr, nullptr, nullptr};
 
     args[0] = ProcessExpr(ctx, row, filter->_lhs_operand, max_arg);
     if (!args[0]) {
@@ -4055,6 +4115,42 @@ static Expression* ProcessSubLinkExpr(JitTvmCodeGenContext* ctx, Instruction* ro
     return AddSelectSubQueryResult(ctx, expr->_sub_query_index);
 }
 
+static Expression* ProcessBoolExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitBoolExpr* expr, int* maxArg)
+{
+    Expression* result = nullptr;
+
+    Expression* args[MOT_JIT_MAX_BOOL_EXPR_ARGS] = {nullptr, nullptr};
+    int argNum = 0;
+
+    for (int i = 0; i < expr->_arg_count; ++i) {
+        args[i] = ProcessExpr(ctx, row, expr->_args[i], maxArg);
+        if (args[i] == nullptr) {
+            MOT_LOG_TRACE("Failed to process boolean sub-expression %d", argNum);
+            return nullptr;
+        }
+    }
+
+    switch (expr->_bool_expr_type) {
+        case NOT_EXPR:
+            result = new (std::nothrow) NotExpression(args[0]);
+            break;
+
+        case AND_EXPR:
+            result = new (std::nothrow) AndExpression(args[0], args[1]);
+            break;
+
+        case OR_EXPR:
+            result = new (std::nothrow) OrExpression(args[0], args[1]);
+            break;
+
+        default:
+            MOT_LOG_TRACE("Unsupported boolean expression type: %d", (int)expr->_bool_expr_type);
+            break;
+    }
+
+    return result;
+}
+
 static Expression* ProcessExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitExpr* expr, int* max_arg)
 {
     Expression* result = nullptr;
@@ -4071,6 +4167,8 @@ static Expression* ProcessExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitE
         result = ProcessFuncExpr(ctx, row, (JitFuncExpr*)expr, max_arg);
     } else if (expr->_expr_type == JIT_EXPR_TYPE_SUBLINK) {
         result = ProcessSubLinkExpr(ctx, row, (JitSubLinkExpr*)expr, max_arg);
+    } else if (expr->_expr_type == JIT_EXPR_TYPE_BOOL) {
+        result = ProcessBoolExpr(ctx, row, (JitBoolExpr*)expr, max_arg);
     } else {
         MOT_LOG_TRACE(
             "Failed to generate jitted code for query: unsupported target expression type: %d", (int)expr->_expr_type);
@@ -4112,10 +4210,16 @@ static JitContext* FinalizeCodegen(JitTvmCodeGenContext* ctx, int max_arg, JitCo
     // setup execution details
     jit_context->m_table = ctx->_table_info.m_table;
     jit_context->m_index = ctx->_table_info.m_index;
+    jit_context->m_indexId = jit_context->m_index->GetExtId();
+    MOT_LOG_TRACE("Installed index id: %" PRIu64, jit_context->m_indexId);
     jit_context->m_tvmFunction = ctx->m_jittedQuery;
     jit_context->m_argCount = max_arg + 1;
     jit_context->m_innerTable = ctx->m_innerTable_info.m_table;
     jit_context->m_innerIndex = ctx->m_innerTable_info.m_index;
+    if (jit_context->m_innerIndex != nullptr) {
+        jit_context->m_innerIndexId = jit_context->m_innerIndex->GetExtId();
+        MOT_LOG_TRACE("Installed inner index id: %" PRIu64, jit_context->m_innerIndexId);
+    }
     jit_context->m_commandType = command_type;
     jit_context->m_subQueryCount = 0;
 
@@ -4150,9 +4254,9 @@ static bool buildScanExpression(JitTvmCodeGenContext* ctx, JitColumnExpr* expr, 
 }
 
 static bool buildPointScan(JitTvmCodeGenContext* ctx, JitColumnExprArray* expr_array, int* max_arg,
-    JitRangeScanType range_scan_type, Instruction* outer_row, int expr_count = 0, int subQueryIndex = -1)
+    JitRangeScanType range_scan_type, Instruction* outer_row, int expr_count = -1, int subQueryIndex = -1)
 {
-    if (expr_count == 0) {
+    if (expr_count == -1) {
         expr_count = expr_array->_count;
     }
     AddInitSearchKey(ctx, range_scan_type, subQueryIndex);
@@ -4175,7 +4279,7 @@ static bool buildPointScan(JitTvmCodeGenContext* ctx, JitColumnExprArray* expr_a
                 MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
                     "Generate TVM JIT Code",
                     "Invalid expression table (expected main/outer table %s, got %s)",
-                    ctx->m_innerTable_info.m_table->GetTableName().c_str(),
+                    ctx->_table_info.m_table->GetTableName().c_str(),
                     expr->_table->GetTableName().c_str());
                 return false;
             }
@@ -4254,7 +4358,7 @@ static bool buildClosedRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* indexS
     JitRangeScanType rangeScanType, Instruction* outerRow, int subQueryIndex)
 {
     // a closed range scan starts just like a point scan (with not enough search expressions) and then adds key patterns
-    bool result = buildPointScan(ctx, &indexScan->_search_exprs, maxArg, rangeScanType, outerRow, 0, subQueryIndex);
+    bool result = buildPointScan(ctx, &indexScan->_search_exprs, maxArg, rangeScanType, outerRow, -1, subQueryIndex);
     if (result) {
         AddCopyKey(ctx, rangeScanType, subQueryIndex);
 
@@ -4601,7 +4705,7 @@ static bool buildRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* indexScan, i
 
     // if this is a point scan we generate two identical keys for the iterators
     if (indexScan->_scan_type == JIT_INDEX_SCAN_POINT) {
-        result = buildPointScan(ctx, &indexScan->_search_exprs, maxArg, rangeScanType, outerRow, 0, subQueryIndex);
+        result = buildPointScan(ctx, &indexScan->_search_exprs, maxArg, rangeScanType, outerRow, -1, subQueryIndex);
         if (result) {
             AddCopyKey(ctx, rangeScanType, subQueryIndex);
             *beginRangeBound = JIT_RANGE_BOUND_INCLUDE;
@@ -4619,6 +4723,10 @@ static bool buildRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* indexScan, i
     } else if (indexScan->_scan_type == JIT_INDEX_SCAN_OPEN) {
         result = buildOpenRangeScan(
             ctx, indexScan, maxArg, rangeScanType, beginRangeBound, endRangeBound, outerRow, subQueryIndex);
+    } else if (indexScan->_scan_type == JIT_INDEX_SCAN_FULL) {
+        result = true;  // no keys used
+        *beginRangeBound = JIT_RANGE_BOUND_INCLUDE;
+        *endRangeBound = JIT_RANGE_BOUND_INCLUDE;
     }
     return result;
 }
@@ -4641,13 +4749,20 @@ static bool buildPrepareStateScan(JitTvmCodeGenContext* ctx, JitIndexScan* index
 
     // search begin iterator and save it in execution state
     IssueDebugLog("Building search iterator from search key, and saving in execution state");
-    Instruction* itr = buildSearchIterator(ctx, index_scan->_scan_direction, begin_range_bound, range_scan_type);
-    AddSetStateIterator(ctx, itr, JIT_RANGE_ITERATOR_START, range_scan_type);
+    if (index_scan->_scan_type == JIT_INDEX_SCAN_FULL) {
+        Instruction* itr = buildBeginIterator(ctx, range_scan_type);
+        AddSetStateIterator(ctx, itr, JIT_RANGE_ITERATOR_START, range_scan_type);
+    } else {
+        Instruction* itr = buildSearchIterator(ctx, index_scan->_scan_direction, begin_range_bound, range_scan_type);
+        AddSetStateIterator(ctx, itr, JIT_RANGE_ITERATOR_START, range_scan_type);
 
-    // create end iterator and save it in execution state
-    IssueDebugLog("Creating end iterator from end search key, and saving in execution state");
-    itr = AddCreateEndIterator(ctx, index_scan->_scan_direction, end_range_bound, range_scan_type);
-    AddSetStateIterator(ctx, itr, JIT_RANGE_ITERATOR_END, range_scan_type);
+        // create end iterator and save it in execution state
+        IssueDebugLog("Creating end iterator from end search key, and saving in execution state");
+        itr = AddCreateEndIterator(ctx, index_scan->_scan_direction, end_range_bound, range_scan_type);
+        AddSetStateIterator(ctx, itr, JIT_RANGE_ITERATOR_END, range_scan_type);
+    }
+
+    // initialize state scan variables
     if (range_scan_type == JIT_RANGE_SCAN_MAIN) {
         AddResetStateLimitCounter(ctx);              // in case there is a limit clause
         AddResetStateRow(ctx, JIT_RANGE_SCAN_MAIN);  // in case this is a join query
@@ -4680,14 +4795,14 @@ static bool buildPrepareStateRow(JitTvmCodeGenContext* ctx, MOT::AccessType acce
     // check if state scan ended
     JIT_IF_BEGIN(test_scan)
     IssueDebugLog("Checking if state scan ended");
+    BasicBlock* isStateScanEndBlock = JIT_CURRENT_BLOCK();  // remember current block if filter fails
     Instruction* res_scan_end = AddIsStateScanEnd(ctx, index_scan->_scan_direction, range_scan_type);
     JIT_IF_EVAL(res_scan_end)
     // fail scan block
     IssueDebugLog("Scan ended, raising internal state scan end flag");
     AddSetStateScanEndFlag(ctx, 1, range_scan_type);
     JIT_ELSE()
-    // now get row from iterator (remember current block if filter fails)
-    BasicBlock* get_row_from_itr_block = JIT_CURRENT_BLOCK();
+    // now get row from iterator
     IssueDebugLog("State scan not ended - Retrieving row from iterator");
     row = AddGetRowFromStateIterator(ctx, access_mode, index_scan->_scan_direction, range_scan_type);
 
@@ -4699,14 +4814,14 @@ static bool buildPrepareStateRow(JitTvmCodeGenContext* ctx, MOT::AccessType acce
     AddSetStateScanEndFlag(ctx, 1, range_scan_type);
     JIT_ELSE()
     // row found, check for additional filters, if not passing filter then go back to execute getRowFromStateIterator()
-    if (!buildFilterRow(ctx, row, &index_scan->_filters, max_arg, get_row_from_itr_block)) {
+    if (!buildFilterRow(ctx, row, &index_scan->_filters, max_arg, isStateScanEndBlock)) {
         MOT_LOG_TRACE("Failed to generate jitted code for query: failed to build filter expressions for row");
         return false;
     }
     // row passed all filters, so save it in state outer row
     AddSetStateRow(ctx, row, range_scan_type);
     if (range_scan_type == JIT_RANGE_SCAN_MAIN) {
-        AddSetStateScanEndFlag(ctx, 0, range_scan_type);  // reset inner scan flag
+        AddSetStateScanEndFlag(ctx, 0, JIT_RANGE_SCAN_INNER);  // reset inner scan flag
     }
     JIT_IF_END()
     JIT_IF_END()
@@ -5789,7 +5904,9 @@ static JitContext* JitRangeSelectCodegen(const Query* query, const char* query_s
     builder.CreateRet(builder.CreateConst((uint64_t)MOT::RC_OK));
 
     // wrap up
-    JitContext* jit_context = FinalizeCodegen(ctx, max_arg, JIT_COMMAND_RANGE_SELECT);
+    JitCommandType cmdType =
+        plan->_index_scan._scan_type == JIT_INDEX_SCAN_FULL ? JIT_COMMAND_FULL_SELECT : JIT_COMMAND_RANGE_SELECT;
+    JitContext* jit_context = FinalizeCodegen(ctx, max_arg, cmdType);
 
     // cleanup
     DestroyCodeGenContext(ctx);
@@ -6028,6 +6145,9 @@ static JitContext* JitPointOuterJoinCodegen(const Query* query, const char* quer
     // clear tuple even if row is not found later
     AddExecClearTuple(ctx);
 
+    // emit code to cleanup previous scan in case this is a new scan
+    AddCleanupOldScan(ctx);
+
     // we first check if outer state row was already searched
     Instruction* outer_row_copy = AddGetOuterStateRowCopy(ctx);
     JIT_IF_BEGIN(check_outer_row_ready)
@@ -6133,6 +6253,9 @@ static JitContext* JitPointInnerJoinCodegen(const Query* query, const char* quer
     // clear tuple even if row is not found later
     AddExecClearTuple(ctx);
 
+    // emit code to cleanup previous scan in case this is a new scan
+    AddCleanupOldScan(ctx);
+
     // prepare stateful scan if not done so already, if row not found then emit code to return from function (since this
     // is an outer scan)
     int max_arg = 0;
@@ -6177,6 +6300,9 @@ static JitContext* JitPointInnerJoinCodegen(const Query* query, const char* quer
 
     AddExecStoreVirtualTuple(ctx);
     buildIncrementRowsProcessed(ctx);
+
+    // make sure that next iteration find an empty state row, so scan makes a progress
+    AddResetStateRow(ctx, JIT_RANGE_SCAN_MAIN);
 
     // if a limit clause exists, then increment limit counter and check if reached limit
     buildCheckLimit(ctx, plan->_limit_count);
@@ -6483,7 +6609,7 @@ static bool JitSubSelectCodegen(JitTvmCodeGenContext* ctx, JitCompoundPlan* plan
     // begin the WHERE clause
     int maxArg = 0;
     if (!buildPointScan(
-            ctx, &subPlan->_query._search_exprs, &maxArg, JIT_RANGE_SCAN_SUB_QUERY, nullptr, 0, subQueryIndex)) {
+            ctx, &subPlan->_query._search_exprs, &maxArg, JIT_RANGE_SCAN_SUB_QUERY, nullptr, -1, subQueryIndex)) {
         MOT_LOG_TRACE("Failed to generate jitted code for SELECT sub-query: unsupported WHERE clause type");
         return false;
     }

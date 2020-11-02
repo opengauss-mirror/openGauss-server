@@ -101,6 +101,15 @@ extern void* MemRawChunkStoreAllocLocal(int node)
 {
     void* chunk = MemRawChunkPoolAlloc(localChunkPools[node]);
     if (chunk == NULL) {
+        // reached high black mark in this pool, continue attempt in round robin
+        for (int i = (node + 1) % g_memGlobalCfg.m_nodeCount; i != node; i = (i + 1) % g_memGlobalCfg.m_nodeCount) {
+            chunk = MemRawChunkPoolAlloc(localChunkPools[i]);
+            if (chunk != NULL) {
+                break;
+            }
+        }
+    }
+    if (chunk == NULL) {
         // report once for current thread
         if (GetLastError() == MOT_NO_ERROR) {
             MOT_REPORT_ERROR(

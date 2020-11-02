@@ -18,14 +18,20 @@
 #include "storage/block.h"
 #include "storage/relfilenode.h"
 #include "postmaster/pagewriter.h"
+
+typedef struct CkptSortItem CkptSortItem;
+
 typedef enum {
     EVENT_CHECKPOINT_CREATE_SNAPSHOT,
     EVENT_CHECKPOINT_SNAPSHOT_READY,
     EVENT_CHECKPOINT_BEGIN_CHECKPOINT,
     EVENT_CHECKPOINT_ABORT
 } CheckpointEvent;
-typedef struct CkptSortItem CkptSortItem;
+
 typedef void (*CheckpointCallback)(CheckpointEvent checkpointEvent, XLogRecPtr lsn, void* arg);
+
+extern void RegisterCheckpointCallback(CheckpointCallback callback, void* arg);
+extern void CallCheckpointCallback(CheckpointEvent checkpointEvent, XLogRecPtr lsn);
 
 extern void BackgroundWriterMain(void);
 extern void CheckpointerMain(void);
@@ -41,9 +47,6 @@ extern void CheckpointerShmemInit(void);
 
 extern bool FirstCallSinceLastCheckpoint(void);
 extern bool IsBgwriterProcess(void);
-
-extern void RegisterCheckpointCallback(CheckpointCallback callback, void* arg);
-extern void CallCheckpointCallback(CheckpointEvent checkpointEvent, XLogRecPtr lsn);
 
 /*incremental checkpoint bgwriter thread */
 const int INCRE_CKPT_BGWRITER_VIEW_COL_NUM = 6;
@@ -70,4 +73,5 @@ typedef struct BgWriterProc {
     volatile uint32 thread_last_flush;
     int32 next_scan_loc;
 } BgWriterProc;
+
 #endif /* _BGWRITER_H */

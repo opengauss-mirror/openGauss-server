@@ -54,6 +54,7 @@ STEP_START = "Start cluster"
 ACTION_INSTALL_CLUSTER = "install_cluster"
 ACTION_START_CLUSTER = "start_cluster"
 ACTION_BUILD_STANDBY = "build_standby"
+ACTION_BUILD_CASCADESTANDBY = "build_cascadestandby"
 
 # exit code
 EXEC_SUCCESS = 0
@@ -474,6 +475,7 @@ class InstallImpl:
             self.context.sshTool,
             self.context.isSingle or self.context.localMode,
             self.context.mpprcFile)
+
         # build stand by
         cmd = "source %s;" % self.context.mpprcFile
         cmd += "%s -t %s -U %s -X %s -R %s -c %s -l %s %s" % (
@@ -491,6 +493,26 @@ class InstallImpl:
             self.context.sshTool,
             self.context.isSingle or self.context.localMode,
             self.context.mpprcFile)
+
+        # build casecadestand by
+        cmd = "source %s;" % self.context.mpprcFile
+        cmd += "%s -t %s -U %s -X %s -R %s -c %s -l %s %s" % (
+            OMCommand.getLocalScript("Local_Install"),
+            ACTION_BUILD_CASCADESTANDBY,
+            self.context.user + ":" + self.context.group,
+            self.context.xmlFile,
+            self.context.clusterInfo.appPath,
+            self.context.clusterInfo.name, self.context.localLog,
+            self.getCommandOptions())
+        self.context.logger.debug("Command for build cascade standby: %s" % cmd)
+        for hostname in self.context.sshTool.hostNames:
+            DefaultValue.execCommandWithMode(
+                cmd,
+                "Build cascade standby",
+                self.context.sshTool,
+                self.context.isSingle or self.context.localMode,
+                self.context.mpprcFile, [hostname])
+
         self.context.logger.log("Successfully started cluster.")
 
     def doStart(self):

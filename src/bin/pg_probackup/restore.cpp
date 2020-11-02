@@ -580,12 +580,6 @@ do_restore_or_validate(time_t target_backup_id, pgRecoveryTarget *rt,
 	 */
 	if (params->is_restore)
 	{
-		if (rt->lsn_string &&
-			parse_server_version(dest_backup->server_version) < 100000)
-			elog(ERROR, "Backup %s was created for version %s which doesn't support recovery_target_lsn",
-					 base36enc(dest_backup->start_time),
-					 dest_backup->server_version);
-
 		restore_chain(dest_backup, parent_chain,
 					  params, instance_config.pgdata, no_sync);
 
@@ -1332,17 +1326,6 @@ create_recovery_conf(time_t backup_id,
 #endif
 		}
 
-		if (rt->target_action)
-			fio_fprintf(fp, "recovery_target_action = '%s'\n", rt->target_action);
-		else
-			/* default recovery_target_action is 'pause' */
-			fio_fprintf(fp, "recovery_target_action = '%s'\n", "pause");
-	}
-
-	if (pitr_requested)
-	{
-		elog(LOG, "Setting restore_command to '%s'", restore_command_guc);
-		fio_fprintf(fp, "restore_command = '%s'\n", restore_command_guc);
 	}
 
 	if (fio_fflush(fp) != 0 ||
@@ -1665,7 +1648,7 @@ parseRecoveryTargetOptions(const char *target_time,
 #ifdef PGPRO_EE
 		if (parse_uint64(target_xid, &dummy_xid, 0))
 #else
-		if (parse_uint32(target_xid,(uint32 *)&dummy_xid, 0))
+		if (parse_uint64(target_xid,&dummy_xid, 0))
 #endif
 			rt->target_xid = dummy_xid;
 		else

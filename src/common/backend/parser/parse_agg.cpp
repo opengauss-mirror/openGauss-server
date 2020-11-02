@@ -56,6 +56,7 @@ static void finalize_grouping_exprs(
 
 static bool finalize_grouping_exprs_walker(Node* node, check_ungrouped_columns_context* context);
 static List* expand_groupingset_node(GroupingSet* gs);
+static void find_rownum_in_groupby_clauses(Rownum *rownumVar, check_ungrouped_columns_context* context);
 
 /*
  * transformAggregateCall -
@@ -740,6 +741,10 @@ static bool check_ungrouped_columns_walker(Node* node, check_ungrouped_columns_c
         }
     }
 
+    /* If There is ROWNUM, it must appear in the GROUP BY clause or be used in an aggregate function. */
+    if (IsA(node, Rownum)) {
+        find_rownum_in_groupby_clauses((Rownum *)node, context);
+    }
     /*
      * If we have an ungrouped Var of the original query level, we have a
      * failure.  Vars below the original query level are not a problem, and
@@ -1472,4 +1477,26 @@ Oid resolve_aggregate_transtype(Oid aggfuncid, Oid aggtranstype, Oid* inputTypes
         pfree(declaredArgTypes);
     }
     return aggtranstype;
+}
+
+static void find_rownum_in_groupby_clauses(Rownum *rownumVar, check_ungrouped_columns_context *context)
+{
+    bool haveRownum = false;
+    ListCell *gl = NULL;
+
+    if (!context->have_non_var_grouping || context->sublevels_up != 0) {
+        foreach (gl, context->groupClauses) {
+            Node *gnode = (Node *)((TargetEntry *)lfirst(gl))->expr;
+            if (IsA(gnode, Rownum)) {
+                haveRownum = true;
+                break;
+            }
+        }
+
+        if (haveRownum == false) {
+            ereport(ERROR, (errcode(ERRCODE_GROUPING_ERROR),
+                errmsg("ROWNUM must appear in the GROUP BY clause or be used in an aggregate function"),
+                parser_errposition(context->pstate, rownumVar->location)));
+        }
+    }
 }

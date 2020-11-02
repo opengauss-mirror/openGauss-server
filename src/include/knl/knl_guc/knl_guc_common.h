@@ -45,7 +45,7 @@
 #ifdef ENABLE_MULTIPLE_NODES
 #define GUC_MAX_REPLNODE_NUM (8)
 #else
-#define GUC_MAX_REPLNODE_NUM (5)
+#define GUC_MAX_REPLNODE_NUM (9)
 #endif
 
 #ifdef WIN32

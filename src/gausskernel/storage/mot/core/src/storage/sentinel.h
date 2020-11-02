@@ -323,13 +323,14 @@ private:
     Index* m_index = nullptr;
 
     /** @var m_stable A Container for the row and its status bit */
-    uint64_t m_stable = 0;
+    volatile uint64_t m_stable = 0;
 
     /** @var m_refCount A counter of concurrent inserters of the same key  */
     volatile uint32_t m_refCount = 0;
 
     inline void DecCounter()
     {
+        MOT_ASSERT(GetCounter() > 0);
         uint32_t counter = GetCounter() - 1;
         m_refCount = (m_refCount & ~S_COUNTER_MASK) | (counter & S_COUNTER_MASK);
     }

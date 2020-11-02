@@ -1966,7 +1966,7 @@ static void ExecutePlan(EState *estate, PlanState *planstate, bool use_parallel_
     bool stream_instrument = false;
     bool need_sync_step = false;
     bool recursive_early_stop = false;
-    bool mm_finished_execution = false;
+    bool mot_finished_execution = false;
 
     /* Mark sync-up step is required */
     if (NeedSyncUpProducerStep(planstate->plan)) {
@@ -2031,7 +2031,7 @@ static void ExecutePlan(EState *estate, PlanState *planstate, bool use_parallel_
         /******************************* MOT LLVM *************************************/
         else if (!IS_PGXC_COORDINATOR && JitExec::IsMotCodegenEnabled() && mot_jit_context) {
             int scan_ended = 0;
-            if (!mm_finished_execution) {
+            if (!mot_finished_execution) {
                 // previous iteration has not signaled end of scan
                 slot = planstate->ps_ResultTupleSlot;
                 uint64_t tp_processed = 0;
@@ -2039,7 +2039,7 @@ static void ExecutePlan(EState *estate, PlanState *planstate, bool use_parallel_
                         slot, &tp_processed, &scan_ended);
                 if (scan_ended || (tp_processed == 0) || (rc != 0)) {
                     // raise flag so that next round we will bail out (current tuple still must be reported to user)
-                    mm_finished_execution = true;
+                    mot_finished_execution = true;
                 }
             } else {
                 (void)ExecClearTuple(slot);

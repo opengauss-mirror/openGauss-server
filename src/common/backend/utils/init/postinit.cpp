@@ -107,13 +107,6 @@ extern bool StreamThreadAmI();
 extern bool StreamTopConsumerAmI();
 void ShutdownPostgres(int code, Datum arg);
 
-#ifdef ENABLE_MULTIPLE_NODES
-/* 
- * init cache api for pgxc nodes
- */
-extern void PGXC_Cache_Init();
-#endif
-
 AlarmCheckResult ConnAuthMethodChecker(Alarm* alarm, AlarmAdditionalParam* additionalParam)
 {
     if (true == ConnAuthMethodCorrect) {
@@ -1545,11 +1538,6 @@ void PostgresInitializer::InitSysCache()
 
     InitCatalogCache();
     InitPlanCache();
-
-#ifdef ENABLE_MULTIPLE_NODES
-    /* init pgxc caches (local and global) */
-    PGXC_Cache_Init();
-#endif
 
     /* Initialize portal manager */
     EnablePortalManager();

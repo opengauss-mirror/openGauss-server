@@ -163,12 +163,16 @@ void UpdateWaitEventStat(volatile WaitInfo* InstrWaitInfo, uint32 wait_event_inf
             updateMaxValueForAtomicType(duration, &(InstrWaitInfo->event_info.lock_info[eventId].max_duration));
             break;
         case PG_WAIT_IO:
-            updateMinValueForAtomicType(duration,
-                &(InstrWaitInfo->event_info.io_info[eventId].min_duration),
-                InstrWaitInfo->event_info.io_info[eventId].counter);
-            InstrWaitInfo->event_info.io_info[eventId].counter++;
-            InstrWaitInfo->event_info.io_info[eventId].total_duration += duration;
-            updateMaxValueForAtomicType(duration, &(InstrWaitInfo->event_info.io_info[eventId].max_duration));
+            if (wait_event_info != WAIT_EVENT_WAL_BUFFER_ACCESS) {
+                updateMinValueForAtomicType(duration,
+                    &(InstrWaitInfo->event_info.io_info[eventId].min_duration),
+                    InstrWaitInfo->event_info.io_info[eventId].counter);
+                InstrWaitInfo->event_info.io_info[eventId].counter++;
+                InstrWaitInfo->event_info.io_info[eventId].total_duration += duration;
+                updateMaxValueForAtomicType(duration, &(InstrWaitInfo->event_info.io_info[eventId].max_duration));
+            } else {
+                InstrWaitInfo->event_info.io_info[eventId].counter++;
+            }
             break;
         default:
             break;

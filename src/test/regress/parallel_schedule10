@@ -78,3 +78,7 @@ test: partition_foreign_key
 test: partition_trigger
 test: duplicate_column_index
 test: initdb
+# test explain gather
+test: explain_gather
+test: password_length
+test: line_operator

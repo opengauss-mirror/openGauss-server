@@ -84,6 +84,7 @@
 #include "access/clog.h"
 #include "access/csnlog.h"
 #include "access/htup.h"
+#include "access/parallel.h"
 #include "access/subtrans.h"
 #include "access/transam.h"
 #include "access/twophase.h"
@@ -121,8 +122,7 @@
 #include "pgxc/pgxc.h"
 #endif
 #include "utils/distribute_test.h"
-
-extern void MOTProcessRecoveredTransaction(uint64_t txid, bool isCommit);
+#include "storage/mot/mot_fdw.h"
 
 /*
  * Directory where Two-phase commit files reside within PGDATA
@@ -2057,17 +2057,19 @@ void FinishPreparedTransaction(const char* gid, bool isCommit)
 
     if (u_sess->attr.attr_common.xc_maintenance_mode) {
         /*
-         * check if this transaction is an mm engine one.
-         * do it only in maintenance mode since gs_clean will only be called
-         * in this state
+         * Check if this transaction is a MOT engine one.
+         * Do it only in maintenance mode since gs_clean will only be called
+         * in this state.
          */
         MOTProcessRecoveredTransaction(xid, isCommit);
     }
 
-    if (isCommit) {
-        CallXactCallbacks(XACT_EVENT_COMMIT_PREPARED);
-    } else {
-        CallXactCallbacks(XACT_EVENT_ROLLBACK_PREPARED);
+    if (!IsParallelWorker()) {
+        if (isCommit) {
+            CallXactCallbacks(XACT_EVENT_COMMIT_PREPARED);
+        } else {
+            CallXactCallbacks(XACT_EVENT_ROLLBACK_PREPARED);
+        }
     }
 
     /*
@@ -2099,8 +2101,11 @@ void FinishPreparedTransaction(const char* gid, bool isCommit)
             commitLibrary,
             commitLibraryLen,
             hdr->initfileinval);
-        /* release MM Table locks */
-        CallXactCallbacks(XACT_EVENT_END_TRANSACTION);
+
+        if (!IsParallelWorker()) {
+            /* Release MOT locks */
+            CallXactCallbacks(XACT_EVENT_END_TRANSACTION);
+        }
     } else {
         RecordTransactionAbortPrepared(xid,
             hdr->nsubxacts,
@@ -3073,8 +3078,9 @@ static void RecordTransactionCommitPrepared(TransactionId xid, int nchildren, Tr
     xlrec.xid = xid;
     xlrec.crec.xact_time = GetCurrentTimestamp();
     xlrec.crec.xinfo = initfileinval ? XACT_COMPLETION_UPDATE_RELCACHE_FILE : 0;
-    if (IsMMEngineUsed() || IsMixedEngineUsed())
-        xlrec.crec.xinfo |= XACT_MMENGINE_USED;
+    if (IsMOTEngineUsed() || IsMixedEngineUsed()) {
+        xlrec.crec.xinfo |= XACT_MOT_ENGINE_USED;
+    }
     xlrec.crec.nmsgs = 0;
     xlrec.crec.nrels = nrels;
     xlrec.crec.nsubxacts = nchildren;

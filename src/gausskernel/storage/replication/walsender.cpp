@@ -663,15 +663,21 @@ void IdentifyMode(void)
     char smode[11];
     volatile HaShmemData* hashmdata = t_thrd.postmaster_cxt.HaShmData;
     int nRet = 0;
+    ServerMode current_mode = UNKNOWN_MODE;
 
     SpinLockAcquire(&hashmdata->mutex);
-    nRet = snprintf_s(smode, sizeof(smode), sizeof(smode) - 1, "%d", hashmdata->current_mode);
+    if (hashmdata->current_mode == STANDBY_MODE && hashmdata->is_cascade_standby) {
+        current_mode = CASCADE_STANDBY_MODE;
+    } else {
+        current_mode = hashmdata->current_mode;
+    }
+    nRet = snprintf_s(smode, sizeof(smode), sizeof(smode) - 1, "%d", current_mode);
     securec_check_ss(nRet, "\0", "\0");
     SpinLockRelease(&hashmdata->mutex);
 
     /* Send a RowDescription message */
     pq_beginmessage(&buf, 'T');
-    pq_sendint16(&buf, 1); /* 1 fields */
+    pq_sendint16(&buf, 2); /* 2 fields */
 
     /* first field */
     pq_sendstring(&buf, "smode"); /* col name */
@@ -681,13 +687,26 @@ void IdentifyMode(void)
     pq_sendint16(&buf, 4);        /* typlen */
     pq_sendint32(&buf, 0);        /* typmod */
     pq_sendint16(&buf, 0);        /* format code */
+
+    /* second field */
+    pq_sendstring(&buf, "azname"); /* col name */
+    pq_sendint32(&buf, 0);          /* table oid */
+    pq_sendint16(&buf, 0);          /* attnum */
+    pq_sendint32(&buf, TEXTOID);    /* type oid */
+    pq_sendint16(&buf, UINT16_MAX); /* typlen */
+    pq_sendint32(&buf, 0);          /* typmod */
+    pq_sendint16(&buf, 0);          /* format code */
     pq_endmessage_noblock(&buf);
 
     /* Send a DataRow message */
     pq_beginmessage(&buf, 'D');
-    pq_sendint16(&buf, 1);             /* # of columns */
+    pq_sendint16(&buf, 2);             /* # of columns */
     pq_sendint32(&buf, strlen(smode)); /* col1 len */
     pq_sendbytes(&buf, (char*)smode, strlen(smode));
+
+    char* azname = g_instance.attr.attr_storage.available_zone;
+    pq_sendint32(&buf, strlen(azname)); /* col2 len */
+    pq_sendbytes(&buf, (char*)azname, strlen(azname));
     pq_endmessage_noblock(&buf);
 
     /* Send CommandComplete and ReadyForQuery messages */
@@ -4343,8 +4362,13 @@ Datum pg_stat_get_wal_senders(PG_FUNCTION_ARGS)
             /* peer_role */
             if (snd_role == SNDROLE_PRIMARY_DUMMYSTANDBY)
                 values[j++] = CStringGetTextDatum("Secondary");
-            else
-                values[j++] = CStringGetTextDatum(wal_get_role_string(peer_role));
+            else {
+                if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
+                    values[j++] = CStringGetTextDatum("Cascade Standby");
+                } else {
+                    values[j++] = CStringGetTextDatum("Standby");
+                }
+            }
 
             /* peer_state */
             values[j++] = CStringGetTextDatum(wal_get_db_state_string(peer_state));

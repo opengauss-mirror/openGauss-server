@@ -71,16 +71,6 @@
 #include "utils/acl.h"
 #include "catalog/pgxc_group.h"
 
-#ifdef ENABLE_MULTIPLE_NODES
-/* PGXC Cache APIs */
-extern Oid GetCachedGroupid(Oid relid);
-extern void CacheGroupId(Oid relid, Oid groupid);
-extern uint64 GetPGXCGlobalVersion();
-extern Oid GetCachedGrpidByName(const char* name, uint64 version);
-extern void UpdateGrpidInCache(const char* group_name, uint64 groupid, uint64 version);
-#endif
-
-
 /*				---------- AMOP CACHES ----------						 */
 
 /*
@@ -3088,32 +3078,16 @@ bool node_check_host(const char* host, Oid nodeid)
  */
 Oid get_pgxc_groupoid(const char* groupname, bool missing_ok)
 {
-#ifdef ENABLE_MULTIPLE_NODES
-    uint64 version = GetPGXCGlobalVersion();
-    Oid groupoid = GetCachedGrpidByName(groupname, version);
-    if (groupoid != (Oid)-1 && groupoid != 0)
-        return groupoid;
-#else
     Oid groupoid = InvalidOid;
-#endif
-
     if (!ng_is_valid_group_name(groupname)) {
         return InvalidOid;
     }
-
-#ifdef ENABLE_MULTIPLE_NODES
-    version = GetPGXCGlobalVersion();
-#endif
 
     groupoid = GetSysCacheOid1(PGXCGROUPNAME, PointerGetDatum(groupname));
     if (!OidIsValid(groupoid) && !missing_ok) {
         ereport(
             ERROR, (errcode(ERRCODE_UNDEFINED_OBJECT), errmsg("Target node group \"%s\" does not exist", groupname)));
     }
-
-#ifdef ENABLE_MULTIPLE_NODES
-    UpdateGrpidInCache(groupname, groupoid, version);
-#endif
 
     return groupoid;
 }
@@ -3420,14 +3394,7 @@ Oid get_pgxc_class_groupoid(Oid tableoid)
     Relation relation;
     bool isNull = false;
     char* groupname = NULL;
-#ifdef ENABLE_MULTIPLE_NODES
-    Oid groupoid = GetCachedGroupid(tableoid);
-
-    if (groupoid != InvalidOid)
-        return groupoid;
-#else
     Oid groupoid = InvalidOid;
-#endif
 
     relation = heap_open(PgxcClassRelationId, AccessShareLock);
     tuple = SearchSysCache1(PGXCCLASSRELID, ObjectIdGetDatum(tableoid));
@@ -3459,11 +3426,6 @@ Oid get_pgxc_class_groupoid(Oid tableoid)
     if (HeapTupleIsValid(tuple)) {
         ReleaseSysCache(tuple);
     }
-
-#ifdef ENABLE_MULTIPLE_NODES
-    CacheGroupId(tableoid, groupoid);
-#endif
-
     heap_close(relation, AccessShareLock);
     return groupoid;
 }

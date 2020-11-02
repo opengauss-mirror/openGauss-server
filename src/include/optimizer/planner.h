@@ -70,6 +70,8 @@ extern bool plan_cluster_use_sort(Oid tableOid, Oid indexOid);
 
 extern bool ContainRecursiveUnionSubplan(PlannedStmt* pstmt);
 
+extern void preprocess_qual_conditions(PlannerInfo* root, Node* jtnode);
+
 typedef enum {
     /*
      * Disable "inlist2join" rewrite optimization

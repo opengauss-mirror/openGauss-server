@@ -979,7 +979,7 @@ static Datum ExecEvalRownum(RownumState* exprstate, ExprContext* econtext, bool*
         *isDone = ExprSingleResult;
     *isNull = false;
 
-    return Int8GetDatum(exprstate->ps->ps_rownum + 1);
+    return Int64GetDatum(exprstate->ps->ps_rownum + 1);
 }
 
 /* ----------------------------------------------------------------

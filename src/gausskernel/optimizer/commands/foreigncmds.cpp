@@ -800,13 +800,13 @@ void CreateForeignServer(CreateForeignServerStmt* stmt)
     if (aclresult != ACLCHECK_OK)
         aclcheck_error(aclresult, ACL_KIND_FDW, fdw->fdwname);
 
-    /* Creating additional MOT server (for MMtable) is disallowed here because of the following reasons:
-     * 1. While using the FDW interface, MM table is not really "foreign" but rather local. The original idea of FDW
+    /* Creating additional MOT server is disallowed here because of the following reasons:
+     * 1. While using the FDW interface, MOT table is not really "foreign" but rather local. The original idea of FDW
      *    that came with Postgres itself was only a set of interface and function calls to remote, and therefore there
-     *    is nothing to drop locally. MM table does have acutally data to be dropped cascade whenever a dependent
+     *    is nothing to drop locally. MOT table does have actually data to be dropped cascade whenever a dependent
      *    database is dropped. We could not simply just remove the entries in catalog.
-     * 2. MM engine down below does not have the mapping between table and database, in other words, the idea of schema.
-     *    But new foreign servers are database-dependent (pg_foreign_server).
+     * 2. MOT engine down below does not have the mapping between table and database,
+     *    in other words, the idea of schema. But new foreign servers are database-dependent (pg_foreign_server).
      * 3. In the current implementation, dropping a foreign table itself cannot successfully delete the its entry in
      * pg_shdepend.
      *
@@ -1377,7 +1377,7 @@ void getErrorTableFilePath(char* buf, int len, Oid databaseid, Oid reid)
     int rc;
     rc = snprintf_s(buf, len, len - 1, "./pg_errorinfo/%u.%u", databaseid, reid);
     securec_check_ss(rc, "", "");
-    buf[rc] = '\0';
+    buf[len - 1] = '\0';
 }
 
 #define OptInternalMask "internal_mask"
@@ -1458,7 +1458,7 @@ void CreateForeignIndex(IndexStmt* stmt, Oid indexRelationId)
 
             stmt->indexOid = prevIndxId;
             index_update_stats(rel, true, stmt->primary, InvalidOid, InvalidOid, -1);
-            SetCurrentTransactionStorageEngine(SE_TYPE_MM);
+            SetCurrentTransactionStorageEngine(SE_TYPE_MOT);
         }
     }
 
@@ -1677,7 +1677,7 @@ void CreateForeignTable(CreateForeignTableStmt* stmt, Oid relid)
     }
 
     if (isMOTTableFromSrvName(stmt->servername)) {
-        SetCurrentTransactionStorageEngine(SE_TYPE_MM);
+        SetCurrentTransactionStorageEngine(SE_TYPE_MOT);
     }
 
     stmt->options = regularizeObsLocationInfo(stmt->options);

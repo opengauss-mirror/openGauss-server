@@ -1,0 +1,4 @@
+[ca_ext]
+basicConstraints=CA:TRUE
+[some_ext]
+basicConstraints=CA:FALSE

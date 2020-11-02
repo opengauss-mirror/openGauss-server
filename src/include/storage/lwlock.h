@@ -143,6 +143,7 @@ enum BuiltinTrancheIds {
     LWTRANCHE_EXTEND,  // For general 3rd plugin
     LWTRANCHE_GTT_CTL, // For GTT
     LWTRANCHE_PLDEBUG, // For Pldebugger
+    LWTRANCHE_PARALLEL_APPEND,
 
     /*
      * Each trancheId above should have a corresponding item in BuiltinTrancheNames;

@@ -608,7 +608,7 @@ static inline bool RelationEnableWaitCleanGpi(Relation relation)
 /* routines in utils/cache/relcache.c */
 extern bool RelationIsDfsStore(Relation relatioin);
 extern bool RelationIsPaxFormatByOid(Oid relid);
-extern bool RelationIsMMTableByOid(Oid relid);
+extern bool RelationIsMOTTableByOid(Oid relid);
 extern bool RelationIsCUFormatByOid(Oid relid);
 
 #define IS_FOREIGNTABLE(rel) ((rel)->rd_rel->relkind == RELKIND_FOREIGN_TABLE)

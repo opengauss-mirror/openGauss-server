@@ -30,6 +30,10 @@
 #include "utilities.h"
 #include "mot_error.h"
 
+extern uint16_t MOTTimestampToStr(uintptr_t src, char* destBuf, size_t len);
+extern uint16_t MOTTimestampTzToStr(uintptr_t src, char* destBuf, size_t len);
+extern uint16_t MOTDateToStr(uintptr_t src, char* destBuf, size_t len);
+
 namespace MOT {
 DECLARE_LOGGER(Column, Storage)
 
@@ -293,11 +297,11 @@ bool ColumnLONG::PackKey(uint8_t* dest, uintptr_t src, size_t len, uint8_t fill)
 {
     uint64_t tmp = (uint64_t)GetBytes8(src);
     *(uint64_t*)(dest + 1) = be64toh(tmp);
-    if (tmp & 0x8000000000000000)
+    if (tmp & 0x8000000000000000) {
         *dest = 0x00;
-    else
+    } else {
         *dest = 0x01;
-
+    }
     return true;
 }
 
@@ -340,10 +344,11 @@ bool ColumnFLOAT::PackKey(uint8_t* dest, uintptr_t src, size_t len, uint8_t fill
     t.m_r = (uint32_t)GetBytes4(src);
 
     // keep sign
-    if (t.m_r & FLOAT_SIGN_MASK)
+    if (t.m_r & FLOAT_SIGN_MASK) {
         *dest = 0x00;
-    else
+    } else {
         *dest = 0x01;
+    }
     // remove sign and move exp to a most significant byte
     t.m_r <<= 1;
     // extract exp
@@ -477,15 +482,13 @@ void ColumnDATE::Unpack(uint8_t* data, uintptr_t* dest, size_t& len)
 
 void ColumnDATE::SetKeySize()
 {
-    m_keySize = m_size;
+    m_keySize = m_size + 1;
 }
 
 uint16_t ColumnDATE::PrintValue(uint8_t* data, char* destBuf, size_t len)
 {
-    if (len >= 3) {
-        errno_t erc = snprintf_s(destBuf, len, len - 1, "NaN");
-        securec_check_ss(erc, "\0", "\0");
-        return erc;
+    if (len >= MOT_MAXDATELEN) {
+        return MOTDateToStr(GetBytes4(*(uint32_t*)(data + m_offset)), destBuf, len);
     }
     return 0;
 }
@@ -635,8 +638,13 @@ bool ColumnTIMESTAMP::Pack(uint8_t* dest, uintptr_t src, size_t len)
 
 bool ColumnTIMESTAMP::PackKey(uint8_t* dest, uintptr_t src, size_t len, uint8_t fill)
 {
-    *(uint64_t*)(dest) = be64toh((uint64_t)GetBytes8(src));
-
+    uint64_t tmp = (uint64_t)GetBytes8(src);
+    *(uint64_t*)(dest + 1) = be64toh(tmp);
+    if (tmp & 0x8000000000000000) {
+        *dest = 0x00;
+    } else {
+        *dest = 0x01;
+    }
     return true;
 }
 
@@ -647,15 +655,50 @@ void ColumnTIMESTAMP::Unpack(uint8_t* data, uintptr_t* dest, size_t& len)
 
 void ColumnTIMESTAMP::SetKeySize()
 {
-    m_keySize = m_size;
+    m_keySize = m_size + 1;
 }
 
 uint16_t ColumnTIMESTAMP::PrintValue(uint8_t* data, char* destBuf, size_t len)
 {
-    if (len >= 3) {
-        errno_t erc = snprintf_s(destBuf, len, len - 1, "NaN");
-        securec_check_ss(erc, "\0", "\0");
-        return erc;
+    if (len >= MOT_MAXDATELEN) {
+        return MOTTimestampToStr(GetBytes8(*(uint64_t*)(data + m_offset)), destBuf, len);
+    }
+    return 0;
+}
+
+bool ColumnTIMESTAMPTZ::Pack(uint8_t* dest, uintptr_t src, size_t len)
+{
+    *(uint64_t*)(dest + m_offset) = (uint64_t)GetBytes8(src);
+
+    return true;
+}
+
+bool ColumnTIMESTAMPTZ::PackKey(uint8_t* dest, uintptr_t src, size_t len, uint8_t fill)
+{
+    uint64_t tmp = (uint64_t)GetBytes8(src);
+    *(uint64_t*)(dest + 1) = be64toh(tmp);
+    if (tmp & 0x8000000000000000) {
+        *dest = 0x00;
+    } else {
+        *dest = 0x01;
+    }
+    return true;
+}
+
+void ColumnTIMESTAMPTZ::Unpack(uint8_t* data, uintptr_t* dest, size_t& len)
+{
+    *dest = GetBytes8(*(uint64_t*)(data + m_offset));
+}
+
+void ColumnTIMESTAMPTZ::SetKeySize()
+{
+    m_keySize = m_size + 1;
+}
+
+uint16_t ColumnTIMESTAMPTZ::PrintValue(uint8_t* data, char* destBuf, size_t len)
+{
+    if (len >= MOT_MAXDATELEN) {
+        return MOTTimestampTzToStr(GetBytes8(*(uint64_t*)(data + m_offset)), destBuf, len);
     }
     return 0;
 }

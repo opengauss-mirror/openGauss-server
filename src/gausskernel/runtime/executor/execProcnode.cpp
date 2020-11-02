@@ -1375,3 +1375,96 @@ bool ExecShutdownNode(PlanState *node)
 
     return planstate_tree_walker(node, (bool (*)())ExecShutdownNode, NULL);
 }
+
+/*
+ * ExecSetTupleBound
+ *
+ * Set a tuple bound for a planstate node.  This lets child plan nodes
+ * optimize based on the knowledge that the maximum number of tuples that
+ * their parent will demand is limited.  The tuple bound for a node may
+ * only be changed between scans (i.e., after node initialization or just
+ * before an ExecReScan call).
+ *
+ * Any negative tuples_needed value means "no limit", which should be the
+ * default assumption when this is not called at all for a particular node.
+ *
+ * Note: if this is called repeatedly on a plan tree, the exact same set
+ * of nodes must be updated with the new limit each time; be careful that
+ * only unchanging conditions are tested here.
+ */
+void ExecSetTupleBound(int64 tuples_needed, PlanState *child_node)
+{
+    /*
+     * Since this function recurses, in principle we should check stack depth
+     * here.  In practice, it's probably pointless since the earlier node
+     * initialization tree traversal would surely have consumed more stack.
+     */
+    if (IsA(child_node, SortState) || IsA(child_node, VecSortState)) {
+        /*
+         * If it is a Sort node, notify it that it can use bounded sort.
+         *
+         * Note: it is the responsibility of nodeSort.c to react properly to
+         * changes of these parameters.  If we ever redesign this, it'd be a
+         * good idea to integrate this signaling with the parameter-change
+         * mechanism.
+         */
+        SortState *sortState = (SortState *)child_node;
+
+        if (tuples_needed < 0) {
+            /* make sure flag gets reset if needed upon rescan */
+            sortState->bounded = false;
+        } else {
+            sortState->bounded = true;
+            sortState->bound = tuples_needed;
+        }
+    } else if (IsA(child_node, MergeAppendState)) {
+        /*
+         * If it is a MergeAppend, we can apply the bound to any nodes that
+         * are children of the MergeAppend, since the MergeAppend surely need
+         * read no more than that many tuples from any one input.
+         */
+        MergeAppendState *maState = (MergeAppendState *)child_node;
+
+        for (int i = 0; i < maState->ms_nplans; i++) {
+            ExecSetTupleBound(tuples_needed, maState->mergeplans[i]);
+        }
+    } else if (IsA(child_node, ResultState) || IsA(child_node, VecResultState)) {
+        /*
+         * An extra consideration here is that if the Result is projecting a
+         * targetlist that contains any SRFs, we can't assume that every input
+         * tuple generates an output tuple, so a Sort underneath might need to
+         * return more than N tuples to satisfy LIMIT N. So we cannot use
+         * bounded sort.
+         *
+         * If Result supported qual checking, we'd have to punt on seeing a
+         * qual, too.  Note that having a resconstantqual is not a
+         * showstopper: if that fails we're not getting any rows at all.
+         */
+        if (outerPlanState(child_node) && !expression_returns_set((Node*)child_node->plan->targetlist)) {
+            ExecSetTupleBound(tuples_needed, outerPlanState(child_node));
+        }
+    } else if (IsA(child_node, GatherState)) {
+        /*
+         * A Gather node can propagate the bound to its workers.  As with
+         * MergeAppend, no one worker could possibly need to return more
+         * tuples than the Gather itself needs to.
+         *
+         * Note: As with Sort, the Gather node is responsible for reacting
+         * properly to changes to this parameter.
+         */
+        GatherState *gstate = (GatherState *)child_node;
+
+        gstate->tuples_needed = tuples_needed;
+
+        /* Also pass down the bound to our own copy of the child plan */
+        ExecSetTupleBound(tuples_needed, outerPlanState(child_node));
+    }
+
+    /*
+     * In principle we could descend through any plan node type that is
+     * certain not to discard or combine input rows; but on seeing a node that
+     * can do that, we can't propagate the bound any further.  For the moment
+     * it's unclear that any other cases are worth checking here.
+     */
+}
+

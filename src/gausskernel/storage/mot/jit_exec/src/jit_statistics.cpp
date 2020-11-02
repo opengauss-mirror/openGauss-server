@@ -34,10 +34,12 @@ DECLARE_LOGGER(JitStatistics, System)
 JitThreadStatistics::JitThreadStatistics(uint64_t threadId, void* inplaceBuffer)
     : MOT::ThreadStatistics(threadId, inplaceBuffer),
       m_execQueryCount(MakeName("jit-exec", threadId).c_str()),
+      m_invokeQueryCount(MakeName("jit-invoke", threadId).c_str()),
       m_execFailQueryCount(MakeName("jit-exec-fail", threadId).c_str()),
       m_execAbortQueryCount(MakeName("jit-exec-abort", threadId).c_str())
 {
     RegisterStatistics(&m_execQueryCount);
+    RegisterStatistics(&m_invokeQueryCount);
     RegisterStatistics(&m_execFailQueryCount);
     RegisterStatistics(&m_execAbortQueryCount);
 }

@@ -1724,7 +1724,7 @@ static void attach_info_to_plantree_list(List* plantree_list, AttachInfoContext*
                 attachInfoCtx->info_index++;
                 break;
             }
-            case T_CreateStmt:
+            case T_CreateStmt:  /* fall through */
             case T_CreateForeignTableStmt: {
                 Node* l = (Node*)stringToNode(info_query_string);
                 CreateStmt* cstmt = (CreateStmt*)stmt;
@@ -2235,17 +2235,17 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
                     errmsg("Cross storage engine transaction is not supported")));
         }
 
-        /* block MM engine queries in sub-transactions */
-        if (!IsTransactionExitStmt(parsetree) && IsMMEngineUsedInParentTransaction() && IsMMEngineUsed()) {
+        /* block MOT engine queries in sub-transactions */
+        if (!IsTransactionExitStmt(parsetree) && IsMOTEngineUsedInParentTransaction() && IsMOTEngineUsed()) {
             ereport(ERROR, (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED), errmodule(MOD_MOT),
-                    errmsg("SubTransaction is not supported for memory table.")));
+                    errmsg("SubTransaction is not supported for memory table")));
         }
 
-        /* check for MM update of indexed field. Can check only the querytree head, no need for drill down */
+        /* check for MOT update of indexed field. Can check only the querytree head, no need for drill down */
         if (!IsTransactionExitStmt(parsetree) &&
-                (querytree_list != NULL && IsMMIndexedColumnUpdate((Query*)linitial(querytree_list)))) {
+                (querytree_list != NULL && IsMOTIndexedColumnUpdate((Query*)linitial(querytree_list)))) {
             ereport(ERROR, (errcode(ERRCODE_FDW_UPDATE_INDEXED_FIELD_NOT_SUPPORTED), errmodule(MOD_MOT),
-                    errmsg("Update of indexed column is not supported for main memory tables")));
+                    errmsg("Update of indexed column is not supported for memory table")));
         }
 
         // judge whether we can use light proxy
@@ -3131,7 +3131,7 @@ void exec_parse_message(const char* query_string,        /* string to execute */
         }
 
         /******************************* MOT LLVM *************************************/
-        if (JitExec::IsMotCodegenEnabled() && !IS_PGXC_COORDINATOR && psrc->storageEngineType == SE_TYPE_MM) {
+        if (JitExec::IsMotCodegenEnabled() && !IS_PGXC_COORDINATOR && psrc->storageEngineType == SE_TYPE_MOT) {
             // try to generate LLVM jitted code - first cleanup jit of previous run
             if (psrc->mot_jit_context != NULL) {
                 // NOTE: context is cleaned up during end of session, this should not happen, maybe a warning should be issued
@@ -3152,9 +3152,9 @@ void exec_parse_message(const char* query_string,        /* string to execute */
         }
         /******************************* MOT LLVM *************************************/
 
-        if (!IsTransactionExitStmt(raw_parse_tree) && IsMMIndexedColumnUpdate(query)) {
+        if (!IsTransactionExitStmt(raw_parse_tree) && IsMOTIndexedColumnUpdate(query)) {
             ereport(ERROR, (errcode(ERRCODE_FDW_UPDATE_INDEXED_FIELD_NOT_SUPPORTED), errmodule(MOD_MOT),
-                    errmsg("Update of indexed column is not supported for main memory tables")));
+                    errmsg("Update of indexed column is not supported for memory table")));
         }
 
         /*
@@ -3373,7 +3373,7 @@ static int getSingleNodeIdx(StringInfo input_message, CachedPlanSource* psrc, co
      * snapshot active till we're done, so that plancache.c doesn't have to
      * take new ones.
      */
-    if (!(psrc->storageEngineType == SE_TYPE_MM) && !GTM_LITE_MODE &&
+    if (!(psrc->storageEngineType == SE_TYPE_MOT) && !GTM_LITE_MODE &&
         (numParams > 0 || analyze_requires_snapshot(psrc->raw_parse_tree))) {
         PushActiveSnapshot(GetTransactionSnapshot());
         snapshot_set = true;
@@ -3865,19 +3865,16 @@ void exec_bind_message(StringInfo input_message)
      */
     start_xact_command();
 
-    /* set unique sql id to current context */
-    SetUniqueSQLIdFromCachedPlanSource(psrc);
-
     /* set transaction storage engine and check for cross transaction violation */
     SetCurrentTransactionStorageEngine(psrc->storageEngineType);
     if (!IsTransactionExitStmt(psrc->raw_parse_tree) && IsMixedEngineUsed())
         ereport(ERROR, (errcode(ERRCODE_FDW_CROSS_STORAGE_ENGINE_TRANSACTION_NOT_SUPPORTED), errmodule(MOD_MOT),
                 errmsg("Cross storage engine transaction is not supported")));
 
-    /* block MM engine queries in sub-transactions */
-    if (!IsTransactionExitStmt(psrc->raw_parse_tree) && IsMMEngineUsedInParentTransaction() && IsMMEngineUsed())
+    /* block MOT engine queries in sub-transactions */
+    if (!IsTransactionExitStmt(psrc->raw_parse_tree) && IsMOTEngineUsedInParentTransaction() && IsMOTEngineUsed())
         ereport(ERROR, (errcode(ERRCODE_FDW_OPERATION_NOT_SUPPORTED), errmodule(MOD_MOT),
-                errmsg("SubTransaction is not supported for memory table.")));
+                errmsg("SubTransaction is not supported for memory table")));
 
     /*
      * MOT JIT Execution:
@@ -3889,6 +3886,9 @@ void exec_bind_message(StringInfo input_message)
     if (psrc->mot_jit_context != NULL) {
         JitResetScan(psrc->mot_jit_context);
     }
+
+    /* set unique sql id to current context */
+    SetUniqueSQLIdFromCachedPlanSource(psrc);
 
     if (psrc->opFusionObj != NULL) {
         (void)RevalidateCachedQuery(psrc);
@@ -4064,7 +4064,8 @@ void exec_bind_message(StringInfo input_message)
      * snapshot active till we're done, so that plancache.c doesn't have to
      * take new ones.
      */
-    if (!(psrc->storageEngineType == SE_TYPE_MM) && (numParams > 0 || analyze_requires_snapshot(psrc->raw_parse_tree))) {
+    if (!(psrc->storageEngineType == SE_TYPE_MOT) &&
+        (numParams > 0 || analyze_requires_snapshot(psrc->raw_parse_tree))) {
         PushActiveSnapshot(GetTransactionSnapshot());
         snapshot_set = true;
     }
@@ -7904,6 +7905,10 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
 
         // reset some flag related to stream
         ResetStreamEnv();
+        // t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->dnStartTime is just set to GetCurrentTimestamp()
+        // in the above call to ResetStreamEnv(). So, just reusing that here instead of calling
+        // GetCurrentTimestamp() again, which will call gettimeofday.
+        TimestampTz currentTimestamp = t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->dnStartTime;
         t_thrd.codegen_cxt.codegen_IRload_thr_count = 0;
         IsExplainPlanStmt = false;
         t_thrd.codegen_cxt.g_runningInFmgr = false;
@@ -7914,7 +7919,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         (void)MemoryContextSwitchTo(oldMemory);
 
         /* Set statement_timestamp */
-        SetStatementStartTimestamp(t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->dnStartTime);
+        SetStatementStartTimestamp(currentTimestamp);
 
         if (u_sess->proc_cxt.MyProcPort && u_sess->proc_cxt.MyProcPort->is_logic_conn)
             LIBCOMM_DEBUG_LOG("postgres to node[nid:%d,sid:%d] with msg:%c.",

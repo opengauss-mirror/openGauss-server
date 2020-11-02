@@ -553,7 +553,6 @@ bool GsCodeGen::verifyFunction(Function* fn)
             }
         }
         if (!m_isCorrupt) {
-            /* OA: print error message to error stream if failed */
             llvm::raw_fd_ostream rfdos(STDERR_FILENO, false);
             m_isCorrupt = llvm::verifyFunction(*fn, &rfdos);
         }

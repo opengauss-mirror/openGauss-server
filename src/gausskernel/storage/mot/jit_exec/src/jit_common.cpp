@@ -384,6 +384,43 @@ extern JitWhereOperatorClass ClassifyWhereOperator(int whereOp)
     return result;
 }
 
+#define APPLY_UNARY_OPERATOR(funcId, name) \
+    case funcId:                           \
+        break;
+#define APPLY_BINARY_OPERATOR(funcId, name) \
+    case funcId:                            \
+        break;
+#define APPLY_TERNARY_OPERATOR(funcId, name) \
+    case funcId:                             \
+        break;
+#define APPLY_UNARY_CAST_OPERATOR(funcId, name) \
+    case funcId:                                \
+        break;
+#define APPLY_BINARY_CAST_OPERATOR(funcId, name) \
+    case funcId:                                 \
+        break;
+#define APPLY_TERNARY_CAST_OPERATOR(funcId, name) \
+    case funcId:                                  \
+        break;
+
+extern bool IsFuncIdSupported(int funcId)
+{
+    bool result = true;
+    switch (funcId) {
+        APPLY_OPERATORS()
+        default:
+            result = false;
+    }
+    return result;
+}
+
+#undef APPLY_UNARY_OPERATOR
+#undef APPLY_BINARY_OPERATOR
+#undef APPLY_TERNARY_OPERATOR
+#undef APPLY_UNARY_CAST_OPERATOR
+#undef APPLY_BINARY_CAST_OPERATOR
+#undef APPLY_TERNARY_CAST_OPERATOR
+
 extern bool IsFullPrefixSearch(const int* columnArray, int columnCount, int* firstZeroColumn)
 {
     *firstZeroColumn = -1;
@@ -530,6 +567,8 @@ extern bool PrepareSubQueryData(JitContext* jitContext, JitCompoundPlan* plan)
                         JitSelectPlan* selectPlan = (JitSelectPlan*)subPlan;
                         subQueryData->m_table = selectPlan->_query._table;
                         subQueryData->m_index = subQueryData->m_table->GetPrimaryIndex();
+                        subQueryData->m_indexId = subQueryData->m_index->GetExtId();
+                        MOT_LOG_TRACE("Installed sub-query %d index id: %" PRIu64, i, subQueryData->m_indexId);
                     } else {
                         MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
                             "Generate JIT code",

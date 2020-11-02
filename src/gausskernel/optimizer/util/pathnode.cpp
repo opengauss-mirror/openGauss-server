@@ -61,6 +61,9 @@
 static bool is_itst_path(PlannerInfo* root, RelOptInfo* rel, Path* path);
 static void add_parameterized_path(RelOptInfo* parent_rel, Path* new_path);
 static List* translate_sub_tlist(List* tlist, int relid);
+static int append_total_cost_compare(const void *a, const void *b);
+static int append_startup_cost_compare(const void *a, const void *b);
+
 static bool check_join_method_alternative(
     List* restrictlist, RelOptInfo* outerrel, RelOptInfo* innerrel, JoinType jointype, bool* try_eq_related_indirectly);
 
@@ -1624,7 +1627,7 @@ bool add_partial_path_precheck(RelOptInfo* parent_rel, Cost total_cost, List* pa
  *	  Creates a path corresponding to a sequential scan, returning the
  *	  pathnode.
  */
-Path* create_seqscan_path(PlannerInfo* root, RelOptInfo* rel, Relids required_outer, int dop, int parallel_degree)
+Path* create_seqscan_path(PlannerInfo* root, RelOptInfo* rel, Relids required_outer, int dop, int parallel_workers)
 {
     Path* pathnode = makeNode(Path);
 
@@ -1633,9 +1636,9 @@ Path* create_seqscan_path(PlannerInfo* root, RelOptInfo* rel, Relids required_ou
     pathnode->param_info = get_baserel_parampathinfo(root, rel, required_outer);
     pathnode->pathkeys = NIL; /* seqscan has unordered result */
     pathnode->dop = dop;
-    pathnode->parallel_aware = parallel_degree > 0 ? true : false;
+    pathnode->parallel_aware = parallel_workers > 0 ? true : false;
     pathnode->parallel_safe = rel->consider_parallel;
-    pathnode->parallel_degree = parallel_degree;
+    pathnode->parallel_workers = parallel_workers;
 
 #ifdef STREAMPLAN
     /* We need to set locator_type for parallel query, cause we may send this value to bg worker */
@@ -2160,34 +2163,38 @@ TidPath* create_tidscan_path(PlannerInfo* root, RelOptInfo* rel, List* tidquals)
  *
  * Note that we must handle subpaths = NIL, representing a dummy access path.
  */
-AppendPath* create_append_path(
-    PlannerInfo* root, RelOptInfo* rel, List* subpaths, Relids required_outer, int parallel_degree)
+AppendPath* create_append_path(PlannerInfo* root, RelOptInfo* rel, List* subpaths, List* partial_subpaths,
+    Relids required_outer, int parallel_workers, bool parallel_aware, double rows)
 {
     AppendPath* pathnode = makeNode(AppendPath);
     ListCell* l = NULL;
     double local_rows = 0;
 
+    Assert(!parallel_aware || parallel_workers > 0);
+
     pathnode->path.pathtype = T_Append;
     pathnode->path.parent = rel;
     pathnode->path.param_info = get_appendrel_parampathinfo(rel, required_outer);
-    pathnode->path.parallel_aware = false;
+    pathnode->path.parallel_aware = parallel_aware;
     pathnode->path.parallel_safe = rel->consider_parallel;
-    pathnode->path.parallel_degree = parallel_degree;
-    pathnode->path.pathkeys = NIL; /* result is always considered
-                                    * unsorted */
-    pathnode->subpaths = subpaths;
+    pathnode->path.parallel_workers = parallel_workers;
+    pathnode->path.pathkeys = NIL; /* result is always considered unsorted */
 
     /*
-     * We don't bother with inventing a cost_append(), but just do it here.
-     *
-     * Compute rows and costs as sums of subplan rows and costs.  We charge
-     * nothing extra for the Append itself, which perhaps is too optimistic,
-     * but since it doesn't do any selection or projection, it is a pretty
-     * cheap node.	If you change this, see also make_append().
+     * For parallel append, non-partial paths are sorted by descending total
+     * costs. That way, the total time to finish all non-partial paths is
+     * minimized.  Also, the partial paths are sorted by descending startup
+     * costs.  There may be some paths that require to do startup work by a
+     * single worker.  In such case, it's better for workers to choose the
+     * expensive ones first, whereas the leader should choose the cheapest
+     * startup plan.
      */
-    set_path_rows(&pathnode->path, 0, rel->multiple);
-    pathnode->path.startup_cost = 0;
-    pathnode->path.total_cost = 0;
+    if (pathnode->path.parallel_aware) {
+        subpaths = list_qsort(subpaths, append_total_cost_compare);
+        partial_subpaths = list_qsort(partial_subpaths, append_startup_cost_compare);
+    }
+    pathnode->first_partial_path = list_length(subpaths);
+    pathnode->subpaths = list_concat(subpaths, partial_subpaths);
 
 #ifdef STREAMPLAN
     if (IS_STREAM_PLAN) {
@@ -2239,9 +2246,7 @@ AppendPath* create_append_path(
 
     foreach (l, subpaths) {
         Path* subpath = (Path*)lfirst(l);
-
         local_rows += PATH_LOCAL_ROWS(subpath);
-        pathnode->path.rows += subpath->rows;
 
         /*
          * Add local gather above the parallelized subpath.
@@ -2276,10 +2281,6 @@ AppendPath* create_append_path(
             }
         }
 
-        if (l == list_head(subpaths)) /* first node? */
-            pathnode->path.startup_cost = subpath->startup_cost;
-        pathnode->path.total_cost += subpath->total_cost;
-        pathnode->path.stream_cost += subpath->stream_cost;
         pathnode->path.parallel_safe = pathnode->path.parallel_safe && subpath->parallel_safe;
         /* All child paths must have same parameterization */
         AssertEreport(bms_equal(PATH_REQ_OUTER(subpath), required_outer),
@@ -2296,7 +2297,58 @@ AppendPath* create_append_path(
     /* Calculate overal multiple for append path */
     if (pathnode->path.rows != 0)
         pathnode->path.multiple = local_rows / pathnode->path.rows * ng_get_dest_num_data_nodes((Path*)pathnode);
+
+    Assert(!parallel_aware || pathnode->path.parallel_safe);
+
+    cost_append(pathnode);
+
+    /* If the caller provided a row estimate, override the computed value. */
+    if (rows >= 0)
+        pathnode->path.rows = rows;
+
     return pathnode;
+}
+
+/*
+ * append_total_cost_compare
+ *   qsort comparator for sorting append child paths by total_cost descending
+ *
+ * For equal total costs, we fall back to comparing startup costs; if those
+ * are equal too, break ties using bms_compare on the paths' relids.
+ * (This is to avoid getting unpredictable results from qsort.)
+ */
+static int append_total_cost_compare(const void *a, const void *b)
+{
+    Path *path1 = (Path*)lfirst(*(ListCell**)a);
+    Path *path2 = (Path*)lfirst(*(ListCell**)b);
+    int   cmp;
+
+    cmp = compare_path_costs(path1, path2, TOTAL_COST);
+    if (cmp != 0)
+        return -cmp;
+
+    return bms_compare(path1->parent->relids, path2->parent->relids);
+}
+
+/*
+ * append_startup_cost_compare
+ *   qsort comparator for sorting append child paths by startup_cost descending
+ *
+ * For equal startup costs, we fall back to comparing total costs; if those
+ * are equal too, break ties using bms_compare on the paths' relids.
+ * (This is to avoid getting unpredictable results from qsort.)
+ */
+static int append_startup_cost_compare(const void *a, const void *b)
+{
+    Path *path1 = (Path*)lfirst(*(ListCell**)a);
+    Path *path2 = (Path*)lfirst(*(ListCell**)b);
+    int   cmp;
+
+    cmp = compare_path_costs(path1, path2, STARTUP_COST);
+    if (cmp != 0)
+        return -cmp;
+
+    return bms_compare(path1->parent->relids, path2->parent->relids);
 }
 
 /*
@@ -2318,7 +2370,7 @@ MergeAppendPath* create_merge_append_path(
     pathnode->path.param_info = get_appendrel_parampathinfo(rel, required_outer);
     pathnode->path.parallel_aware = false;
     pathnode->path.parallel_safe = rel->consider_parallel;
-    pathnode->path.parallel_degree = 0;
+    pathnode->path.parallel_workers = 0;
     pathnode->path.pathkeys = pathkeys;
     pathnode->subpaths = subpaths;
 
@@ -2469,7 +2521,7 @@ ResultPath* create_result_path(RelOptInfo* rel, List* quals, Path* subpath)
     pathnode->path.param_info = NULL;
     pathnode->path.parallel_aware = false;
     pathnode->path.parallel_safe = rel->consider_parallel;
-    pathnode->path.parallel_degree = 0;
+    pathnode->path.parallel_workers = 0;
     pathnode->path.pathkeys = NIL;
     pathnode->subpath = subpath;
     if (subpath != NULL) {
@@ -2526,7 +2578,7 @@ MaterialPath* create_material_path(Path* subpath, bool materialize_all)
     pathnode->path.param_info = subpath->param_info;
     pathnode->path.parallel_aware = false;
     pathnode->path.parallel_safe = subpath->parallel_safe;
-    pathnode->path.parallel_degree = 0;
+    pathnode->path.parallel_workers = 0;
     pathnode->path.pathkeys = subpath->pathkeys;
     pathnode->path.dop = subpath->dop;
     pathnode->materialize_all = materialize_all;
@@ -2739,7 +2791,7 @@ UniquePath* create_unique_path(PlannerInfo* root, RelOptInfo* rel, Path* subpath
 
     pathnode->path.parallel_aware = false;
     pathnode->path.parallel_safe = subpath->parallel_safe;
-    pathnode->path.parallel_degree = 0;
+    pathnode->path.parallel_workers = 0;
     /*
      * Assume the output is unsorted, since we don't necessarily have pathkeys
      * to represent it.  (This might get overridden below.)
@@ -2937,15 +2989,15 @@ GatherPath *create_gather_path(PlannerInfo *root, RelOptInfo *rel, Path *subpath
     pathnode->path.param_info = get_baserel_parampathinfo(root, rel, required_outer);
     pathnode->path.parallel_aware = false;
     pathnode->path.parallel_safe = false;
-    pathnode->path.parallel_degree = subpath->parallel_degree;
+    pathnode->path.parallel_workers = subpath->parallel_workers;
     pathnode->path.pathkeys = NIL; /* Gather has unordered result */
 
     pathnode->subpath = subpath;
     pathnode->single_copy = false;
 
-    if (pathnode->path.parallel_degree == 0) {
+    if (pathnode->path.parallel_workers == 0) {
         pathnode->path.pathkeys = subpath->pathkeys;
-        pathnode->path.parallel_degree = 1;
+        pathnode->path.parallel_workers = 1;
         pathnode->single_copy = true;
     }
 
@@ -2996,7 +3048,7 @@ Path* create_subqueryscan_path(PlannerInfo* root, RelOptInfo* rel, List* pathkey
 
     pathnode->parallel_aware = false;
     pathnode->parallel_safe = rel->consider_parallel;
-    pathnode->parallel_degree = 0;
+    pathnode->parallel_workers = 0;
 
     pathnode->pathkeys = pathkeys;
 
@@ -3095,7 +3147,7 @@ Path* create_functionscan_path(PlannerInfo* root, RelOptInfo* rel)
 
     pathnode->parallel_aware = false;
     pathnode->parallel_safe = rel->consider_parallel;
-    pathnode->parallel_degree = 0;
+    pathnode->parallel_workers = 0;
 
     pathnode->pathkeys = NIL; /* for now, assume unordered result */
 
@@ -3138,7 +3190,7 @@ Path* create_valuesscan_path(PlannerInfo* root, RelOptInfo* rel)
 
     pathnode->parallel_aware = false;
     pathnode->parallel_safe = rel->consider_parallel;
-    pathnode->parallel_degree = 0;
+    pathnode->parallel_workers = 0;
     pathnode->pathkeys = NIL; /* result is always unordered */
 
 #ifdef STREAMPLAN
@@ -3180,7 +3232,7 @@ Path* create_ctescan_path(PlannerInfo* root, RelOptInfo* rel)
 
     pathnode->parallel_aware = false;
     pathnode->parallel_safe = rel->consider_parallel;
-    pathnode->parallel_degree = 0;
+    pathnode->parallel_workers = 0;
     pathnode->pathkeys = NIL; /* XXX for now, result is always unordered */
 
 #ifdef STREAMPLAN
@@ -3212,7 +3264,7 @@ Path* create_worktablescan_path(PlannerInfo* root, RelOptInfo* rel)
 
     pathnode->parallel_aware = false;
     pathnode->parallel_safe = rel->consider_parallel;
-    pathnode->parallel_degree = 0;
+    pathnode->parallel_workers = 0;
     pathnode->pathkeys = NIL; /* result is always unordered */
 
 #ifdef STREAMPLAN
@@ -3276,7 +3328,7 @@ ForeignPath* create_foreignscan_path(PlannerInfo* root, RelOptInfo* rel, Cost st
     pathnode->path.param_info = get_baserel_parampathinfo(root, rel, required_outer);
     pathnode->path.parallel_aware = false;
     pathnode->path.parallel_safe = rel->consider_parallel;
-    pathnode->path.parallel_degree = 0;
+    pathnode->path.parallel_workers = 0;
     set_path_rows(&pathnode->path, rel->rows, rel->multiple);
     pathnode->path.startup_cost = startup_cost;
     pathnode->path.total_cost = total_cost;
@@ -3670,8 +3722,8 @@ NestPath* create_nestloop_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType 
         get_joinrel_parampathinfo(root, joinrel, outer_path, inner_path, sjinfo, required_outer, &restrict_clauses);
     pathnode->path.parallel_aware = false;
     pathnode->path.parallel_safe = joinrel->consider_parallel && outer_path->parallel_safe && inner_path->parallel_safe;
-    /* This is a foolish way to estimate parallel_degree, but for now... */
-    pathnode->path.parallel_degree = outer_path->parallel_degree;
+    /* This is a foolish way to estimate parallel_workers, but for now... */
+    pathnode->path.parallel_workers = outer_path->parallel_workers;
     pathnode->path.pathkeys = pathkeys;
     if (IsA(outer_path, StreamPath) && NIL == outer_path->pathkeys) {
         pathnode->path.pathkeys = NIL;
@@ -3730,7 +3782,7 @@ MergePath* create_mergejoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinTyp
     pathnode->jpath.path.parallel_aware = false;
     pathnode->jpath.path.parallel_safe =
         joinrel->consider_parallel && outer_path->parallel_safe && inner_path->parallel_safe;
-    pathnode->jpath.path.parallel_degree = 0;
+    pathnode->jpath.path.parallel_workers = 0;
     pathnode->jpath.path.pathkeys = pathkeys;
     pathnode->jpath.jointype = jointype;
     pathnode->jpath.outerjoinpath = outer_path;
@@ -3787,6 +3839,12 @@ HashPath* create_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType 
     pathnode->jpath.path.parent = joinrel;
     pathnode->jpath.path.param_info =
         get_joinrel_parampathinfo(root, joinrel, outer_path, inner_path, sjinfo, required_outer, &restrict_clauses);
+
+    pathnode->jpath.path.parallel_aware = false;
+    pathnode->jpath.path.parallel_safe =
+        joinrel->consider_parallel && outer_path->parallel_safe && inner_path->parallel_safe;
+    /* This is a foolish way to estimate parallel_workers, but for now... */
+    pathnode->jpath.path.parallel_workers = outer_path->parallel_workers;
 
     /*
      * A hashjoin never has pathkeys, since its output ordering is

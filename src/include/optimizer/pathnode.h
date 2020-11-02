@@ -14,6 +14,7 @@
 #ifndef PATHNODE_H
 #define PATHNODE_H
 
+#include "nodes/bitmapset.h"
 #include "nodes/relation.h"
 #include "optimizer/streamplan.h"
 
@@ -53,7 +54,7 @@ extern bool add_path_precheck(
     RelOptInfo* parent_rel, Cost startup_cost, Cost total_cost, List* pathkeys, Relids required_outer);
 
 extern Path* create_seqscan_path(PlannerInfo* root, RelOptInfo* rel, Relids required_outer,
-    int dop = 1, int parallel_degree = 0);
+    int dop = 1, int parallel_workers = 0);
 extern Path* create_cstorescan_path(PlannerInfo* root, RelOptInfo* rel, int dop = 1);
 extern Path *create_tsstorescan_path(PlannerInfo* root, RelOptInfo* rel, int dop = 1);
 extern IndexPath* create_index_path(PlannerInfo* root, IndexOptInfo* index, List* indexclauses, List* indexclausecols,
@@ -70,8 +71,8 @@ extern BitmapHeapPath* create_bitmap_heap_path(
 extern BitmapAndPath* create_bitmap_and_path(PlannerInfo* root, RelOptInfo* rel, List* bitmapquals);
 extern BitmapOrPath* create_bitmap_or_path(PlannerInfo* root, RelOptInfo* rel, List* bitmapquals);
 extern TidPath* create_tidscan_path(PlannerInfo* root, RelOptInfo* rel, List* tidquals);
-extern AppendPath* create_append_path(
-    PlannerInfo* root, RelOptInfo* rel, List* subpaths, Relids required_outer, int parallel_degree);
+extern AppendPath* create_append_path(PlannerInfo* root, RelOptInfo* rel, List* subpaths, List* partial_subpaths,
+    Relids required_outer, int parallel_workers, bool parallel_aware, double rows);
 extern MergeAppendPath* create_merge_append_path(
     PlannerInfo* root, RelOptInfo* rel, List* subpaths, List* pathkeys, Relids required_outer);
 extern ResultPath* create_result_path(RelOptInfo* rel, List* quals, Path* subpath = NULL);

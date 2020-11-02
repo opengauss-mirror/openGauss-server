@@ -212,7 +212,7 @@ static int pair_encode(float8 x, float8 y, char* str)
     if (ndig < 1) {
         ndig = 1;
     }
-	
+
     int rc = sprintf_s(str, P_MAXLEN, "%.*g,%.*g", ndig, x, ndig, y);
     securec_check_ss(rc, "\0", "\0");
 
@@ -222,8 +222,8 @@ static int pair_encode(float8 x, float8 y, char* str)
 static int path_decode(int opentype, int npts, char* str, int* isopen, char** ss, Point* p)
 {
     int depth = 0;
-    char *s = NULL;
-	char *cp = NULL;
+    char* s = NULL;
+    char* cp = NULL;
     int i;
 
     s = str;
@@ -845,17 +845,10 @@ Datum box_diagonal(PG_FUNCTION_ARGS)
  **				there are few relops.
  **
  ***********************************************************************/
-#define LINE_NOT_SUPPORT() \
-    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("type \"line\" not yet implemented")));
-
 Datum line_in(PG_FUNCTION_ARGS)
 {
-#ifdef ENABLE_LINE_TYPE
     char* str = PG_GETARG_CSTRING(0);
-#endif
     LINE* line = NULL;
-
-#ifdef ENABLE_LINE_TYPE
     /* when fixed, modify "not implemented", catalog/pg_type.h and SGML */
     LSEG lseg;
     int isopen;
@@ -867,58 +860,20 @@ Datum line_in(PG_FUNCTION_ARGS)
     }
     line = (LINE*)palloc(sizeof(LINE));
     line_construct_pts(line, &lseg.p[0], &lseg.p[1]);
-#else
-    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("type \"line\" not yet implemented")));
-
-    line = NULL;
-#endif
-
     PG_RETURN_LINE_P(line);
 }
 
 Datum line_out(PG_FUNCTION_ARGS)
 {
-#ifdef ENABLE_LINE_TYPE
     LINE* line = PG_GETARG_LINE_P(0);
-#endif
-    char* result = NULL;
+    const char* astr = DatumGetCString(DirectFunctionCall1(float8out, Float8GetDatum(line->A)));
+    const char* bstr = DatumGetCString(DirectFunctionCall1(float8out, Float8GetDatum(line->B)));
+    const char* cstr = DatumGetCString(DirectFunctionCall1(float8out, Float8GetDatum(line->C)));
+    StringInfoData buffer;
 
-#ifdef ENABLE_LINE_TYPE
-    /* when fixed, modify "not implemented", catalog/pg_type.h and SGML */
-    LSEG lseg;
-
-    if (FPzero(line->B)) { /* vertical */
-        /* use "x = C" */
-        result->A = -1;
-        result->B = 0;
-        result->C = pt1->x;
-#ifdef GEODEBUG
-        printf("line_out- line is vertical\n");
-#endif
-#ifdef NOT_USED
-        result->m = DBL_MAX;
-#endif
-
-    } else if (FPzero(line->A)) { /* horizontal */
-        /* use "x = C" */
-        result->A = 0;
-        result->B = -1;
-        result->C = pt1->y;
-#ifdef GEODEBUG
-        printf("line_out- line is horizontal\n");
-#endif
-#ifdef NOT_USED
-        result->m = 0.0;
-#endif
-    }
-
-    return path_encode(TRUE, 2, (Point*)&(ls->p[0]));
-#else
-    ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("type \"line\" not yet implemented")));
-    result = NULL;
-#endif
-
-    PG_RETURN_CSTRING(result);
+    initStringInfo(&buffer);
+    appendStringInfo(&buffer, "{%s,%s,%s}", astr, bstr, cstr);
+    PG_RETURN_CSTRING(buffer.data);
 }
 
 /*
@@ -1020,8 +975,6 @@ static void line_construct_pts(LINE* line, Point* pt1, Point* pt2)
  */
 Datum line_construct_pp(PG_FUNCTION_ARGS)
 {
-    LINE_NOT_SUPPORT();
-
     Point* pt1 = PG_GETARG_POINT_P(0);
     Point* pt2 = PG_GETARG_POINT_P(1);
     LINE* result = (LINE*)palloc(sizeof(LINE));
@@ -1036,8 +989,6 @@ Datum line_construct_pp(PG_FUNCTION_ARGS)
 
 Datum line_intersect(PG_FUNCTION_ARGS)
 {
-    LINE_NOT_SUPPORT();
-
     LINE* l1 = PG_GETARG_LINE_P(0);
     LINE* l2 = PG_GETARG_LINE_P(1);
 
@@ -1046,8 +997,6 @@ Datum line_intersect(PG_FUNCTION_ARGS)
 
 Datum line_parallel(PG_FUNCTION_ARGS)
 {
-    LINE_NOT_SUPPORT();
-
     LINE* l1 = PG_GETARG_LINE_P(0);
     LINE* l2 = PG_GETARG_LINE_P(1);
 
@@ -1062,8 +1011,6 @@ Datum line_parallel(PG_FUNCTION_ARGS)
 
 Datum line_perp(PG_FUNCTION_ARGS)
 {
-    LINE_NOT_SUPPORT();
-
     LINE* l1 = PG_GETARG_LINE_P(0);
     LINE* l2 = PG_GETARG_LINE_P(1);
 
@@ -1085,8 +1032,6 @@ Datum line_perp(PG_FUNCTION_ARGS)
 
 Datum line_vertical(PG_FUNCTION_ARGS)
 {
-    LINE_NOT_SUPPORT();
-
     LINE* line = PG_GETARG_LINE_P(0);
 
     PG_RETURN_BOOL(FPzero(line->B));
@@ -1094,8 +1039,6 @@ Datum line_vertical(PG_FUNCTION_ARGS)
 
 Datum line_horizontal(PG_FUNCTION_ARGS)
 {
-    LINE_NOT_SUPPORT();
-
     LINE* line = PG_GETARG_LINE_P(0);
 
     PG_RETURN_BOOL(FPzero(line->A));
@@ -1103,8 +1046,6 @@ Datum line_horizontal(PG_FUNCTION_ARGS)
 
 Datum line_eq(PG_FUNCTION_ARGS)
 {
-    LINE_NOT_SUPPORT();
-
     LINE* l1 = PG_GETARG_LINE_P(0);
     LINE* l2 = PG_GETARG_LINE_P(1);
     double k;
@@ -1131,8 +1072,6 @@ Datum line_eq(PG_FUNCTION_ARGS)
  */
 Datum line_distance(PG_FUNCTION_ARGS)
 {
-    LINE_NOT_SUPPORT();
-
     LINE* l1 = PG_GETARG_LINE_P(0);
     LINE* l2 = PG_GETARG_LINE_P(1);
     float8 result;
@@ -1141,7 +1080,7 @@ Datum line_distance(PG_FUNCTION_ARGS)
     if (!DatumGetBool(DirectFunctionCall2(line_parallel, LinePGetDatum(l1), LinePGetDatum(l2)))) {
         PG_RETURN_FLOAT8(0.0);
     }
-	/* vertical? */
+    /* vertical? */
     if (FPzero(l1->B)) {
         PG_RETURN_FLOAT8(fabs(l1->C - l2->C));
     }
@@ -1155,14 +1094,11 @@ Datum line_distance(PG_FUNCTION_ARGS)
  */
 Datum line_interpt(PG_FUNCTION_ARGS)
 {
-    LINE_NOT_SUPPORT();
-
     LINE* l1 = PG_GETARG_LINE_P(0);
     LINE* l2 = PG_GETARG_LINE_P(1);
     Point* result = NULL;
 
     result = line_interpt_internal(l1, l2);
-
     if (result == NULL) {
         PG_RETURN_NULL();
     }
@@ -1189,7 +1125,7 @@ static Point* line_interpt_internal(LINE* l1, LINE* l2)
     }
 
 #ifdef NOT_USED
-	/* l1 vertical? */
+    /* l1 vertical? */
     if (FPzero(l1->B)) {
         result = point_construct(l2->m * l1->C + l2->C, l1->C);
     } else if (FPzero(l2->B)) { /* l2 vertical? */
@@ -1573,8 +1509,7 @@ Datum path_distance(PG_FUNCTION_ARGS)
 
         if (i > 0) {
             iprev = i - 1;
-        }
-        else {
+        } else {
             if (!p1->closed) {
                 continue;
             }
@@ -1586,8 +1521,7 @@ Datum path_distance(PG_FUNCTION_ARGS)
 
             if (j > 0) {
                 jprev = j - 1;
-            }
-            else {
+            } else {
                 if (!p2->closed) {
                     continue;
                 }
@@ -1626,8 +1560,7 @@ Datum path_length(PG_FUNCTION_ARGS)
 
         if (i > 0) {
             iprev = i - 1;
-        }
-        else {
+        } else {
             if (!path->closed) {
                 continue;
             }
@@ -2022,8 +1955,7 @@ Datum lseg_perp(PG_FUNCTION_ARGS)
 #endif
     if (FPzero(m1)) {
         PG_RETURN_BOOL(FPeq(m2, DBL_MAX));
-    }
-    else if (FPzero(m2)) {
+    } else if (FPzero(m2)) {
         PG_RETURN_BOOL(FPeq(m1, DBL_MAX));
     }
     PG_RETURN_BOOL(FPeq(m1 / m2, -1.0));
@@ -2218,8 +2150,6 @@ Datum lseg_interpt(PG_FUNCTION_ARGS)
 
 Datum dist_pl(PG_FUNCTION_ARGS)
 {
-    LINE_NOT_SUPPORT();
-
     Point* pt = PG_GETARG_POINT_P(0);
     LINE* line = PG_GETARG_LINE_P(1);
 
@@ -2355,16 +2285,13 @@ Datum dist_pb(PG_FUNCTION_ARGS)
 
 Datum dist_sl(PG_FUNCTION_ARGS)
 {
-    LINE_NOT_SUPPORT();
-
     LSEG* lseg = PG_GETARG_LSEG_P(0);
     LINE* line = PG_GETARG_LINE_P(1);
     float8 result, d2;
 
     if (has_interpt_sl(lseg, line)) {
         result = 0.0;
-    }
-    else {
+    } else {
         result = dist_pl_internal(&lseg->p[0], line);
         d2 = dist_pl_internal(&lseg->p[1], line);
         /* XXX shouldn't we take the min not max? */
@@ -2517,8 +2444,6 @@ static bool has_interpt_sl(LSEG* lseg, LINE* line)
  */
 Datum close_pl(PG_FUNCTION_ARGS)
 {
-    LINE_NOT_SUPPORT();
-
     Point* pt = PG_GETARG_POINT_P(0);
     LINE* line = PG_GETARG_LINE_P(1);
     Point* result = NULL;
@@ -2603,7 +2528,7 @@ Datum close_ps(PG_FUNCTION_ARGS)
         if (result != NULL) {
             PG_RETURN_POINT_P(result);
         }
-		
+
         /* point lines along (to left or right) of the vertical lseg. */
         result = (Point*)palloc(sizeof(Point));
         result->x = lseg->p[0].x;
@@ -2774,8 +2699,6 @@ Datum close_pb(PG_FUNCTION_ARGS)
  */
 Datum close_sl(PG_FUNCTION_ARGS)
 {
-    LINE_NOT_SUPPORT();
-
     LSEG* lseg = PG_GETARG_LSEG_P(0);
     LINE* line = PG_GETARG_LINE_P(1);
     Point* result = NULL;
@@ -2789,8 +2712,7 @@ Datum close_sl(PG_FUNCTION_ARGS)
     d2 = dist_pl_internal(&lseg->p[1], line);
     if (d1 < d2) {
         result = point_copy(&lseg->p[0]);
-    }
-    else {
+    } else {
         result = point_copy(&lseg->p[1]);
     }
 
@@ -2802,8 +2724,6 @@ Datum close_sl(PG_FUNCTION_ARGS)
  */
 Datum close_ls(PG_FUNCTION_ARGS)
 {
-    LINE_NOT_SUPPORT();
-
     LINE* line = PG_GETARG_LINE_P(0);
     LSEG* lseg = PG_GETARG_LSEG_P(1);
     Point* result = NULL;
@@ -2898,7 +2818,6 @@ Datum close_lb(PG_FUNCTION_ARGS)
  */
 Datum on_pl(PG_FUNCTION_ARGS)
 {
-    LINE_NOT_SUPPORT();
 
     Point* pt = PG_GETARG_POINT_P(0);
     LINE* line = PG_GETARG_LINE_P(1);
@@ -2977,8 +2896,6 @@ Datum on_ppath(PG_FUNCTION_ARGS)
 
 Datum on_sl(PG_FUNCTION_ARGS)
 {
-    LINE_NOT_SUPPORT();
-
     LSEG* lseg = PG_GETARG_LSEG_P(0);
     LINE* line = PG_GETARG_LINE_P(1);
 
@@ -3002,8 +2919,6 @@ Datum on_sb(PG_FUNCTION_ARGS)
 
 Datum inter_sl(PG_FUNCTION_ARGS)
 {
-    LINE_NOT_SUPPORT();
-
     LSEG* lseg = PG_GETARG_LSEG_P(0);
     LINE* line = PG_GETARG_LINE_P(1);
 
@@ -3042,7 +2957,7 @@ Datum inter_sb(PG_FUNCTION_ARGS)
     if (DatumGetBool(DirectFunctionCall2(on_pb, PointPGetDatum(&lseg->p[0]), BoxPGetDatum(box))) ||
         DatumGetBool(DirectFunctionCall2(on_pb, PointPGetDatum(&lseg->p[1]), BoxPGetDatum(box)))) {
         PG_RETURN_BOOL(true);
-	}
+    }
 
     /* pairwise check lseg intersections */
     point.x = box->low.x;
@@ -3078,8 +2993,6 @@ Datum inter_sb(PG_FUNCTION_ARGS)
  */
 Datum inter_lb(PG_FUNCTION_ARGS)
 {
-    LINE_NOT_SUPPORT();
-
     LINE* line = PG_GETARG_LINE_P(0);
     BOX* box = PG_GETARG_BOX_P(1);
     LSEG bseg;
@@ -3579,7 +3492,7 @@ static bool lseg_inside_poly(Point* a, Point* b, POLYGON* poly, int start)
     LSEG s, t;
     int i;
     bool res = true;
-	bool intersection = false;
+    bool intersection = false;
 
     t.p[0] = *a;
     t.p[1] = *b;
@@ -4677,12 +4590,11 @@ Datum circle_poly(PG_FUNCTION_ARGS)
         ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED), errmsg("too many points requested")));
     }
 
-    poly = (POLYGON*)palloc0(size); /* zero any holes */	
+    poly = (POLYGON*)palloc0(size); /* zero any holes */
     SET_VARSIZE(poly, size);
     poly->npts = npts;
 
     anglestep = (2.0 * M_PI) / npts;
-
     for (i = 0; i < npts; i++) {
         angle = i * anglestep;
         poly->p[i].x = circle->center.x - (circle->radius * cos(angle));
@@ -4807,7 +4719,7 @@ static int lseg_crossing(double x, double y, double prev_x, double prev_y)
     double z;
     int y_sign;
 
-    if (FPzero(y)) {   /* y == 0, on X axis */
+    if (FPzero(y)) {     /* y == 0, on X axis */
         if (FPzero(x)) { /* (x,y) is (0,0)? */
             return POINT_ON_POLYGON;
         } else if (FPgt(x, 0)) {  /* x > 0 */
@@ -4830,10 +4742,10 @@ static int lseg_crossing(double x, double y, double prev_x, double prev_y)
         if (FPzero(prev_y)) {
             /* previous point was on X axis, so new point is either off or on */
             return FPlt(prev_x, 0) ? 0 : y_sign;
-        }  else if (FPgt(y_sign * prev_y, 0)) {
+        } else if (FPgt(y_sign * prev_y, 0)) {
             /* both above or below X axis */
             return 0; /* same sign */
-        } else { /* y and prev_y cross X-axis */
+        } else {      /* y and prev_y cross X-axis */
             if (FPge(x, 0) && FPgt(prev_x, 0)) {
                 /* both non-negative so cross positive X-axis */
                 return 2 * y_sign;

@@ -698,7 +698,7 @@ Datum pg_tablespace_location(PG_FUNCTION_ARGS)
     Oid table_space_oid = PG_GETARG_OID(0);
     char source_path[MAXPGPATH];
     char target_path[MAXPGPATH];
-    int rllen;
+    ssize_t rllen;
 
     if (!superuser()) {
         ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE), (errmsg("permission denied."))));
@@ -738,7 +738,7 @@ Datum pg_tablespace_location(PG_FUNCTION_ARGS)
 
     /* relative location will contain t_thrd.proc_cxt.DataDir */
     size_t dataDirLength = strlen(t_thrd.proc_cxt.DataDir);
-    if (0 == strncmp(target_path, t_thrd.proc_cxt.DataDir, dataDirLength) && rllen > dataDirLength &&
+    if (0 == strncmp(target_path, t_thrd.proc_cxt.DataDir, dataDirLength) && (size_t)rllen > dataDirLength &&
         target_path[dataDirLength] == '/') {
         /*
          * The position is  not '/' when skip t_thrd.proc_cxt.DataDir. the relative location can't start from '/'

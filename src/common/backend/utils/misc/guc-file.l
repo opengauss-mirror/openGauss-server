@@ -124,6 +124,9 @@ ProcessConfigFile(GucContext context)
 				   *tail = NULL;
 	int			i;
 
+	int			min_length;
+	int			max_length;
+	bool		is_password_length_error = false;
 	/*
 	 * Config files are processed on startup (by the postmaster only)
 	 * and on SIGHUP (by the postmaster and its children)
@@ -378,6 +381,17 @@ ProcessConfigFile(GucContext context)
 	/* Remember when we last successfully loaded the config file. */
 	t_thrd.time_cxt.pg_reload_time = GetCurrentTimestamp();
 
+	/*
+	 * This is the start-up phase, so we can let it set the parameters of session because we will stop the database if 
+	 * the password length error.
+	 */
+	min_length = u_sess->attr.attr_security.Password_min_length;
+	max_length = u_sess->attr.attr_security.Password_max_length;
+	if (min_length > max_length) {
+		error = true;
+		is_password_length_error = true;
+		goto cleanup_list;
+	}
  cleanup_list:
 	FreeConfigVariables(head);
 
@@ -389,6 +403,10 @@ ProcessConfigFile(GucContext context)
 					(errcode(ERRCODE_CONFIG_FILE_ERROR),
 					 errmsg("configuration file \"%s\" contains errors",
 							g_instance.attr.attr_common.ConfigFileName)));
+		else if (is_password_length_error)
+			ereport(elevel,
+					(errcode(ERRCODE_CONFIG_FILE_ERROR),
+					 errmsg("the parameter password_min_length cannot longer than password_max_length.\n")));
 		else if (apply)
 			ereport(elevel,
 					(errcode(ERRCODE_CONFIG_FILE_ERROR),

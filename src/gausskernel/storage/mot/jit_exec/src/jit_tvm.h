@@ -369,6 +369,104 @@ private:
     int _arg_pos;
 };
 
+/*---------------------------------  AndExpression --------------------------------*/
+/** @class AndExpression. An expression that evaluates to boolean AND of two sub-expressions. */
+class AndExpression : public Expression {
+public:
+    /**
+     * @brief Constructor.
+     * @param lhs The left-hand-side sub-expression.
+     * @param rhs The right-hand-side sub-expression.
+     */
+    AndExpression(Expression* lhs, Expression* rhs) : Expression(Expression::CanFail), _lhs(lhs), _rhs(rhs)
+    {}
+
+    /** @brief Destructor. */
+    ~AndExpression() override
+    {}
+
+    /**
+     * @brief Evaluates the boolean expression.
+     * @param exec_context The execution context.
+     * @return The boolean result.
+     */
+    Datum eval(ExecContext* exec_context) override;
+
+    /** @brief Dumps the expression to the standard error stream. */
+    void dump() override;
+
+private:
+    /** @var The left-hand-side sub-expression. */
+    Expression* _lhs;
+
+    /** @var The right-hand-side sub-expression. */
+    Expression* _rhs;
+};
+
+/*---------------------------------  OrExpression --------------------------------*/
+/** @class OrExpression. An expression that evaluates to boolean OR of two sub-expressions. */
+class OrExpression : public Expression {
+public:
+    /**
+     * @brief Constructor.
+     * @param lhs The left-hand-side sub-expression.
+     * @param rhs The right-hand-side sub-expression.
+     */
+    OrExpression(Expression* lhs, Expression* rhs) : Expression(Expression::CanFail), _lhs(lhs), _rhs(rhs)
+    {}
+
+    /** @brief Destructor. */
+    ~OrExpression() override
+    {}
+
+    /**
+     * @brief Evaluates the boolean expression.
+     * @param exec_context The execution context.
+     * @return The boolean result.
+     */
+    Datum eval(ExecContext* exec_context) override;
+
+    /** @brief Dumps the expression to the standard error stream. */
+    void dump() override;
+
+private:
+    /** @var The left-hand-side sub-expression. */
+    Expression* _lhs;
+
+    /** @var The right-hand-side sub-expression. */
+    Expression* _rhs;
+};
+
+/*---------------------------------  NotExpression --------------------------------*/
+/** @class NotExpression. An expression that evaluates to boolean NOT of a sub-expression. */
+class NotExpression : public Expression {
+public:
+    /**
+     * @brief Constructor.
+     * @param arg The sub-expression.
+     */
+    explicit NotExpression(Expression* arg) : Expression(Expression::CanFail), _arg(arg)
+    {}
+
+    /** @brief Destructor. */
+    ~NotExpression() override
+    {}
+
+    /**
+     * @brief Evaluates the boolean expression.
+     * @param exec_context The execution context.
+     * @return The boolean result.
+     */
+    Datum eval(ExecContext* exec_context) override;
+
+    /** @brief Dumps the expression to the standard error stream. */
+    void dump() override;
+
+private:
+    /** @var The sub-expression. */
+    Expression* _arg;
+};
+
 /*---------------------------------  RegisterRefInstruction --------------------------------*/
 /**
  * @class RegisterRefInstruction. This instruction retrieves the cached result of a previously

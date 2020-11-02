@@ -494,12 +494,16 @@ static void ExplainIndexExprArray(Query* query, JitPlan* plan, JitIndexScan* ind
     if ((indexScan->_scan_type == JIT_INDEX_SCAN_CLOSED) || (indexScan->_scan_type == JIT_INDEX_SCAN_POINT)) {
         ExplainIndexExprArray(query, plan, indexScan, indexScan->_search_exprs._count);
     } else if (indexScan->_scan_type == JIT_INDEX_SCAN_SEMI_OPEN) {
-        ExplainIndexExprArray(query, plan, indexScan, indexScan->_search_exprs._count - 1);
-        MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, " AND ");
+        if (indexScan->_search_exprs._count > 1) {
+            ExplainIndexExprArray(query, plan, indexScan, indexScan->_search_exprs._count - 1);
+            MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, " AND ");
+        }
         ExplainIndexOpenExpr(query, plan, indexScan, indexScan->_search_exprs._count - 1, indexScan->_last_dim_op1);
     } else if (indexScan->_scan_type == JIT_INDEX_SCAN_OPEN) {
-        ExplainIndexExprArray(query, plan, indexScan, indexScan->_search_exprs._count - 2);
-        MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, " AND ");
+        if (indexScan->_search_exprs._count > 2) {
+            ExplainIndexExprArray(query, plan, indexScan, indexScan->_search_exprs._count - 2);
+            MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, " AND ");
+        }
         ExplainIndexOpenExpr(query, plan, indexScan, indexScan->_search_exprs._count - 2, indexScan->_last_dim_op1);
         MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE, " AND ");
         ExplainIndexOpenExpr(query, plan, indexScan, indexScan->_search_exprs._count - 1, indexScan->_last_dim_op2);
@@ -530,6 +534,8 @@ static const char* JitIndexScanTypeToString(JitIndexScanType scanType)
             return "Semi-Open-Scan";
         case JIT_INDEX_SCAN_POINT:
             return "Point-Scan";
+        case JIT_INDEX_SCAN_FULL:
+            return "Full-Scan";
         default:
             return "Invalid-Scan-Type";
     }
@@ -557,18 +563,20 @@ static void ExplainIndexScan(Query* query, JitPlan* plan, int indent, JitIndexSc
     MOT::Index* index = indexScan->_table->GetIndex(indexScan->_index_id);
     if (isSubQuery) {
         MOT_LOG_APPEND(MOT::LogLevel::LL_TRACE,
-            "%s SCAN %s index %s (%s, %s) ON (",
+            "%s%sSCAN %s index %s (%s, %s) ON (",
             scanName,
+            scanName[0] ? " " : "",
             index->GetName().c_str(),
             JitQuerySortOrderToString(indexScan->_sort_order),
             JitIndexScanTypeToString(indexScan->_scan_type),
             JitIndexScanDirectionToString(indexScan->_scan_direction));
     } else {
         MOT_LOG_BEGIN(MOT::LogLevel::LL_TRACE,
-            "%*s%s SCAN %s index %s (%s, %s) ON (",
+            "%*s%s%sSCAN %s index %s (%s, %s) ON (",
             indent,
             "",
             scanName,
+            scanName[0] ? " " : "",
             index->GetName().c_str(),
             JitQuerySortOrderToString(indexScan->_sort_order),
             JitIndexScanTypeToString(indexScan->_scan_type),
@@ -722,8 +730,8 @@ static void ExplainJoinPlan(Query* query, JitJoinPlan* plan)
         indent += 2;
         MOT_LOG_TRACE("%*sLIMIT %d", indent, "", plan->_limit_count);
     }
-    ExplainIndexScan(query, (JitPlan*)plan, indent + 2, &plan->_outer_scan, "OUTER ");
-    ExplainIndexScan(query, (JitPlan*)plan, indent + 2, &plan->_inner_scan, "INNER ");
+    ExplainIndexScan(query, (JitPlan*)plan, indent + 2, &plan->_outer_scan, "OUTER");
+    ExplainIndexScan(query, (JitPlan*)plan, indent + 2, &plan->_inner_scan, "INNER");
 }
 
 static void ExplainCompoundPlan(Query* query, JitCompoundPlan* plan)

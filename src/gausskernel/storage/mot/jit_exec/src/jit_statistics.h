@@ -55,6 +55,12 @@ public:
         m_execQueryCount.AddSample();
     }
 
+    /** @brief Updates the successful JIT query invocation count statistics. */
+    inline void AddInvokeQuery()
+    {
+        m_invokeQueryCount.AddSample();
+    }
+
     /** @brief Updates the failed JIT query execution count statistics. */
     inline void AddExecFailQuery()
     {
@@ -70,6 +76,9 @@ public:
 private:
     /** @var The successful JIT query execution count statistic variable. */
     MOT::FrequencyStatisticVariable m_execQueryCount;
+
+    /** @var The successful JIT query invocation count statistic variable. */
+    MOT::FrequencyStatisticVariable m_invokeQueryCount;
 
     /** @var The failed JIT query execution count statistic variable. */
     MOT::FrequencyStatisticVariable m_execFailQueryCount;
@@ -191,7 +200,7 @@ public:
         }
     }
 
-    /** @brief Updates the statistics for total amount of un-jittable queries. */
+    /** @brief Updates the statistics for total amount of un-jittable queries  due to disqualification. */
     inline void AddUnjittableDisqualifiedQuery()
     {
         JitGlobalStatistics* jgs = GetGlobalStatistics<JitGlobalStatistics>();
@@ -200,7 +209,7 @@ public:
         }
     }
 
-    /** @brief Updates the statistics for total amount of un-jittable queries due to disqualification. */
+    /** @brief Updates the statistics for total amount of compiled queries. */
     inline void AddCodeGenQuery()
     {
         JitGlobalStatistics* jgs = GetGlobalStatistics<JitGlobalStatistics>();
@@ -260,6 +269,14 @@ public:
         JitThreadStatistics* jts = GetCurrentThreadStatistics<JitThreadStatistics>();
         if (jts != nullptr) {
             jts->AddExecQuery();
+        }
+    }
+
+    inline void AddInvokeQuery()
+    {
+        JitThreadStatistics* jts = GetCurrentThreadStatistics<JitThreadStatistics>();
+        if (jts != nullptr) {
+            jts->AddInvokeQuery();
         }
     }
 

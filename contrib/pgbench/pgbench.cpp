@@ -971,10 +971,11 @@ top:
                 case PGRES_TUPLES_OK:
                     break; /* OK */
                 default:
-                    error_found = true;
                     if (!is_mot) {
                         fprintf(
                             stderr, "Client %d aborted in state %d: %s", st->id, st->state, PQerrorMessage(st->con));
+                    } else {
+                        error_found = true;
                     }
                     break;
             }
@@ -1511,21 +1512,21 @@ static void init(void)
                 ddl->distribute_by);
         else
 #endif
-        if (!is_mot) {
-            snprintf(buffer,
-                256,
-                "create%s table %s(%s)%s",
-                unlogged_tables ? " unlogged" : "",
-                ddl->table,
-                ddl->cols,
-                opts);
-        } else {
-            snprintf(buffer,
-                256,
-                "create foreign table %s(%s)",
-                ddl->table,
-                ddl->cols);
-        }
+            if (!is_mot) {
+                snprintf(buffer,
+                    256,
+                    "create%s table %s(%s)%s",
+                    unlogged_tables ? " unlogged" : "",
+                    ddl->table,
+                    ddl->cols,
+                    opts);
+            } else {
+                snprintf(buffer,
+                    256,
+                    "create foreign table %s(%s)",
+                    ddl->table,
+                    ddl->cols);
+            }
 
         executeStatement(con, buffer);
     }
@@ -1653,22 +1654,22 @@ static void init(void)
             }
         } else
 #endif
-        for (i = 0; i < (int)lengthof(DDLAFTERs); i++) {
-            char buffer[256];
+            for (i = 0; i < (int)lengthof(DDLAFTERs); i++) {
+                char buffer[256];
 
-            strncpy(buffer, DDLAFTERs[i], 256);
+                strncpy(buffer, DDLAFTERs[i], 256);
 
-            if (index_tablespace != NULL) {
-                char* escape_tablespace = NULL;
+                if (index_tablespace != NULL) {
+                    char* escape_tablespace = NULL;
 
-                escape_tablespace = PQescapeIdentifier(con, index_tablespace, strlen(index_tablespace));
-                snprintf(
-                    buffer + strlen(buffer), 256 - strlen(buffer), " using index tablespace %s", escape_tablespace);
-                PQfreemem(escape_tablespace);
+                    escape_tablespace = PQescapeIdentifier(con, index_tablespace, strlen(index_tablespace));
+                    snprintf(
+                        buffer + strlen(buffer), 256 - strlen(buffer), " using index tablespace %s", escape_tablespace);
+                    PQfreemem(escape_tablespace);
+                }
+
+                executeStatement(con, buffer, true);
             }
-
-            executeStatement(con, buffer, true);
-        }
     }
 
     /* vacuum */

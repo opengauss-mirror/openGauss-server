@@ -218,7 +218,18 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
 
             InsertArg args;
             HeapTuple deltaTup = NULL;
-            CStoreInsert::InitInsertArg(onerel, NULL, false, args);
+            ResultRelInfo *resultRelInfo = NULL;
+            if (onerel->rd_rel->relhasindex) {
+                resultRelInfo = makeNode(ResultRelInfo);
+                if (vacstmt->onepartrel != NULL) {
+                    InitResultRelInfo(resultRelInfo, vacstmt->onepartrel, 1, 0);
+                } else {
+                    InitResultRelInfo(resultRelInfo, onerel, 1, 0);
+                }
+
+                ExecOpenIndices(resultRelInfo, false);
+            }
+            CStoreInsert::InitInsertArg(onerel, resultRelInfo, true, args);
             CStoreInsert cstoreInsert(onerel, args, false, NULL, NULL);
             TupleDesc tupDesc = onerel->rd_att;
             Datum* val = (Datum*)palloc(sizeof(Datum) * tupDesc->natts);
@@ -250,6 +261,10 @@ void lazy_vacuum_rel(Relation onerel, VacuumStmt* vacstmt, BufferAccessStrategy 
             CStoreInsert::DeInitInsertArg(args);
             batchRow.Destroy();
             cstoreInsert.Destroy();
+            if (resultRelInfo != NULL) {
+                ExecCloseIndices(resultRelInfo);
+                pfree(resultRelInfo);
+            }
         }
 
         /* clean part info before vacuum delta and desc table */

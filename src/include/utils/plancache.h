@@ -34,9 +34,9 @@ namespace JitExec
 /* different storage engine types that might be used by a query */
 typedef enum {
     SE_TYPE_UNSPECIFIED = 0,    /* unspecified storage engine */
-    SE_TYPE_MM,                 /* MM storage engine */
+    SE_TYPE_MOT,                /* MOT storage engine */
     SE_TYPE_PAGE_BASED,         /* Page Based storage engine */
-    SE_TYPE_MIXED               /* Mixed (MM & Page Based) storage engines */
+    SE_TYPE_MIXED               /* Mixed (MOT & Page Based) storage engines */
 } StorageEngineType;
 
 /* possible values for plan_cache_mode */

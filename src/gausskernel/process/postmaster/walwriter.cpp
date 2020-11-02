@@ -77,8 +77,6 @@ typedef struct WALCallbackItem {
     void* arg;
 } WALCallbackItem;
 
-static WALCallbackItem* wal_callback = NULL;
-
 /* Signal handlers */
 static void wal_quickdie(SIGNAL_ARGS);
 static void WalSigHupHandler(SIGNAL_ARGS);
@@ -409,15 +407,15 @@ void RegisterWALCallback(WALCallback callback, void* arg)
     item = (WALCallbackItem*)MemoryContextAlloc(g_instance.instance_context, sizeof(WALCallbackItem));
     item->callback = callback;
     item->arg = arg;
-    item->next = wal_callback;
-    wal_callback = item;
+    item->next = g_instance.xlog_cxt.walCallback;
+    g_instance.xlog_cxt.walCallback = item;
 }
 
 void CallWALCallback()
 {
     WALCallbackItem* item;
 
-    for (item = wal_callback; item; item = item->next) {
+    for (item = g_instance.xlog_cxt.walCallback; item; item = item->next) {
         (*item->callback) (item->arg);
     }
 }

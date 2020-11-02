@@ -243,8 +243,10 @@ public:
         // if no expression was collected, this is an invalid scan (we do not support full scans yet)
         int column_count = _index_op_count;
         if (_index_op_count == 0) {
-            MOT_LOG_TRACE("RangeScanExpressionCollector(): Disqualifying query - no expression was collected "
-                          "(unsupported for index scan)");
+            MOT_LOG_TRACE("RangeScanExpressionCollector(): no expression was collected, assuming full scan");
+            _index_scan->_scan_type = JIT_INDEX_SCAN_FULL;
+            _index_scan->_column_count = 0;
+            _index_scan->_search_exprs._count = 0;
             return;
         }
 
@@ -654,21 +656,58 @@ static JitExpr* parseRelabelExpr(Query* query, RelabelType* relabel_type, int ar
     return (JitExpr*)result;
 }
 
+static bool ValidateFuncCallExpr(Expr* expr)
+{
+    Oid resultType;
+    Oid funcId;
+    List* args;
+    Oid oidValue;
+
+    if (expr->type == T_OpExpr) {
+        OpExpr* opExpr = (OpExpr*)expr;
+        resultType = opExpr->opresulttype;
+        funcId = opExpr->opfuncid;
+        args = opExpr->args;
+        oidValue = opExpr->opno;  // with operator expression we prefer printing the operator id for easier lookup
+    } else if (expr->type == T_FuncExpr) {
+        FuncExpr* funcExpr = (FuncExpr*)expr;
+        resultType = funcExpr->funcresulttype;
+        funcId = funcExpr->funcid;
+        args = funcExpr->args;
+        oidValue = funcExpr->funcid;
+    } else {
+        MOT_LOG_TRACE("ValidateFuncOpExpr(): Invalid expression type %u", expr->type);
+        return false;
+    }
+
+    const char* exprName = expr->type == T_OpExpr ? "operator" : "function";
+    if (!IsTypeSupported(resultType)) {
+        MOT_LOG_TRACE("Disqualifying %s expression: result type %u is unsupported", exprName, resultType);
+        return false;
+    }
+
+    if (!IsFuncIdSupported(funcId)) {
+        MOT_LOG_TRACE("Disqualifying %s expression: operator function id %u is unsupported", exprName, funcId);
+        return false;
+    }
+
+    if (list_length(args) > MOT_JIT_MAX_FUNC_EXPR_ARGS) {
+        MOT_LOG_TRACE("Unsupported %s %u: too many arguments", exprName, oidValue);
+        return false;
+    }
+
+    return true;
+}
+
 static JitExpr* parseOpExpr(Query* query, const OpExpr* op_expr, int arg_pos, int depth)
 {
-    if (!IsTypeSupported(op_expr->opresulttype)) {
-        MOT_LOG_TRACE("Disqualifying operator expression: result type %d is unsupported", (int)op_expr->opresulttype);
+    if (!ValidateFuncCallExpr((Expr*)op_expr)) {
+        MOT_LOG_TRACE("Disqualifying invalid operator expression");
         return nullptr;
     }
 
-    if (list_length(op_expr->args) > 3) {
-        MOT_LOG_TRACE("Unsupported operator %d: too many arguments", op_expr->opno);
-        return nullptr;
-    }
-
-    JitExpr* args[3] = {nullptr, nullptr, nullptr};
+    JitExpr* args[MOT_JIT_MAX_FUNC_EXPR_ARGS] = {nullptr, nullptr, nullptr};
     int arg_num = 0;
-
     ListCell* lc = nullptr;
     foreach (lc, op_expr->args) {
         Expr* sub_expr = (Expr*)lfirst(lc);
@@ -680,7 +719,7 @@ static JitExpr* parseOpExpr(Query* query, const OpExpr* op_expr, int arg_pos, in
             }
             return nullptr;
         }
-        if (++arg_num == 3) {
+        if (++arg_num == MOT_JIT_MAX_FUNC_EXPR_ARGS) {
             break;
         }
     }
@@ -693,39 +732,32 @@ static JitExpr* parseOpExpr(Query* query, const OpExpr* op_expr, int arg_pos, in
         for (int i = 0; i < arg_num; ++i) {
             freeExpr(args[i]);
         }
-    } else {
-        result->_expr_type = JIT_EXPR_TYPE_OP;
-        result->_op_no = op_expr->opno;
-        result->_op_func_id = op_expr->opfuncid;
-        result->_result_type = op_expr->opresulttype;
-        result->_arg_count = arg_num;
-        for (int i = 0; i < arg_num; ++i) {
-            result->_args[i] = args[i];
-        }
-        result->_arg_pos = arg_pos;
+        return nullptr;
     }
+
+    result->_expr_type = JIT_EXPR_TYPE_OP;
+    result->_op_no = op_expr->opno;
+    result->_op_func_id = op_expr->opfuncid;
+    result->_result_type = op_expr->opresulttype;
+    result->_arg_count = arg_num;
+    for (int i = 0; i < arg_num; ++i) {
+        result->_args[i] = args[i];
+    }
+    result->_arg_pos = arg_pos;
 
     return (JitExpr*)result;
 }
 
 static JitExpr* parseFuncExpr(Query* query, const FuncExpr* func_expr, int arg_pos, int depth)
 {
-    if (!IsTypeSupported(func_expr->funcresulttype)) {
-        MOT_LOG_TRACE(
-            "Disqualifying function expression: result type %d is unsupported", (int)func_expr->funcresulttype);
+    if (!ValidateFuncCallExpr((Expr*)func_expr)) {
+        MOT_LOG_TRACE("Disqualifying invalid function expression");
         return nullptr;
     }
 
-    if (list_length(func_expr->args) > 3) {
-        MOT_LOG_TRACE("Unsupported function %d: too many arguments", func_expr->funcid);
-        return nullptr;
-    }
-
-    JitExpr* args[3] = {nullptr, nullptr, nullptr};
+    JitExpr* args[MOT_JIT_MAX_FUNC_EXPR_ARGS] = {nullptr, nullptr, nullptr};
     int arg_num = 0;
-
     ListCell* lc = nullptr;
-
     foreach (lc, func_expr->args) {
         Expr* sub_expr = (Expr*)lfirst(lc);
         args[arg_num] = parseExpr(query, sub_expr, arg_pos + arg_num, depth + 1);
@@ -736,7 +768,7 @@ static JitExpr* parseFuncExpr(Query* query, const FuncExpr* func_expr, int arg_p
             }
             return nullptr;
         }
-        if (++arg_num == 3) {
+        if (++arg_num == MOT_JIT_MAX_FUNC_EXPR_ARGS) {
             break;
         }
     }
@@ -749,16 +781,17 @@ static JitExpr* parseFuncExpr(Query* query, const FuncExpr* func_expr, int arg_p
         for (int i = 0; i < arg_num; ++i) {
             freeExpr(args[i]);
         }
-    } else {
-        result->_expr_type = JIT_EXPR_TYPE_FUNC;
-        result->_func_id = func_expr->funcid;
-        result->_result_type = func_expr->funcresulttype;
-        result->_arg_count = arg_num;
-        for (int i = 0; i < arg_num; ++i) {
-            result->_args[i] = args[i];
-        }
-        result->_arg_pos = arg_pos;
+        return nullptr;
     }
+
+    result->_expr_type = JIT_EXPR_TYPE_FUNC;
+    result->_func_id = func_expr->funcid;
+    result->_result_type = func_expr->funcresulttype;
+    result->_arg_count = arg_num;
+    for (int i = 0; i < arg_num; ++i) {
+        result->_args[i] = args[i];
+    }
+    result->_arg_pos = arg_pos;
 
     return (JitExpr*)result;
 }
@@ -801,6 +834,56 @@ static JitExpr* ParseSubLink(Query* query, const SubLink* subLink, int argPos, i
     return (JitExpr*)result;
 }
 
+static JitExpr* ParseBoolExpr(Query* query, const BoolExpr* boolExpr, int argPos, int depth)
+{
+    if (list_length(boolExpr->args) > MOT_JIT_MAX_BOOL_EXPR_ARGS) {
+        MOT_LOG_TRACE("Unsupported Boolean operator: too many arguments");
+        return nullptr;
+    }
+
+    JitExpr* args[MOT_JIT_MAX_BOOL_EXPR_ARGS] = {nullptr, nullptr};
+    int argNum = 0;
+
+    ListCell* lc = nullptr;
+    foreach (lc, boolExpr->args) {
+        Expr* subExpr = (Expr*)lfirst(lc);
+        args[argNum] = parseExpr(query, subExpr, argPos + argNum, depth + 1);
+        if (args[argNum] == nullptr) {
+            MOT_LOG_TRACE("Failed to process operator sub-expression %d", argNum);
+            for (int i = 0; i < argNum; ++i) {
+                freeExpr(args[i]);
+            }
+            return nullptr;
+        }
+        if (++argNum == MOT_JIT_MAX_BOOL_EXPR_ARGS) {
+            break;
+        }
+    }
+
+    size_t allocSize = sizeof(JitBoolExpr);
+    JitBoolExpr* result = (JitBoolExpr*)MOT::MemSessionAlloc(allocSize);
+    if (result == nullptr) {
+        MOT_REPORT_ERROR(
+            MOT_ERROR_OOM, "Prepare JIT Plan", "Failed to allocate %u bytes for boolean expression", allocSize);
+        for (int i = 0; i < argNum; ++i) {
+            freeExpr(args[i]);
+        }
+        return nullptr;
+    }
+
+    result->_expr_type = JIT_EXPR_TYPE_BOOL;
+    result->_source_expr = (Expr*)boolExpr;
+    result->_result_type = BOOLOID;
+    result->_bool_expr_type = boolExpr->boolop;
+    result->_arg_count = argNum;
+    for (int i = 0; i < argNum; ++i) {
+        result->_args[i] = args[i];
+    }
+    result->_arg_pos = argPos;
+
+    return (JitExpr*)result;
+}
+
 static JitExpr* parseExpr(Query* query, Expr* expr, int arg_pos, int depth)
 {
     JitExpr* result = nullptr;
@@ -824,6 +907,8 @@ static JitExpr* parseExpr(Query* query, Expr* expr, int arg_pos, int depth)
         result = parseFuncExpr(query, (FuncExpr*)expr, arg_pos, depth);
     } else if (expr->type == T_SubLink) {
         result = ParseSubLink(query, (SubLink*)expr, arg_pos, depth);
+    } else if (expr->type == T_BoolExpr) {
+        result = ParseBoolExpr(query, (BoolExpr*)expr, arg_pos, depth);
     } else {
         MOT_LOG_TRACE("Disqualifying expression: unsupported target expression type %d", (int)expr->type);
     }
@@ -1060,6 +1145,11 @@ static TableExprClass clasifyTableExprArgs(Query* query, MOT::Table* table, MOT:
 
 static TableExprClass classifyTableOpExpr(Query* query, MOT::Table* table, MOT::Index* index, OpExpr* op_expr)
 {
+    if (!IsFuncIdSupported(op_expr->opfuncid)) {
+        MOT_LOG_TRACE("classifyTableOpExpr(): Unsupported function id %d", (int)op_expr->opfuncid);
+        return TableExprError;
+    }
+
     TableExprClass result = clasifyTableExprArgs(query, table, index, op_expr->args);
     if (result == TableExprError) {
         int nargs = (int)list_length(op_expr->args);
@@ -1069,11 +1159,17 @@ static TableExprClass classifyTableOpExpr(Query* query, MOT::Table* table, MOT::
             nargs,
             (int)op_expr->xpr.type);
     }
+
     return result;
 }
 
 static TableExprClass classifyTableFuncExpr(Query* query, MOT::Table* table, MOT::Index* index, FuncExpr* func_expr)
 {
+    if (!IsFuncIdSupported(func_expr->funcid)) {
+        MOT_LOG_TRACE("classifyTableFuncExpr(): Unsupported function id %d", (int)func_expr->funcid);
+        return TableExprError;
+    }
+
     TableExprClass result = clasifyTableExprArgs(query, table, index, func_expr->args);
     if (result == TableExprError) {
         int nargs = (int)list_length(func_expr->args);
@@ -1083,6 +1179,7 @@ static TableExprClass classifyTableFuncExpr(Query* query, MOT::Table* table, MOT
             nargs,
             (int)func_expr->xpr.type);
     }
+
     return result;
 }
 
@@ -1105,6 +1202,10 @@ static TableExprClass classifyTableExpr(Query* query, MOT::Table* table, MOT::In
 
         case T_FuncExpr:
             return classifyTableFuncExpr(query, table, index, (FuncExpr*)expr);
+
+        case T_SubLink:
+            MOT_LOG_TRACE("classifyTableExpr(): neutral sub-query");
+            return TableExprNeutral;
 
         default:
             MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
@@ -1226,7 +1327,7 @@ static bool visitSearchOpExpression(Query* query, MOT::Table* table, MOT::Index*
             } else {  // column belongs to table, but...
                 if (colid >= 0) {
                     // this is very unexpected, is the user trying to compare two columns of the same table? we do not
-                    // allow it at them moment
+                    // allow it at the moment
                     MOT_LOG_TRACE("visitSearchOpExpression(): Rejecting query with comparison between two columns of "
                                   "the same table");
                     return false;
@@ -1270,6 +1371,12 @@ static bool visitSearchOpExpression(Query* query, MOT::Table* table, MOT::Index*
 
     if (join_expr) {  // it is possible to see another table's column but not ours in implicit JOIN statements
         MOT_LOG_TRACE("visitSearchOpExpression(): Skipping expression %p of another table in implicit JOIN", op_expr);
+        return true;
+    }
+
+    // last option: complex filter referring some table columns, so we need to analyze it is a valid filter expression
+    if (classifyTableExpr(query, table, index, (Expr*)op_expr) == TableExprFilter) {
+        MOT_LOG_TRACE("visitSearchOpExpression(): Enabling complex filter expression %p", op_expr);
         return true;
     }
 
@@ -1383,7 +1490,8 @@ static bool getRangeSearchExpressions(
     } else {
         Node* quals = query->jointree->quals;
         if (quals == nullptr) {
-            MOT_LOG_TRACE("No range search expressions collected - empty WHEER clause");
+            MOT_LOG_TRACE("No range search expressions collected (empty WHERE clause) - using a full index scan");
+            index_scan->_scan_type = JIT_INDEX_SCAN_FULL;
             return true;
         }
         if (!visitSearchExpressions(

@@ -63,12 +63,12 @@
 #include "utils/tqual.h"
 #include "gstrace/gstrace_infra.h"
 #include "gstrace/commands_gstrace.h"
+#include "foreign/fdwapi.h"
 
 #ifdef PGXC
 #include "pgxc/pgxc.h"
 #include "pgxc/redistrib.h"
 #include "catalog/catalog.h"
-#include "foreign/fdwapi.h"
 #endif
 
 const int ROW_COUNT_SQL_TEMPLATE = 0;
@@ -1863,9 +1863,9 @@ static bool vacuum_rel(Oid relid, VacuumStmt* vacstmt, bool do_toast)
      * get_rel_oids() but seems safer to check after we've locked the
      * relation.
      */
-    if (onerel->rd_rel->relkind == RELKIND_FOREIGN_TABLE && isMOTFromTblOid(onerel->rd_id)) {
-        ;
-    } else if (onerel->rd_rel->relkind != RELKIND_RELATION && onerel->rd_rel->relkind != RELKIND_MATVIEW && 
+    if (onerel->rd_rel->relkind != RELKIND_RELATION &&
+        !(RelationIsForeignTable(onerel) && isMOTFromTblOid(onerel->rd_id)) &&
+        onerel->rd_rel->relkind != RELKIND_MATVIEW &&
         onerel->rd_rel->relkind != RELKIND_TOASTVALUE) {
 
         if (vacstmt->options & VACOPT_VERBOSE)

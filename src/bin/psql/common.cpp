@@ -1513,6 +1513,23 @@ static const char* skip_white_space(const char* query)
 }
 
 /*
+ * judge begin is belong to anonymous block or transaction,if it belong to
+ * anonymous block,return false,otherwise return true. 
+ *
+ */
+static bool is_begin_transaction(const char* query) {
+    if (pg_strncasecmp(query, "begin", 5) == 0) {
+        query = skip_white_space(query + 5);
+        if (query[0] == ';')
+            return true;
+        else
+            return false;
+    }
+    return false;
+}
+
+
+/*
  * Check whether a command is one of those for which we should NOT start
  * a new transaction block (ie, send a preceding BEGIN).
  *
@@ -1543,9 +1560,11 @@ static bool command_no_begin(const char* query)
      * (We assume that START must be START TRANSACTION, since there is
      * presently no other "START foo" command.)
      */
-    if (wordlen == 5 && pg_strncasecmp(query, "abort", 5) == 0)
+
+    if (is_begin_transaction(query))
         return true;
-    if (wordlen == 5 && pg_strncasecmp(query, "begin", 5) == 0)
+
+    if (wordlen == 5 && pg_strncasecmp(query, "abort", 5) == 0)
         return true;
     if (wordlen == 5 && pg_strncasecmp(query, "start", 5) == 0)
         return true;

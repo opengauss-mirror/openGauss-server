@@ -24,7 +24,7 @@ do_init(void)
 	int			results;
 
 	results = pg_check_dir(backup_path);
-	if (results == 4)	/* exists and not empty*/
+	if (results == 2)	/* exists and not empty*/
 		elog(ERROR, "backup catalog already exist and it's not empty");
 	else if (results == -1) /*trouble accessing directory*/
 	{

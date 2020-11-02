@@ -92,7 +92,7 @@ typedef enum {
     SYNCHRONOUS_COMMIT_REMOTE_RECEIVE, /* wait for local flush and remote receive */
     SYNCHRONOUS_COMMIT_REMOTE_WRITE,   /* wait for local flush and remote write */
     SYNCHRONOUS_COMMIT_REMOTE_FLUSH,   /* wait for local and remote flush */
-    SYNCHRONOUS_COMMIT_REMOTE_REPLAY,  /* wait for local and remote replay */
+    SYNCHRONOUS_COMMIT_REMOTE_APPLY,  /* wait for local and remote replay */
     SYNCHRONOUS_BAD
 } SyncCommitLevel;
 
@@ -130,7 +130,7 @@ typedef struct xl_xact_assignment {
 typedef struct xl_xact_commit_compact {
     TimestampTz xact_time;  /* time of commit */
     uint64 csn;             /* commit sequence number */
-    bool isMMEngine;        /* Indicate whether MMEngine involves in the transaction commit */
+    bool isMOTEngine;       /* Indicate whether MOT Engine involves in the transaction commit */
     int nsubxacts;          /* number of subtransaction XIDs */
     /* ARRAY OF COMMITTED SUBTRANSACTION XIDs FOLLOWS */
     TransactionId subxacts[FLEXIBLE_ARRAY_MEMBER]; /* VARIABLE LENGTH ARRAY */
@@ -166,12 +166,12 @@ typedef struct xl_xact_commit {
  */
 #define XACT_COMPLETION_UPDATE_RELCACHE_FILE 0x01
 #define XACT_COMPLETION_FORCE_SYNC_COMMIT 0x02
-#define XACT_MMENGINE_USED 0x04
+#define XACT_MOT_ENGINE_USED 0x04
 
 /* Access macros for above flags */
 #define XactCompletionRelcacheInitFileInval(xinfo) (xinfo & XACT_COMPLETION_UPDATE_RELCACHE_FILE)
 #define XactCompletionForceSyncCommit(xinfo) (xinfo & XACT_COMPLETION_FORCE_SYNC_COMMIT)
-#define XactMMEngineUsed(xinfo) (xinfo & XACT_MMENGINE_USED)
+#define XactMOTEngineUsed(xinfo) (xinfo & XACT_MOT_ENGINE_USED)
 
 typedef struct xl_xact_abort {
     TimestampTz xact_time; /* time of abort */
@@ -251,8 +251,9 @@ typedef struct {
 #define STCSaveElem(dest, src) ((dest) = (src))
 #define STCRestoreElem(dest, src) ((src) = (dest))
 
-typedef void (*RedoCommitCallback)(TransactionId xid);
-void RegisterRedoCommitCallback(RedoCommitCallback callback);
+typedef void (*RedoCommitCallback)(TransactionId xid, void* arg);
+void RegisterRedoCommitCallback(RedoCommitCallback callback, void* arg);
+void CallRedoCommitCallback(TransactionId xid);
 
 /* ----------------
  *		extern definitions
@@ -328,6 +329,7 @@ extern void BeginInternalSubTransaction(const char* name);
 extern void ReleaseCurrentSubTransaction(void);
 extern void RollbackAndReleaseCurrentSubTransaction(void);
 extern bool IsSubTransaction(void);
+extern void SerializeTransactionState(ParallelInfoContext *cxt);
 extern void StartParallelWorkerTransaction(ParallelInfoContext *cxt);
 extern void EndParallelWorkerTransaction(void);
 extern void SetParallelStartTimestamps(TimestampTz xact_ts, TimestampTz stmt_ts);
@@ -343,6 +345,7 @@ extern void RegisterXactCallback(XactCallback callback, void* arg);
 extern void UnregisterXactCallback(XactCallback callback, const void* arg);
 extern void RegisterSubXactCallback(SubXactCallback callback, void* arg);
 extern void UnregisterSubXactCallback(SubXactCallback callback, const void* arg);
+extern void CallXactCallbacks(XactEvent event);
 extern bool AtEOXact_GlobalTxn(bool commit, bool is_write = false);
 
 #ifdef PGXC
@@ -387,12 +390,11 @@ extern void ExtendCsnlogForSubtrans(TransactionId parent_xid, int nsub_xid, Tran
 extern CommitSeqNo SetXact2CommitInProgress(TransactionId xid, CommitSeqNo csn);
 extern void XactGetRelFiles(XLogReaderState* record, ColFileNodeRel** xnodesPtr, int* nrelsPtr);
 extern CommitSeqNo GetLocalNextCSN();
-extern bool IsMMEngineUsed();
-extern bool IsMMEngineUsedInParentTransaction();
+extern bool IsMOTEngineUsed();
+extern bool IsMOTEngineUsedInParentTransaction();
 extern bool IsPGEngineUsed();
 extern bool IsMixedEngineUsed();
 extern void SetCurrentTransactionStorageEngine(StorageEngineType storageEngineType);
-extern void CallXactCallbacks(XactEvent event);
 
 extern void EnterParallelMode(void);
 extern void ExitParallelMode(void);

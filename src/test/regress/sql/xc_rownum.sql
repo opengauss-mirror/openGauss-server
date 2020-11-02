@@ -1,6 +1,9 @@
 --------------------------------------------------------------------
 -------------------test rownum pseudocolumn ------------------------
 --------------------------------------------------------------------
+-- ROWNUM can not be used as alias
+select oid rownum from pg_class;
+select oid as rownum from pg_class;
 
 ------------------------------------
 --test the basic function of rownum
@@ -85,6 +88,11 @@ select rownum from distributors group by rownum;
 select rownum rn from distributors group by rn;
 select rownum + 1 from dual group by rownum;
 select rownum + 1 rn from dual group by rn;
+
+--test having
+select id from distributors group by rownum,id having rownum < 5;
+select rownum from distributors group by rownum having rownum < 5;
+select id from distributors group by id having rownum < 5;
 --test alias name after where
 select rownum rn, name from distributors where rn<3;
 select rownum rowno2, * from (select rownum rowno1, * from distributors order by id desc) where rowno2 < 2;
@@ -182,3 +190,277 @@ insert into bbbb values (0, 1);
 select (select a1.smgwname from aaaa a1 where a1.seid = ( select a2.seid from aaaa a2 where a2.igmgwidx = b.imgwindex and a2.imsflag = b.imsflag and rownum <=1)) from bbbb b;
 drop table aaaa;
 drop table bbbb;
+
+--test query plan after optimizing
+create table student(id int, stuname varchar(10) );
+insert into student values(1, 'stu1');
+insert into student values(2, 'stu2');
+insert into student values(3, 'stu3');
+insert into student values(4, 'stu4');
+insert into student values(5, 'stu5');
+insert into student values(6, 'stu6');
+insert into student values(7, 'stu7');
+insert into student values(8, 'stu8');
+insert into student values(9, 'stu9');
+insert into student values(10, 'stu10');
+
+create table test(id int, testchar varchar(10));
+insert into test values(1, 'test1');
+insert into test values(2, 'test2');
+insert into test values(3, 'test3');
+insert into test values(4, 'test4');
+insert into test values(5, 'test5');
+insert into test values(6, 'test6');
+insert into test values(7, 'test7');
+insert into test values(8, 'test8');
+insert into test values(9, 'test9');
+insert into test values(10, 'test10');
+
+-- operator '<' (with 'and')
+-- n > 1 
+explain select * from student where rownum < 5;
+explain select * from student where rownum < 5 and id > 5;
+explain select * from student where rownum < 5 and id > 5 and id < 9;
+explain select * from student where rownum < 5 and rownum < 6;
+explain select * from student where rownum < 5 and rownum < 6 and rownum < 9;
+explain select * from student where rownum < 5 and rownum < 6 and rownum < 9 and rownum < 12;
+
+-- n <= 1 
+explain select * from student where rownum < 1;
+explain select * from student where rownum < -5;
+explain select * from student where rownum < -5 and id > 5;
+explain select * from student where rownum < -5 and id > 5 and id < 9;
+explain select * from student where rownum < -5 and rownum < 6;
+explain select * from student where rownum < -5 and rownum < 6 and rownum < 9;
+explain select * from student where rownum < -5 and rownum < 6 and rownum < 9 and rownum < 12;
+
+-- operator '<=' (with 'and')
+-- n >= 1
+explain select * from student where rownum <= 1;
+explain select * from student where rownum <= 5;
+explain select * from student where rownum <= 5 and id > 5;
+explain select * from student where rownum <= 5 and id > 5 and id < 9;
+explain select * from student where rownum <= 5 and rownum < 6;
+explain select * from student where rownum <= 5 and rownum < 6 and rownum < 9;
+explain select * from student where rownum <= 5 and rownum < 6 and rownum < 9 and rownum < 12;
+
+-- n < 1
+explain select * from student where rownum <= -5;
+explain select * from student where rownum <= -5 and id > 5;
+explain select * from student where rownum <= -5 and id > 5 and id < 9;
+explain select * from student where rownum <= -5 and rownum < 6;
+explain select * from student where rownum <= -5 and rownum < 6 and rownum < 9;
+explain select * from student where rownum <= -5 and rownum < 6 and rownum < 9 and rownum < 12;
+
+
+-- operator '=' (with 'and')
+-- n = 1
+explain select * from student where rownum = 1;
+explain select * from student where rownum = 1 and id > 5;
+explain select * from student where rownum = 1 and rownum = 2 and id > 5;
+
+-- n != 1
+explain select * from student where rownum = 2;
+explain select * from student where rownum = 2 and id > 5;
+
+-- operator '!=' (with 'and')
+-- n = 1
+explain select * from student where rownum != 1;
+explain select * from student where rownum != 1 and id > 5;
+explain select * from student where rownum != 1 and rownum != 2 and id > 5;
+
+-- n > 1
+explain select * from student where rownum != 5;
+explain select * from student where rownum != 5 and id > 5;
+explain select * from student where rownum != 5 and rownum != 8 and id > 5;
+
+-- n < 1
+explain select * from student where rownum != -5;
+explain select * from student where rownum != -5 and id > 5;
+explain select * from student where rownum != -5 and rownum != -8 and id > 5;
+
+-- operator '>' (with 'and')
+-- n >= 1
+explain select * from student where rownum > 1;
+explain select * from student where rownum > 5;
+explain select * from student where rownum > 5 and id > 5;
+explain select * from student where rownum > 5 and id > 5 and id < 9;
+explain select * from student where rownum > 5 and rownum > 6;
+explain select * from student where rownum > 5 and rownum > 6 and rownum > 9;
+explain select * from student where rownum > 5 and rownum < 6 and rownum < 9 and rownum < 12;
+
+--n < 1
+explain select * from student where rownum > -5;
+explain select * from student where rownum > -5 and id > 5;
+explain select * from student where rownum > -5 and id > 5 and id < 9;
+explain select * from student where rownum > -5 and rownum > 6;
+explain select * from student where rownum > -5 and rownum > 6 and rownum < 9;
+explain select * from student where rownum > -5 and rownum > 6 and rownum < 9 and rownum < 12;
+
+-- operator '>=' (with 'and')
+-- n > 1
+explain select * from student where rownum >= 5;
+explain select * from student where rownum >= 5 and id > 5;
+explain select * from student where rownum >= 5 and id > 5 and id < 9;
+explain select * from student where rownum >= 5 and rownum > 6;
+explain select * from student where rownum >= 5 and rownum > 6 and rownum > 9;
+explain select * from student where rownum >= 5 and rownum < 6 and rownum < 9 and rownum < 12;
+
+-- n <= 1
+explain select * from student where rownum >= 1;
+explain select * from student where rownum >= -5;
+explain select * from student where rownum >= -5 and id > 5;
+explain select * from student where rownum >= -5 and id > 5 and id < 9;
+explain select * from student where rownum >= -5 and rownum > 6;
+explain select * from student where rownum >= -5 and rownum > 6 and rownum < 9;
+explain select * from student where rownum >= -5 and rownum > 6 and rownum < 9 and rownum < 12;
+
+-- operator '<' with 'or'
+-- n > 1
+-- can not be optimized
+explain select * from student where rownum < 5 or id > 5;
+
+-- n <= 1
+explain select * from student where rownum < -5;
+explain select * from student where rownum < -5 or id > 5;
+explain select * from student where rownum < -5 or id > 5 or id < 9;
+
+-- operator '<=' with 'or'
+-- n >= 1
+-- can not be optimized
+explain select * from student where rownum <= 5 or id > 5;
+
+-- n < 1
+explain select * from student where rownum <= -5;
+explain select * from student where rownum <= -5 or id > 5;
+explain select * from student where rownum <= -5 or id > 5 or id < 9;
+
+-- operator '=' with 'or'
+-- n > 0
+-- can not be optimized
+explain select * from student where rownum = 5 or id > 5;
+
+-- n <= 0
+explain select * from student where rownum = 0 or id > 5;
+explain select * from student where rownum = -1 or id > 5;
+
+-- operator '!=' with 'or'
+-- n >= 1
+-- can not be optimized
+explain select * from student where rownum != 6 or id > 5;
+
+-- n<1
+explain select * from student where rownum != 0 or id > 5;
+
+-- operator '>' with 'or'
+-- n >= 1  
+-- can not be optimized
+explain select * from student where rownum > 5 or id > 5;
+
+-- n < 1
+explain select * from student where rownum > -5;
+explain select * from student where rownum > -5 or id > 5;
+explain select * from student where rownum > -5 or id > 5 or id < 9;
+-- operator '>=' with 'or'
+-- n > 1  
+-- can not be optimized
+explain select * from student where rownum >= 5 or id > 5;
+
+-- n <= 1
+explain select * from student where rownum >= -5;
+explain select * from student where rownum >= -5 or id > 5;
+explain select * from student where rownum >= -5 or id > 5 or id < 9;
+
+-- limit
+explain select * from student where rownum < 5 limit 3;
+explain select * from student where rownum < 3 limit 5;
+explain select * from student where rownum <= 5 limit 3;
+explain select * from student where rownum <= 3 limit 5;
+
+-- subqueries
+explain select * from (select * from student where rownum < 5);
+explain select * from (select * from student where rownum < 5) where rownum < 9;
+explain select * from (select * from student where rownum < 5 and id < 7);
+explain select * from (select * from student where rownum < 3 and id < 10) where rownum < 5;
+explain select * from (select * from student where rownum < 3 and id < 10) where rownum < 2 and stuname = 'stu1';
+
+--sublink
+explain select * from student where id in (select id from test where rownum < 4);
+explain select * from student where id in (select id from test where rownum < 4) and rownum < 6;
+explain select * from student where id in (select id from test where rownum < 4) and stuname in (select stuname from student where rownum < 6);
+explain select * from student where id in (select id from test where rownum < 4 and id < 7);
+explain select * from student where id in (select id from test where rownum < 4) and rownum < 6 and id > 3;
+
+-- insert 
+explain insert into test select * from student where rownum < 5;
+explain insert into test select * from student where rownum < 5 and id > 3;
+
+-- between
+explain select * from student where rownum between 1 and 5;
+explain select * from student where rownum between 2 and 8;
+explain select * from student where rownum between -5 and 8;
+explain select * from student where rownum between -5 and -2;
+
+--update
+explain update student set id = 5 where rownum < 3;
+explain update student set id = 5 where rownum < 3 and rownum < 5;
+explain update student set id = 5 where rownum > 3;
+
+--delete
+explain delete from student where rownum < 3;
+explain delete from student where rownum < 3 and rownum < 5;
+explain delete from student where rownum > 3;
+
+-- have not been optimized yet
+explain select * from student where rownum < 6.5;
+explain select * from student where rownum <= 6.5;
+explain select * from student where rownum = 6.5;
+explain select * from student where rownum != 6.5;
+explain select * from student where rownum > 6.5;
+explain select * from student where rownum >= 6.5;
+
+explain delete from student where 3 > rownum;
+explain delete from student where 3 < rownum;
+
+explain delete from student where rownum < 5 or rownum < 6;
+explain delete from student where rownum > 5 or rownum > 6;
+
+-- ROWNUM with type cast
+explain select * from student where rownum < 3::bigint;
+explain select * from student where rownum < 3::int4;
+explain select * from student where rownum < 3::int2;
+explain select * from student where rownum < 3::int1;
+
+-- ROWNUM with LIMIT ALL
+explain select * from student where rownum <= 3 limit all;
+explain select * from student where rownum <= 18 limit 3.14;
+
+-- ROWNUM with constant expression
+explain select * from student where rownum > 3 + 2;
+explain select * from student where rownum < 3 + 2;
+explain select * from student where rownum < 9 + (-1 * 5);
+explain select * from student where rownum <= 9 + (-1 * 5) and id = 4;
+explain select * from student where rownum > -3 + 100 or id = 4;
+explain select * from student where rownum > -3 + 100.1 or id = 4;  -- not optimized
+
+explain select * from student where rownum < -2 and id = (select id from student where rownum = 1);
+
+-- ROWNUM and NOT expression
+explain select * from student where not(rownum < -2);
+explain select * from student where not(rownum > 3);
+explain select * from student where not(rownum < 3 + 2);
+explain select * from student where not(rownum < 3 and id = 1);
+explain select * from student where not(rownum > 3 or id = 1);
+
+-- ROWNUM with ORDER BY
+explain select * from test where rownum < 5 order by 1;
+
+-- ROWNUM with GROUP BY
+explain select id from test where rownum < 5 group by id;
+
+-- ROWNUM with UNION and ORDER BY
+explain select id from student where rownum < 3 union select id from (select id from student order by 1)  where rownum < 5;
+select * from test where id < 2 union select * from (select * from test order by id desc) where rownum < 5;
+
+drop table student;
+drop table test;

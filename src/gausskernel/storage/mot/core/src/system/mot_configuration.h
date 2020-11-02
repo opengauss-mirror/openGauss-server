@@ -85,6 +85,12 @@ public:
         --m_suppressLog;
     }
 
+    /** @brief Enables loading extra configuration parameters (by default disabled, used for testing). */
+    inline void EnableLoadExtraParams()
+    {
+        m_loadExtraParams = true;
+    }
+
     /**
      * @brief Validates configuration. Call this function after loading configuration to validate
      * the loaded values are valid, not out of bounds, and not self-contradicting.
@@ -399,23 +405,6 @@ public:
     static constexpr uint32_t MIN_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT = 8;
     static constexpr uint32_t MAX_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT = 128;
 
-private:
-    /** @var A singleton instance available for static initializers. */
-    static MOTConfiguration motGlobalConfiguration;
-
-    /** @var Map of CPUs to NUMA nodes */
-    CpuNodeMap m_cpuNodeMapper;
-
-    CpuMap m_osCpuMap;
-
-    bool m_isSystemHyperThreaded = false;
-
-    /** @var The total memory value to be used when loading memory percent values. By default uses system total. */
-    uint64_t m_totalMemoryMb;
-
-    /** @var Controls suppressing of log messages during configuration loading. */
-    int m_suppressLog;
-
     /** @var Memory scaling constants (from bytes). */
     static constexpr uint64_t SCALE_BYTES = 1;
     static constexpr uint64_t SCALE_KILO_BYTES = KILO_BYTE;
@@ -594,6 +583,9 @@ private:
     static constexpr uint64_t MIN_MIN_MOT_LOCAL_MEMORY_MB = 0;                // no pre-allocation
     static constexpr uint64_t MAX_MIN_MOT_LOCAL_MEMORY_MB = 512 * KILO_BYTE;  // max pre-allocate 512 GB
 
+    /** @var The minimum memory consumption required by the MOT engine. */
+    static constexpr uint64_t MOT_MIN_MEMORY_USAGE_MB = MIN_MAX_MOT_GLOBAL_MEMORY_MB + MIN_MAX_MOT_LOCAL_MEMORY_MB;
+
     /** @var Default maximum for single MOT session small memory allocations. */
     static constexpr const char* DEFAULT_MAX_MOT_SESSION_MEMORY = "0";
     static constexpr uint64_t DEFAULT_MAX_MOT_SESSION_MEMORY_KB = 0;  // no session-memory limit
@@ -698,6 +690,26 @@ private:
 
     /** @var The default total memory reference used for calculating memory percent value. */
     static constexpr uint64_t DEFAULT_TOTAL_MEMORY_MB = 10 * KILO_BYTE;  // 10 MB
+
+private:
+    /** @var A singleton instance available for static initializers. */
+    static MOTConfiguration motGlobalConfiguration;
+
+    /** @var Map of CPUs to NUMA nodes */
+    CpuNodeMap m_cpuNodeMapper;
+
+    CpuMap m_osCpuMap;
+
+    bool m_isSystemHyperThreaded = false;
+
+    /** @var The total memory value to be used when loading memory percent values. By default uses system total. */
+    uint64_t m_totalMemoryMb;
+
+    /** @var Controls suppressing of log messages during configuration loading. */
+    int m_suppressLog;
+
+    /** @var Controls loading of extra configuration parameters. */
+    bool m_loadExtraParams;
 
     /** @brief Loads configuration from main configuration. */
     void LoadConfig();

@@ -118,6 +118,7 @@ typedef struct RunningTransactionsData {
     bool subxid_overflow;             /* snapshot overflowed, subxids missing */
     TransactionId nextXid;            /* copy of ShmemVariableCache->nextXid */
     TransactionId oldestRunningXid;   /* *not* oldestXmin */
+    TransactionId globalXmin;         /* running xacts's snapshot xmin */
     TransactionId latestCompletedXid; /* copy of ShmemVariableCache-> latestCompletedXid*/
     TransactionId* xids;              /* array of (sub)xids still running */
 } RunningTransactionsData;

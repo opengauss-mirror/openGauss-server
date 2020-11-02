@@ -24,10 +24,7 @@
 #include "logger.h"
 #include "file.h"
 
-
-static char	   *password = NULL;
-bool			prompt_password = true;
-bool			force_password = false;
+bool		prompt_password = true;
 
 /* Database connections */
 static PGcancel *volatile cancel_conn = NULL;
@@ -556,20 +553,13 @@ escapeConnectionParameter(const char *src)
 /* TODO: it is better to use PQconnectdbParams like in psql
  * It will allow to set application_name for pg_probackup
  */
-PGconn *
-pgut_connect(const char *host, const char *port,
-			 const char *dbname, const char *username)
+PGconn* pgut_connect(const char *host, const char *port,
+					 const char *dbname, const char *username)
 {
 	PGconn	   *conn;
 
 	if (interrupted && !in_cleanup)
 		elog(ERROR, "interrupted");
-
-	if (force_password && !prompt_password)
-		elog(ERROR, "You cannot specify --password and --no-password options together");
-
-	if (!password && force_password)
-		prompt_for_password(username);
 
 	/* Start the connection. Loop until we have a password if requested by backend. */
 	for (;;)
@@ -604,9 +594,8 @@ pgut_connect(const char *host, const char *port,
 	}
 }
 
-PGconn *
-pgut_connect_replication(const char *host, const char *port,
-						 const char *dbname, const char *username)
+PGconn* pgut_connect_replication(const char *host, const char *port,
+						 		 const char *dbname, const char *username)
 {
 	PGconn	   *tmpconn;
 	int			argcount = 7;	/* dbname, replication, fallback_app_name,
@@ -617,12 +606,6 @@ pgut_connect_replication(const char *host, const char *port,
 
 	if (interrupted && !in_cleanup)
 		elog(ERROR, "interrupted");
-
-	if (force_password && !prompt_password)
-		elog(ERROR, "You cannot specify --password and --no-password options together");
-
-	if (!password && force_password)
-		prompt_for_password(username);
 
 	i = 0;
 

@@ -616,8 +616,7 @@ List* transformCreateStmt(CreateStmt* stmt, const char* queryString, const List*
      * If the user did not specify any distribution clause and there is no
      * inherits clause, try and use PK or unique index
      */
-    if ((!IsA(stmt, CreateForeignTableStmt) ||
-            IsSpecifiedFDW(((CreateForeignTableStmt*)stmt)->servername, MOT_FDW)) &&
+    if ((!IsA(stmt, CreateForeignTableStmt) || IsSpecifiedFDW(((CreateForeignTableStmt*)stmt)->servername, MOT_FDW)) &&
         !stmt->distributeby && !stmt->inhRelations && cxt.fallback_dist_col) {
         stmt->distributeby = (DistributeBy*)palloc0(sizeof(DistributeBy));
         stmt->distributeby->disttype = DISTTYPE_HASH;
@@ -3156,7 +3155,7 @@ IndexStmt* transformIndexStmt(Oid relid, IndexStmt* stmt, const char* queryStrin
                  errmsg("timeseries store does not support add index ")));
     }
 
-    if (rel->rd_rel->relkind == RELKIND_FOREIGN_TABLE && isMOTFromTblOid(RelationGetRelid(rel))) {
+    if (RelationIsForeignTable(rel) && isMOTFromTblOid(RelationGetRelid(rel))) {
         stmt->internal_flag = true;
     }
 

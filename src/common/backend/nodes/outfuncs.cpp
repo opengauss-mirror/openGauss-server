@@ -780,6 +780,7 @@ static void _outAppend(StringInfo str, Append* node)
     _outPlanInfo(str, (Plan*)node);
 
     WRITE_NODE_FIELD(appendplans);
+    WRITE_INT_FIELD(first_partial_plan);
 }
 
 static void _outVecAppend(StringInfo str, Append* node)
@@ -2656,7 +2657,7 @@ static void _outPathInfo(StringInfo str, Path* node)
     }
     WRITE_BOOL_FIELD(parallel_aware);
     WRITE_BOOL_FIELD(parallel_safe);
-    WRITE_INT_FIELD(parallel_degree);
+    WRITE_INT_FIELD(parallel_workers);
     WRITE_FLOAT_FIELD(rows, "%.0f");
     WRITE_FLOAT_FIELD(multiple, "%.0f");
     WRITE_FLOAT_FIELD(startup_cost, "%.2f");

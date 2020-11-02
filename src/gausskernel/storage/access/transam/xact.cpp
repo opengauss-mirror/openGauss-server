@@ -121,13 +121,6 @@ typedef enum TransState {
     TRANS_PREPARE     /* prepare in progress */
 } TransState;
 
-static RedoCommitCallback redoCommitCallback = NULL;
-
-void RegisterRedoCommitCallback(RedoCommitCallback callback)
-{
-    redoCommitCallback = callback;
-}
-
 /*
  *	transaction block states - transaction state of client queries
  *
@@ -278,6 +271,12 @@ typedef struct GTMCallbackItem {
     void* arg;
 } GTMCallbackItem;
 #endif
+
+typedef struct RedoCommitCallbackItem {
+    struct RedoCommitCallbackItem* next;
+    RedoCommitCallback callback;
+    void* arg;
+} RedoCommitCallbackItem;
 
 /* local function prototypes */
 static void AssignTransactionId(TransactionState s);
@@ -1147,6 +1146,17 @@ bool TransactionIdIsCurrentTransactionId(TransactionId xid)
         return false;
 
     /*
+     * In parallel workers, the XIDs we must consider as current are stored in
+     * ParallelCurrentXids rather than the transaction-state stack.  Note that
+     * the XIDs in this array are sorted numerically rather than according to
+     * transactionIdPrecedes order.
+     */
+    if (t_thrd.xact_cxt.nParallelCurrentXids > 0) {
+        return bsearch(&xid, t_thrd.xact_cxt.ParallelCurrentXids, (uint32)t_thrd.xact_cxt.nParallelCurrentXids,
+            sizeof(TransactionId), xidComparator) != NULL ? true : false;
+    }
+
+    /*
      * We will return true for the Xid of the current subtransaction, any of
      * its subcommitted children, any of its parents, or any of their
      * previously subcommitted children.  However, a transaction being aborted
@@ -1566,8 +1576,9 @@ static TransactionId RecordTransactionCommit(void)
                 xlrec.xinfo |= XACT_COMPLETION_UPDATE_RELCACHE_FILE;
             if (t_thrd.xact_cxt.forceSyncCommit)
                 xlrec.xinfo |= XACT_COMPLETION_FORCE_SYNC_COMMIT;
-            if (IsMMEngineUsed() || IsMixedEngineUsed())
-                xlrec.xinfo |= XACT_MMENGINE_USED;
+            if (IsMOTEngineUsed() || IsMixedEngineUsed()) {
+                xlrec.xinfo |= XACT_MOT_ENGINE_USED;
+            }
 
             xlrec.dbId = u_sess->proc_cxt.MyDatabaseId;
             xlrec.tsId = u_sess->proc_cxt.MyDatabaseTableSpace;
@@ -2413,7 +2424,9 @@ static void StartTransaction(bool begin_on_gtm)
     /* done with start processing, set current transaction state to "in progress" */
     s->state = TRANS_INPROGRESS;
 
-    CallXactCallbacks(XACT_EVENT_START);
+    if (!IsParallelWorker()) {
+        CallXactCallbacks(XACT_EVENT_START);
+    }
 
     if (module_logging_is_on(MOD_TRANS_XACT)) {
         ereport(LOG,
@@ -2771,16 +2784,17 @@ static void CommitTransaction(bool stpCommit)
     }
 
     /*
-     * Commit MM Table Engine - do this as late as possible
-     * to allow atomic cross transaction between PG tables and MM tables
-     * in the future
-     */
-    CallXactCallbacks(XACT_EVENT_COMMIT);
-
-    /*
      * Here is where we really truly local commit.
      */
     if (!is_parallel_worker) {
+        /*
+         * For MOT, CallXactCallbacks should be called be called before RecordTransactionCommit.
+         *
+         * Commit MOT Engine - do this as late as possible to allow
+         * atomic cross transaction between PG tables and MOT tables
+         * in the future.
+         */
+        CallXactCallbacks(XACT_EVENT_COMMIT);
         latestXid = RecordTransactionCommit();
     } else {
         /*
@@ -2881,8 +2895,10 @@ static void CommitTransaction(bool stpCommit)
 
     TRACE_POSTGRESQL_TRANSACTION_COMMIT(t_thrd.proc->lxid);
 
-    /* release MM Table locks */
-    CallXactCallbacks(XACT_EVENT_END_TRANSACTION);
+    if (!is_parallel_worker) {
+        /* Release MOT locks */
+        CallXactCallbacks(XACT_EVENT_END_TRANSACTION);
+    }
 
     /*
      * Let others know about no transaction in progress by me. Note that this
@@ -2906,7 +2922,6 @@ static void CommitTransaction(bool stpCommit)
      * the ResourceOwner mechanism.  The other calls here are for backend-wide
      * state.
      */
-    // CallXactCallbacks(XACT_EVENT_COMMIT);
     instr_report_workload_xact_info(true);
 #ifdef PGXC
     /*
@@ -3004,7 +3019,6 @@ static void CommitTransaction(bool stpCommit)
     s->maxChildXids = 0;
     s->storageEngineType = SE_TYPE_UNSPECIFIED;
 
-    t_thrd.xact_cxt.XactTopTransactionId = InvalidTransactionId;
     t_thrd.xact_cxt.nParallelCurrentXids = 0;
 
 #ifdef PGXC
@@ -3354,8 +3368,7 @@ static void PrepareTransaction(bool stpCommit)
     PreCommit_CheckForSerializationFailure();
 
     /*
-     * Prepare MM Table Engine - Check for Serialization
-     * Failures in FDW
+     * Prepare MOT Engine - Check for Serialization failures in FDW
      */
     CallXactCallbacks(XACT_EVENT_PREPARE);
 
@@ -3560,6 +3573,8 @@ static void PrepareTransaction(bool stpCommit)
     s->maxChildXids = 0;
     s->storageEngineType = SE_TYPE_UNSPECIFIED;
 
+    t_thrd.xact_cxt.nParallelCurrentXids = 0;
+
     /*
      * done with 1st phase commit processing, set current transaction state
      * back to default
@@ -3724,8 +3739,8 @@ static void AbortTransaction(bool PerfectRollback, bool stpRollback)
         }
     }
 
-    /* If it is MM transaction reserve the connection */
-    if (IsMMEngineUsed()) {
+    /* If it is MOT transaction reserve the connection. */
+    if (IsMOTEngineUsed()) {
         PerfectRollback = true;
     }
 
@@ -3862,7 +3877,11 @@ static void AbortTransaction(bool PerfectRollback, bool stpRollback)
      * do abort processing
      */
     AfterTriggerEndXact(false); /* 'false' means it's abort */
-    CallXactCallbacks(XACT_EVENT_PREROLLBACK_CLEANUP);
+
+    if (!is_parallel_worker) {
+        CallXactCallbacks(XACT_EVENT_PREROLLBACK_CLEANUP);
+    }
+
     AtAbort_Portals(stpRollback);
     AtEOXact_LargeObject(false);
     AtAbort_Notify();
@@ -3912,7 +3931,9 @@ static void AbortTransaction(bool PerfectRollback, bool stpRollback)
     if (t_thrd.utils_cxt.TopTransactionResourceOwner != NULL) {
         bool change_user_name = false;
         instr_report_workload_xact_info(false);
-        CallXactCallbacks(XACT_EVENT_ABORT);
+        if (!is_parallel_worker) {
+            CallXactCallbacks(XACT_EVENT_ABORT);
+        }
 
         ResourceOwnerRelease(t_thrd.utils_cxt.TopTransactionResourceOwner, RESOURCE_RELEASE_BEFORE_LOCKS, false, true);
         AtEOXact_Buffers(false);
@@ -4013,7 +4034,10 @@ static void CleanupTransaction(void)
     s->childXids = NULL;
     s->nChildXids = 0;
     s->maxChildXids = 0;
+
     s->storageEngineType = SE_TYPE_UNSPECIFIED;
+
+    t_thrd.xact_cxt.nParallelCurrentXids = 0;
 
     /* done with abort processing, set current transaction state back to default */
     s->state = TRANS_DEFAULT;
@@ -6426,6 +6450,7 @@ static void CleanupSubTransaction(void)
     AtSubCleanup_Memory();
 
     s->state = TRANS_DEFAULT;
+
     s->storageEngineType = SE_TYPE_UNSPECIFIED;
 
     PopTransaction();
@@ -6572,6 +6597,86 @@ void SetParallelStartTimestamps(TimestampTz xact_ts, TimestampTz stmt_ts)
     Assert(IsParallelWorker());
     t_thrd.xact_cxt.xactStartTimestamp = xact_ts;
     t_thrd.xact_cxt.stmtStartTimestamp = stmt_ts;
+}
+
+/*
+ * SerializeTransactionState
+ *      Write out relevant details of our transaction state that will be
+ *      needed by a parallel worker.
+ *
+ * We need to save and restore XactDeferrable, XactIsoLevel, and the XIDs
+ * associated with this transaction. We emit the XIDs in sorted order for
+ * the convenience of the receiving process.
+ */
+void SerializeTransactionState(ParallelInfoContext *cxt)
+{
+    Assert(cxt != NULL);
+    int rc;
+    int i;
+    int nxids = 0;
+    Size transSize;
+    TransactionState s = NULL;
+    cxt->xactIsoLevel = u_sess->utils_cxt.XactIsoLevel;
+    cxt->xactDeferrable = u_sess->attr.attr_storage.XactDeferrable;
+    cxt->topTransactionId = GetTopTransactionIdIfAny();
+    cxt->currentTransactionId = GetCurrentTransactionIdIfAny();
+    cxt->currentCommandId = t_thrd.xact_cxt.currentCommandId;
+    cxt->RecentGlobalXmin = u_sess->utils_cxt.RecentGlobalXmin;
+    cxt->TransactionXmin = u_sess->utils_cxt.TransactionXmin;
+    cxt->RecentXmin = u_sess->utils_cxt.RecentXmin;
+    cxt->nParallelCurrentXids = 0;
+    cxt->ParallelCurrentXids = NULL;
+
+    /*
+     * If we're running in a parallel worker and launching a parallel worker
+     * of our own, we can just pass along the information that was passed to
+     * us.
+     */
+    if (t_thrd.xact_cxt.nParallelCurrentXids > 0) {
+        cxt->nParallelCurrentXids = t_thrd.xact_cxt.nParallelCurrentXids;
+        transSize = sizeof(TransactionId) * (uint32)t_thrd.xact_cxt.nParallelCurrentXids;
+        cxt->ParallelCurrentXids = (TransactionId*)palloc(transSize);
+        rc = memcpy_s(cxt->ParallelCurrentXids, transSize, t_thrd.xact_cxt.ParallelCurrentXids, transSize);
+        securec_check_c(rc, "", "");
+        return;
+    }
+
+    /*
+     * OK, we need to generate a sorted list of XIDs that our workers should
+     * view as current. First, figure out how many there are.
+     */
+    for (s = CurrentTransactionState; s != NULL; s = s->parent) {
+        if (TransactionIdIsValid(s->transactionId)) {
+            nxids++;
+        }
+        nxids += s->nChildXids;
+    }
+
+    if (nxids <= 0) {
+        return;
+    }
+
+    /* Copy them to our scratch space. */
+    cxt->nParallelCurrentXids = nxids;
+    transSize = sizeof(TransactionId) * (uint32)nxids;
+    cxt->ParallelCurrentXids = (TransactionId*)palloc(transSize);
+
+    for (i = 0, s = CurrentTransactionState; s != NULL; s = s->parent) {
+        if (TransactionIdIsValid(s->transactionId)) {
+            cxt->ParallelCurrentXids[i++] = s->transactionId;
+        }
+
+        if (s->childXids != NULL && s->nChildXids > 0) {
+            rc = memcpy_s(&cxt->ParallelCurrentXids[i], transSize - (i * sizeof(TransactionId)),
+                            s->childXids, (uint32)s->nChildXids * sizeof(TransactionId));
+            securec_check_c(rc, "", "");
+            i += s->nChildXids;
+        }
+    }
+    Assert(i == nxids);
+
+    /* Sort them. */
+    qsort(cxt->ParallelCurrentXids, nxids, sizeof(TransactionId), xidComparator);
 }
 
 /*
@@ -6862,15 +6967,14 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
     }
 
     if (t_thrd.xlog_cxt.standbyState == STANDBY_DISABLED) {
-        if (redoCommitCallback != NULL)  // && XactMMEngineUsed(xinfo)) // this is an optimization
-                                         // to avoid calling MOT redo commit callbacks
-                                         // in case of commit does not have MOT records
-                                         // it is disabled for the time being since
-                                         // data used to identify storage engine type
-                                         // is cleared in 2phase commit prepare phase.
-                                         // this should be implemented in the future to
-                                         // improve recovery time
-            redoCommitCallback(xid);
+        /*
+         * Report committed transaction to MOT Engine.
+         * If (XactMOTEngineUsed(xinfo)) - This is an optimization to avoid calling
+         * MOT redo commit callbacks in case of commit does not have MOT records.
+         * It is disabled for the time being since data used to identify storage
+         * engine type is cleared in 2phase commit prepare phase.
+         */
+        CallRedoCommitCallback(xid);
 
         /*
          * Mark the transaction committed in pg_xact. We don't bother updating
@@ -6910,16 +7014,14 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
          */
         // RecordKnownAssignedTransactionIds(max_xid);
 
-        // report commited transaction to MMEngine
-        if (redoCommitCallback != NULL)  // && XactMMEngineUsed(xinfo)) // this is an optimization
-                                         // to avoid calling MOT redo commit callbacks
-                                         // in case of commit does not have MOT records
-                                         // it is disabled for the time being since
-                                         // data used to identify storage engine type
-                                         // is cleared in 2phase commit prepare phase.
-                                         // this should be implemented in the future to
-                                         // improve recovery time
-            redoCommitCallback(xid);
+        /*
+         * Report committed transaction to MOT Engine.
+         * If (XactMOTEngineUsed(xinfo)) - This is an optimization to avoid calling
+         * MOT redo commit callbacks in case of commit does not have MOT records.
+         * It is disabled for the time being since data used to identify storage
+         * engine type is cleared in 2phase commit prepare phase.
+         */
+        CallRedoCommitCallback(xid);
 
         /*
          * Mark the transaction committed in pg_clog. We use async commit
@@ -7647,11 +7749,11 @@ TransactionState CopyTxnStateByCurrentMcxt(TransactionState state)
 }
 
 /*
- * Check if we are using MM storage engine in current transaction.
+ * Check if we are using MOT storage engine in current transaction.
  */
-bool IsMMEngineUsed()
+bool IsMOTEngineUsed()
 {
-    return (CurrentTransactionState->storageEngineType == SE_TYPE_MM);
+    return (CurrentTransactionState->storageEngineType == SE_TYPE_MOT);
 }
 
 /*
@@ -7665,19 +7767,20 @@ bool IsPGEngineUsed()
 /*
  * Check if we are using PG storage engine in parent transaction.
  */
-bool IsMMEngineUsedInParentTransaction()
+bool IsMOTEngineUsedInParentTransaction()
 {
     TransactionState s = CurrentTransactionState;
     while (s->parent != NULL) {
         s = s->parent;
-        if (s->storageEngineType == SE_TYPE_MM)
+        if (s->storageEngineType == SE_TYPE_MOT) {
             return true;
+        }
     }
     return false;
 }
 
 /*
- * Check if we are using both PG and MM storage engines in current transaction.
+ * Check if we are using both PG and MOT storage engines in current transaction.
  */
 bool IsMixedEngineUsed()
 {
@@ -7690,15 +7793,36 @@ bool IsMixedEngineUsed()
  */
 void SetCurrentTransactionStorageEngine(StorageEngineType storageEngineType)
 {
-    if (storageEngineType == SE_TYPE_UNSPECIFIED)
+    if (storageEngineType == SE_TYPE_UNSPECIFIED) {
         return;
-    else if (storageEngineType == SE_TYPE_MM &&
-             (CurrentTransactionState->storageEngineType == SE_TYPE_UNSPECIFIED || IsMMEngineUsed()))
-        CurrentTransactionState->storageEngineType = SE_TYPE_MM;
-    else if (storageEngineType == SE_TYPE_PAGE_BASED &&
-             (CurrentTransactionState->storageEngineType == SE_TYPE_UNSPECIFIED || IsPGEngineUsed()))
+    } else if (storageEngineType == SE_TYPE_MOT &&
+        (CurrentTransactionState->storageEngineType == SE_TYPE_UNSPECIFIED || IsMOTEngineUsed())) {
+        CurrentTransactionState->storageEngineType = SE_TYPE_MOT;
+    } else if (storageEngineType == SE_TYPE_PAGE_BASED &&
+        (CurrentTransactionState->storageEngineType == SE_TYPE_UNSPECIFIED || IsPGEngineUsed())) {
         CurrentTransactionState->storageEngineType = SE_TYPE_PAGE_BASED;
-    else if (storageEngineType == SE_TYPE_MIXED || (storageEngineType == SE_TYPE_PAGE_BASED && IsMMEngineUsed()) ||
-             (storageEngineType == SE_TYPE_MM && IsPGEngineUsed()))
+    } else if (storageEngineType == SE_TYPE_MIXED || (storageEngineType == SE_TYPE_PAGE_BASED && IsMOTEngineUsed()) ||
+        (storageEngineType == SE_TYPE_MOT && IsPGEngineUsed())) {
         CurrentTransactionState->storageEngineType = SE_TYPE_MIXED;
+    }
+}
+
+void RegisterRedoCommitCallback(RedoCommitCallback callback, void* arg)
+{
+    RedoCommitCallbackItem* item;
+
+    item = (RedoCommitCallbackItem*)MemoryContextAlloc(g_instance.instance_context, sizeof(RedoCommitCallbackItem));
+    item->callback = callback;
+    item->arg = arg;
+    item->next = g_instance.xlog_cxt.redoCommitCallback;
+    g_instance.xlog_cxt.redoCommitCallback = item;
+}
+
+void CallRedoCommitCallback(TransactionId xid)
+{
+    RedoCommitCallbackItem* item;
+
+    for (item = g_instance.xlog_cxt.redoCommitCallback; item; item = item->next) {
+        (*item->callback) (xid, item->arg);
+    }
 }

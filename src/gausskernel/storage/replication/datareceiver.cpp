@@ -1490,7 +1490,7 @@ static void DataRcvStreamConnect(char* conninfo)
                                "the primary server: %s",
                             PQerrorMessage(t_thrd.datareceiver_cxt.dataStreamingConn))));
             }
-            if (PQnfields(res) != 1 || PQntuples(res) != 1) {
+            if (PQnfields(res) != 2 || PQntuples(res) != 1) {
                 int ntuples = PQntuples(res);
                 int nfields = PQnfields(res);
 
@@ -1498,7 +1498,7 @@ static void DataRcvStreamConnect(char* conninfo)
                 ereport(ERROR,
                     (errcode(ERRCODE_INVALID_STATUS),
                         errmsg("invalid response from primary server"),
-                        errdetail("Expected 1 tuple with 1 fields, got %d tuples with %d fields.", ntuples, nfields)));
+                        errdetail("Expected 1 tuple with 2 fields, got %d tuples with %d fields.", ntuples, nfields)));
             }
             primary_mode = (ServerMode)pg_strtoint32(PQgetvalue(res, 0, 0));
             if (primary_mode != PRIMARY_MODE) {

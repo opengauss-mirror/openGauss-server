@@ -2565,7 +2565,7 @@ static void makeTableDataInfo(TableInfo* tbinfo, bool boids)
     /* Skip VIEWs (no data to dump) */
     if (tbinfo->relkind == RELKIND_VIEW)
         return;
-    
+
     /* Skip FOREIGN TABLEs (no data to dump) except MOT type */
     if (tbinfo->relkind == RELKIND_FOREIGN_TABLE && !tbinfo->isMOT)
         return;
@@ -6103,7 +6103,7 @@ TableInfo* getTables(Archive* fout, int* numTables)
             PQclear(resFdw);
             destroyPQExpBuffer(queryFdw);
         }
-        
+
         /*
          * Decide whether we want to dump this table.
          */
@@ -17541,7 +17541,6 @@ static void dumpIndex(Archive* fout, IndxInfo* indxinfo)
         appendPQExpBuffer(q, "%s;\n", tmpindexdef.data());
 #else
         appendPQExpBuffer(q, "%s;\n", indxinfo->indexdef);
-        
 #endif
 
         /* If the index is clustered, we need to record that. */
@@ -18282,8 +18281,7 @@ static void dumpSequenceData(Archive* fout, TableDataInfo* tdinfo)
         exit_nicely(1);
     }
 
-    /*local last_value and isCalled are not reliable. but the following values are reliable */
-
+    /* local last_value and isCalled are not reliable. but the following values are reliable */
     start = PQgetvalue(res, 0, 0);
     if (start != NULL) {
         errorno = memcpy_s(temp_start, sizeof(temp_start), start, strlen(start));
@@ -18291,7 +18289,7 @@ static void dumpSequenceData(Archive* fout, TableDataInfo* tdinfo)
     }
     start = temp_start;
     startValue = atol(start);
-    
+
     increment = PQgetvalue(res, 0, 1);
     if (increment != NULL){
         errorno = memcpy_s(temp_increment, sizeof(temp_increment), increment, strlen(increment));

@@ -7948,6 +7948,14 @@ static void plpgsql_destroy_econtext(PLpgSQL_execstate* estate)
  */
 void plpgsql_xact_cb(XactEvent event, void* arg)
 {
+    /*
+     * XACT_EVENT_PREROLLBACK_CLEANUP is added only for MOT FDW to cleanup some
+     * internal resources. So, others can safely ignore this event.
+     */
+    if (event == XACT_EVENT_PREROLLBACK_CLEANUP) {
+        return;
+    }
+
     u_sess->plsql_cxt.simple_eval_estate = NULL;
 
     /*

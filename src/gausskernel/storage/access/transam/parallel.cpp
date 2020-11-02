@@ -114,10 +114,9 @@ ParallelContext *CreateParallelContext(const char *library_name, const char *fun
  * copy state and other bookkeeping information that will be needed by
  * parallel workers into it.
  */
-void InitializeParallelDSM(ParallelContext *pcxt)
+void InitializeParallelDSM(ParallelContext *pcxt, const void *snap)
 {
     int i;
-    Snapshot transaction_snapshot = GetTransactionSnapshot();
     Snapshot active_snapshot = GetActiveSnapshot();
 
     /*
@@ -133,8 +132,22 @@ void InitializeParallelDSM(ParallelContext *pcxt)
      */
     pcxt->seg = dsm_create();
 
-    knl_u_parallel_context *cxt = (knl_u_parallel_context *)pcxt->seg;
-    MemoryContext oldcontext = MemoryContextSwitchTo(cxt->memCtx);
+    MemoryContext oldcontext = NULL;
+    knl_u_parallel_context *cxt = NULL;
+    if (pcxt->seg != NULL) {
+        cxt = (knl_u_parallel_context *)pcxt->seg;
+        oldcontext = MemoryContextSwitchTo(cxt->memCtx);
+    } else {
+        /* DSM segment is full, use backend private memory, set worker to 0, fallback to serial query */
+        oldcontext = MemoryContextSwitchTo(TopMemoryContext);
+        pcxt->nworkers = 0;
+        pcxt->seg = palloc(sizeof(knl_u_parallel_context));
+        cxt = (knl_u_parallel_context *)pcxt->seg;
+        cxt->memCtx = TopMemoryContext;
+        cxt->pwCtx = (ParallelInfoContext*)palloc0(sizeof(ParallelInfoContext));
+        cxt->used = true;
+        slist_init(&cxt->on_detach);
+    }
 
     /* Initialize fixed-size state in shared memory. */
     cxt->pwCtx->database_id = u_sess->proc_cxt.MyDatabaseId;
@@ -154,21 +167,21 @@ void InitializeParallelDSM(ParallelContext *pcxt)
     /* We can skip the rest of this if we're not budgeting for any workers. */
     if (pcxt->nworkers > 0) {
         /* Serialize combo CID state. */
-        cxt->pwCtx->usedComboCids = u_sess->utils_cxt.usedComboCids;
-        cxt->pwCtx->comboCids = u_sess->utils_cxt.comboCids;
-        cxt->pwCtx->sizeComboCids = u_sess->utils_cxt.sizeComboCids;
-        cxt->pwCtx->comboHash = u_sess->utils_cxt.comboHash;
+        SerializeComboCIDState(cxt->pwCtx);
 
-        /* Serialize transaction snapshot and active snapshot. */
-        Size tsnaplen = EstimateSnapshotSpace(transaction_snapshot);
+        /* Serialize active snapshot. */
         Size asnaplen = EstimateSnapshotSpace(active_snapshot);
 
-        cxt->pwCtx->tsnapspace = (char *)palloc0(tsnaplen);
-        cxt->pwCtx->tsnapspace_len = tsnaplen;
-        SerializeSnapshot(transaction_snapshot, cxt->pwCtx->tsnapspace, tsnaplen);
         cxt->pwCtx->asnapspace = (char *)palloc0(asnaplen);
         cxt->pwCtx->asnapspace_len = asnaplen;
         SerializeSnapshot(active_snapshot, cxt->pwCtx->asnapspace, asnaplen);
+
+        /* Save transaction snapshot */
+        cxt->pwCtx->xmin = ((Snapshot)snap)->xmin;
+        cxt->pwCtx->xmax = ((Snapshot)snap)->xmax;
+        cxt->pwCtx->timeline = ((Snapshot)snap)->timeline;
+        cxt->pwCtx->snapshotcsn  = ((Snapshot)snap)->snapshotcsn;
+        cxt->pwCtx->curcid  = ((Snapshot)snap)->curcid;
 
         Size searchPathLen = strlen(u_sess->attr.attr_common.namespace_search_path);
         cxt->pwCtx->namespace_search_path = (char *)palloc(searchPathLen + 1);
@@ -177,13 +190,7 @@ void InitializeParallelDSM(ParallelContext *pcxt)
         securec_check_c(rc, "", "");
 
         /* Serialize transaction state. */
-        cxt->pwCtx->xactIsoLevel = u_sess->utils_cxt.XactIsoLevel;
-        cxt->pwCtx->xactDeferrable = u_sess->attr.attr_storage.XactDeferrable;
-        cxt->pwCtx->topTransactionId = GetTopTransactionIdIfAny();
-        cxt->pwCtx->currentTransactionId = GetCurrentTransactionIdIfAny();
-        cxt->pwCtx->currentCommandId = t_thrd.xact_cxt.currentCommandId;
-        cxt->pwCtx->nParallelCurrentXids = t_thrd.xact_cxt.nParallelCurrentXids;
-        cxt->pwCtx->ParallelCurrentXids = t_thrd.xact_cxt.ParallelCurrentXids;
+        SerializeTransactionState(cxt->pwCtx);
 
         /* Serialize relmapper state. */
         cxt->pwCtx->active_shared_updates = u_sess->relmap_cxt.active_shared_updates;
@@ -651,7 +658,7 @@ void DestroyParallelContext(ParallelContext *pcxt)
      * stored there.
      */
     if (pcxt->seg != NULL) {
-        dsm_detach(&(pcxt->seg));
+        dsm_detach(&(pcxt->seg), pcxt->nworkers > 0 ? true : false);
         pcxt->seg = NULL;
     }
 
@@ -988,19 +995,30 @@ void ParallelWorkerMain(Datum main_arg)
     StartParallelWorkerTransaction(ctx->pwCtx);
 
     /* Restore combo CID state. */
-    u_sess->utils_cxt.usedComboCids = ctx->pwCtx->usedComboCids;
-    u_sess->utils_cxt.comboCids = ctx->pwCtx->comboCids;
-    u_sess->utils_cxt.sizeComboCids = ctx->pwCtx->sizeComboCids;
-    u_sess->utils_cxt.comboHash = ctx->pwCtx->comboHash;
+    RestoreComboCIDState(ctx->pwCtx);
 
     /* Restore namespace search path */
     u_sess->attr.attr_common.namespace_search_path = ctx->pwCtx->namespace_search_path;
 
     /* Restore transaction snapshot. */
-    RestoreTransactionSnapshot(RestoreSnapshot(ctx->pwCtx->tsnapspace, ctx->pwCtx->tsnapspace_len),
-                                ctx->pwCtx->parallel_master_pgproc);
+    u_sess->utils_cxt.FirstSnapshotSet = true;
+    u_sess->utils_cxt.CurrentSnapshot = u_sess->utils_cxt.CurrentSnapshotData;
+    u_sess->utils_cxt.CurrentSnapshot->xmin = ctx->pwCtx->xmin;
+    u_sess->utils_cxt.CurrentSnapshot->xmax = ctx->pwCtx->xmax;
+    u_sess->utils_cxt.CurrentSnapshot->timeline = ctx->pwCtx->timeline;
+    u_sess->utils_cxt.CurrentSnapshot->snapshotcsn = ctx->pwCtx->snapshotcsn;
+    u_sess->utils_cxt.CurrentSnapshot->curcid = ctx->pwCtx->curcid;
+    u_sess->utils_cxt.CurrentSnapshot->active_count = 0;
+    u_sess->utils_cxt.CurrentSnapshot->regd_count = 0;
+    u_sess->utils_cxt.CurrentSnapshot->copied = false;
+
+    u_sess->utils_cxt.RecentGlobalXmin = ctx->pwCtx->RecentGlobalXmin;
+    u_sess->utils_cxt.TransactionXmin = ctx->pwCtx->TransactionXmin;
+    u_sess->utils_cxt.RecentXmin = ctx->pwCtx->RecentXmin;
+
     /* Restore active snapshot. */
-    PushActiveSnapshot(RestoreSnapshot(ctx->pwCtx->asnapspace, ctx->pwCtx->asnapspace_len));
+    Snapshot active_snapshot = RestoreSnapshot(ctx->pwCtx->asnapspace, ctx->pwCtx->asnapspace_len);
+    PushActiveSnapshot(active_snapshot);
 
     /*
      * We've changed which tuples we can see, and must therefore invalidate
@@ -1048,6 +1066,7 @@ void ParallelWorkerMain(Datum main_arg)
 
     /* Report success. */
     pq_putmessage('X', NULL, 0);
+    pq_stop_redirect_to_shm_mq();
 }
 
 /*

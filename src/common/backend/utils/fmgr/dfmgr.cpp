@@ -213,6 +213,32 @@ void* internal_load_library(const char* libname)
         /*
          * Call pg_dlopen.
          */
+#if ((defined ENABLE_PYTHON2) || (defined ENABLE_PYTHON3))
+#ifdef ENABLE_PYTHON2
+    #define PYTHON_LIB_NAME "libpython2.7.so"
+#endif
+
+#ifdef ENABLE_PYTHON3
+    #define PYTHON_LIB_NAME "libpython3.so"
+#endif
+        /*
+         * In C++, when you try to open a shared library use dlopen with flag RTLD_NOW,
+         * it will search dependent shared library of main program for the undefined symbol.
+         */
+        if (strstr(file_scanner->filename, "plpython") != NULL) {
+            /*
+             * dlopen will find *.so in LD_LIBRARY_PATH, /etc/ld.so.cache, /lib, /usr/lib ..
+             * And we must set the Flag to "RTLD_NOW | RTLD_GLOBAL"
+             */
+            if (dlopen(PYTHON_LIB_NAME, RTLD_NOW | RTLD_GLOBAL) == NULL) {
+                pfree((char*)file_scanner);
+                file_scanner = NULL;
+                ereport(ERROR,
+                    (errcode_for_file_access(),
+                        errmsg("could not load library \"%s\", get error report failed", PYTHON_LIB_NAME)));
+            }
+        }
+#endif
         file_scanner->handle = pg_dlopen(file_scanner->filename);
 
         if (file_scanner->handle == NULL) {

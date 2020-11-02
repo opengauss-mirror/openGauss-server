@@ -10213,6 +10213,26 @@ RenameStmt: ALTER AGGREGATE func_name aggr_args RENAME TO name
 					n->missing_ok = false;
 					$$ = (Node *)n;
 				}
+			| ALTER POLICY IF_P EXISTS name ON qualified_name RENAME TO name
+				{
+					RenameStmt *n = makeNode(RenameStmt);
+					n->renameType = OBJECT_RLSPOLICY;
+					n->subname = $5;
+					n->relation = $7;
+					n->newname = $10;
+					n->missing_ok = true;
+					$$ = (Node *)n;
+				}
+			| ALTER ROW LEVEL SECURITY POLICY IF_P EXISTS name ON qualified_name RENAME TO name
+				{
+					RenameStmt *n = makeNode(RenameStmt);
+					n->renameType = OBJECT_RLSPOLICY;
+					n->subname = $8;
+					n->relation = $10;
+					n->newname = $13;
+					n->missing_ok = true;
+					$$ = (Node *)n;
+				}
 			| ALTER SCHEMA name RENAME TO name
 				{
 					RenameStmt *n = makeNode(RenameStmt);
@@ -17881,7 +17901,17 @@ ColLabel:	IDENT									{ $$ = $1; }
 			| unreserved_keyword					{ $$ = pstrdup($1); }
 			| col_name_keyword						{ $$ = pstrdup($1); }
 			| type_func_name_keyword				{ $$ = pstrdup($1); }
-			| reserved_keyword						{ $$ = pstrdup($1); }
+			| reserved_keyword
+				{
+					/* ROWNUM can not be used as alias */
+					if (strcmp($1, "rownum") == 0) {
+						ereport(ERROR,
+							(errcode(ERRCODE_SYNTAX_ERROR),
+								errmsg("ROWNUM cannot be used as an alias"),
+										parser_errposition(@1)));
+					}
+					$$ = pstrdup($1);
+				}
 		;
 
 
@@ -18197,7 +18227,7 @@ unreserved_keyword:
 			| SHARE
 			| SHIPPABLE
 			| SHOW
-                        | SHUTDOWN
+			| SHUTDOWN
 			| SIMPLE
 			| SIZE
 			| SMALLDATETIME_FORMAT_P

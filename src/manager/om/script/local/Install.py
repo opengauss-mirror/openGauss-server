@@ -44,6 +44,7 @@ ACTION_START_CLUSTER = "start_cluster"
 ACTION_CLEAN_TEMP_FILE = "clean_temp_file"
 ACTION_PREPARE_CONFIG_CLUSTER = "prepare_config_cluster"
 ACTION_BUILD_STANDBY = "build_standby"
+ACTION_BUILD_CASCADESTANDBY = "build_cascadestandby"
 #################################################################
 g_opts = None
 g_timer = None
@@ -209,7 +210,8 @@ def checkParameter():
             and g_opts.action != ACTION_CONFIG_CLUSTER
             and g_opts.action != ACTION_START_CLUSTER
             and g_opts.action != ACTION_CLEAN_TEMP_FILE
-            and g_opts.action != ACTION_BUILD_STANDBY):
+            and g_opts.action != ACTION_BUILD_STANDBY
+            and g_opts.action != ACTION_BUILD_CASCADESTANDBY):
         GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50004"] % "t")
 
     if (g_opts.clusterConfig != "" and
@@ -594,8 +596,18 @@ class Install(LocalBaseOM):
         output: NA
         """
         for dn in self.dnCons:
-            if dn.instInfo.instanceType != DefaultValue.MASTER_INSTANCE:
+            if dn.instInfo.instanceType == DefaultValue.STANDBY_INSTANCE:
                 dn.build()
+
+    def buildCascadeStandby(self):
+        """
+        function: build standby
+        input: NA
+        output: NA
+        """
+        for dn in self.dnCons:
+            if dn.instInfo.instanceType == DefaultValue.CASCADE_STANDBY:
+                dn.build_cascade()
 
     def cleanTempFile(self):
         """
@@ -638,7 +650,9 @@ if __name__ == '__main__':
             functionDict = {ACTION_INSTALL_CLUSTER: installer.installCluster,
                             ACTION_START_CLUSTER: installer.startCluster,
                             ACTION_CLEAN_TEMP_FILE: installer.cleanTempFile,
-                            ACTION_BUILD_STANDBY: installer.buildStandby}
+                            ACTION_BUILD_STANDBY: installer.buildStandby,
+                            ACTION_BUILD_CASCADESTANDBY:
+                                installer.buildCascadeStandby}
             functionKeys = functionDict.keys()
 
             if g_opts.action in functionKeys:

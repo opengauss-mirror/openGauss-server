@@ -657,15 +657,17 @@ select * from
   (select * from t3 a union all select * from t3 b) ss
   join int4_tbl on f1 = expensivefunc(x);
                    QUERY PLAN                    
--------------------------------------------------
- Hash Join
-   Hash Cond: (expensivefunc(a.x) = int4_tbl.f1)
-   ->  Append
-         ->  Seq Scan on t3 a
-         ->  Seq Scan on t3 b
-   ->  Hash
-         ->  Seq Scan on int4_tbl
-(7 rows)
+------------------------------------------------------- 
+ Gather
+   Number of Workers: 2
+   ->  Hash Join
+         Hash Cond: (expensivefunc(a.x) = int4_tbl.f1)
+         ->  Parallel Append
+               ->  Parallel Seq Scan on t3 a
+               ->  Parallel Seq Scan on t3 b
+         ->  Hash
+               ->  Seq Scan on int4_tbl
+(9 rows)
 
 select * from
   (select * from t3 a union all select * from t3 b) ss

@@ -210,9 +210,10 @@ int bbox_handler_exit = 0;
 #include "utils/distribute_test.h"
 
 #include "commands/user.h"
+#include "storage/mot/mot_fdw.h"
 
 extern int S3_init();
-extern void TermMOT();
+
 static const int RECOVERY_PARALLELISM_DEFAULT = 1;
 
 /* flag to get logic cluster name for dn alarm */
@@ -294,6 +295,10 @@ char g_bbox_dump_path[1024] = {0};
     ((IS_DN_DUMMY_STANDYS_MODE() ? (g_instance.pid_cxt.DataReceiverPID != 0 && t_thrd.datareceiver_cxt.DataRcv && \
                                        t_thrd.datareceiver_cxt.DataRcv->isRuning)                                 \
                                  : true))
+
+#define IsCascadeStandby()                                            \
+    (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE && \
+    t_thrd.postmaster_cxt.HaShmData->is_cascade_standby)
 
 /*
  * postmaster.c - function prototypes
@@ -1259,6 +1264,10 @@ int PostmasterMain(int argc, char* argv[])
                 } else if (0 == strncmp(optCtxt.optarg, "normal", strlen("normal")) &&
                            '\0' == optCtxt.optarg[strlen("normal")]) {
                     t_thrd.xlog_cxt.server_mode = NORMAL_MODE;
+                } else if (0 == strncmp(optCtxt.optarg, "cascade_standby", strlen("cascade_standby")) &&
+                           '\0' == optCtxt.optarg[strlen("cascade_standby")]) {
+                    t_thrd.xlog_cxt.server_mode = STANDBY_MODE;
+                    t_thrd.xlog_cxt.is_cascade_standby = true;
                 } else {
                     ereport(FATAL, (errmsg("the options of -M is not recognized")));
                 }
@@ -4721,6 +4730,22 @@ static void PrepareDemoteResponse(void)
 
     SetWalsndsNodeState(NODESTATE_PROMOTE_APPROVE, NODESTATE_STANDBY_REDIRECT);
 
+    /*
+     * For standby demote to a cascade standby, it is safe
+     * to change servermode here when promote has been approved.
+     */
+    if (t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE) {
+        volatile HaShmemData* hashmdata = t_thrd.postmaster_cxt.HaShmData;
+
+        /* A standby instance will be demote to a cascade standby */
+        SpinLockAcquire(&hashmdata->mutex);
+        hashmdata->current_mode = STANDBY_MODE;
+        hashmdata->is_cascade_standby = true;
+        SpinLockRelease(&hashmdata->mutex);
+
+        load_server_mode();
+    }
+
     allow_immediate_pgstat_restart();
 }
 
@@ -4736,10 +4761,10 @@ static void ProcessDemoteRequest(void)
         return;
 
     /* check the postmaster state */
-    if (pmState != PM_RUN && NoDemote == g_instance.demotion) {
+    if (pmState != PM_RUN && pmState != PM_HOT_STANDBY && NoDemote == g_instance.demotion) {
         SetWalsndsNodeState(NODESTATE_NORMAL, NODESTATE_NORMAL);
         t_thrd.walsender_cxt.WalSndCtl->demotion = NoDemote;
-        ereport(NOTICE, (errmsg("postmaster state not in PM_RUN, primary would not demote.")));
+        ereport(NOTICE, (errmsg("postmaster state not in PM_RUN or PM_HOT_STANDBY, it would not demote.")));
         return;
     }
 
@@ -4990,6 +5015,15 @@ static void reaper(SIGNAL_ARGS)
             if (g_instance.status > NoShutdown && (EXIT_STATUS_0(exitstatus) || EXIT_STATUS_1(exitstatus))) {
                 pmState = PM_WAIT_BACKENDS;
                 /* PostmasterStateMachine logic does the rest */
+                continue;
+            }
+
+            /*
+             * Startup process exited in response to a standby demote request.
+             */
+            if (g_instance.demotion > NoDemote &&
+                t_thrd.postmaster_cxt.HaShmData->current_mode == STANDBY_MODE &&
+                (EXIT_STATUS_0(exitstatus) || EXIT_STATUS_1(exitstatus))) {
                 continue;
             }
 
@@ -6346,6 +6380,12 @@ static void PostmasterStateMachine(void)
         Assert(g_instance.pid_cxt.StartupPID != 0);
         pmState = PM_STARTUP;
     }
+
+    if (pmState == PM_STARTUP &&
+        t_thrd.xlog_cxt.server_mode == STANDBY_MODE &&
+        t_thrd.xlog_cxt.is_cascade_standby) {
+        SetHaShmemData();
+    }
 }
 
 void signalBackend(Backend* bn, int signal, int be_mode)
@@ -7222,6 +7262,12 @@ static void sigusr1_handler(SIGNAL_ARGS)
         ereport(LOG,
             (errmsg("set gaussdb state file: db state(PROMOTING_STATE), server mode(%s)",
                 wal_get_role_string(get_cur_mode()))));
+
+        /* promote cascade standby */
+        if (IsCascadeStandby()) {
+            t_thrd.xlog_cxt.is_cascade_standby = false;
+            SetHaShmemData();
+        }
     }
     if (CheckPostmasterSignal(PMSIGNAL_UPDATE_HAREBUILD_REASON) &&
         (pmState == PM_STARTUP || pmState == PM_RECOVERY || pmState == PM_HOT_STANDBY || pmState == PM_WAIT_READONLY) &&
@@ -9015,6 +9061,7 @@ static void SetHaShmemData()
     switch (t_thrd.xlog_cxt.server_mode) {
         case STANDBY_MODE: {
             hashmdata->current_mode = STANDBY_MODE;
+            hashmdata->is_cascade_standby = t_thrd.xlog_cxt.is_cascade_standby;
             break;
         }
         case PRIMARY_MODE: {
@@ -9407,7 +9454,7 @@ DbState get_local_dbstate(void)
     else {
         if ((t_thrd.postmaster_cxt.HaShmData->repl_reason[t_thrd.postmaster_cxt.HaShmData->current_repl] ==
                     NONE_REBUILD &&
-                walrcv != NULL && walrcv->isRuning && walrcv->conn_target == REPCONNTARGET_PRIMARY) ||
+                walrcv != NULL && walrcv->isRuning && (walrcv->conn_target == REPCONNTARGET_PRIMARY || IsCascadeStandby())) ||
             dummyStandbyMode)
             has_build_reason = false;
 

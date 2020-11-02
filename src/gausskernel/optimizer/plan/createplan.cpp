@@ -1072,8 +1072,8 @@ static Plan* create_append_plan(PlannerInfo* root, AppendPath* best_path)
          * subquery's rangetable so that the executor will apply permissions
          * checks to those rels at runtime.)
          */
-        if (rel->rtekind == RTE_SUBQUERY) {
-            Assert(is_dummy_plan(rel->subplan));
+        if (rel->rtekind == RTE_SUBQUERY &&
+            (rel->subplan != NULL && is_dummy_plan(rel->subplan) == true)) {
             return (Plan*)make_subqueryscan(tlist, NIL, rel->relid, rel->subplan);
         } else {
             /* Generate a Result plan with constant-FALSE gating qual */
@@ -1094,7 +1094,7 @@ static Plan* create_append_plan(PlannerInfo* root, AppendPath* best_path)
      * parent-rel Vars it'll be asked to emit.
      */
 
-    plan = make_append(subplans, tlist);
+    plan = make_append(subplans, best_path->first_partial_path, tlist);
 
     /* For hdfs append rel, we set plan rows according to hint value previous applied */
     if (best_path->path.parent->rtekind == RTE_RELATION) {
@@ -1117,6 +1117,7 @@ static Plan* create_append_plan(PlannerInfo* root, AppendPath* best_path)
                 "Distribute keys error when create append plan.");
     }
 #endif
+    copy_path_costsize(&plan->plan, (Path*)best_path);
 
     /*
      * If there are any pseudoconstant clauses attached to this node, insert a
@@ -1827,18 +1828,29 @@ static bool relIsDeltaNode(PlannerInfo* root, RelOptInfo* relOptInfo)
  */
 static Gather* create_gather_plan(PlannerInfo* root, GatherPath* best_path)
 {
-    Index scan_relid = best_path->path.parent->relid;
     Plan *subplan = create_plan_recurse(root, best_path->subpath);
 
     disuse_physical_tlist(subplan, best_path->subpath);
 
     Gather* gather_plan =
-        make_gather(subplan->targetlist, NIL, best_path->path.parallel_degree, best_path->single_copy, subplan);
+        make_gather(subplan->targetlist, NIL, best_path->path.parallel_workers, best_path->single_copy, subplan);
 
     copy_path_costsize(&gather_plan->plan, &best_path->path);
 
 #ifdef STREAMPLAN
-    add_distribute_info(root, &gather_plan->plan, scan_relid, &(best_path->path), NULL);
+    Index scan_relid = best_path->path.parent->relid;
+
+    switch (subplan->type) {
+        case T_Append:
+        case T_HashJoin:
+        case T_MergeJoin:
+        case T_NestLoop:
+            inherit_plan_locator_info(&gather_plan->plan, subplan);
+            break;
+        default:
+            add_distribute_info(root, &gather_plan->plan, scan_relid, &(best_path->path), NULL);
+            break;
+    }
 #endif
 
     /* use parallel mode for parallel plans. */
@@ -5739,7 +5751,7 @@ Plan* create_globalpartInterator_plan(PlannerInfo* root, PartIteratorPath* pIter
                 piterSeqPlan->lefttree->targetlist = piterIndexPlan->lefttree->targetlist;
 
                 /* Add append nodes for two partial partitin iterator plan. */
-                appendPlan = make_append(subplans, piterIndexPlan->targetlist);
+                appendPlan = make_append(subplans, -1, piterIndexPlan->targetlist);
 
                 plan = (Plan*)appendPlan;
 
@@ -5934,7 +5946,7 @@ ForeignScan* make_foreignscan(
     return node;
 }
 
-Append* make_append(List* appendplans, List* tlist)
+Append* make_append(List* appendplans, int first_partial_plan, List* tlist)
 {
     Append* node = makeNode(Append);
     Plan* plan = &node->plan;
@@ -6008,6 +6020,7 @@ Append* make_append(List* appendplans, List* tlist)
     plan->lefttree = NULL;
     plan->righttree = NULL;
     node->appendplans = appendplans;
+    node->first_partial_plan = first_partial_plan;
 
     return node;
 }
@@ -8253,6 +8266,10 @@ uint32 getDistSessionKey(List* fdw_private)
     uint32 distSessionKey = 0;
 
     foreach (lc, fdw_private) {
+        /*
+         * FDW may put a node of any type into the list, so if we are looking for
+         * some specific type, we need to first make sure that it's the correct type.
+         */
         Node* node = (Node*)lfirst(lc);
         if (IsA(node, DefElem)) {
             DefElem* defElem = (DefElem*)lfirst(lc);
@@ -8664,7 +8681,7 @@ ModifyTable* make_modifytables(CmdType operation, bool canSetTag, List* resultRe
 #endif
         }
 
-        appendPlan = (Plan*)make_append(appendSubPlans, NIL);
+        appendPlan = (Plan*)make_append(appendSubPlans, -1, NIL);
         if (IS_STREAM_PLAN) {
             mark_distribute_setop(root, (Node*)appendPlan, true, false);
         }

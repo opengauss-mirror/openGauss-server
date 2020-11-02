@@ -360,7 +360,10 @@ static void knl_t_xact_init(knl_t_xact_context* xact_cxt)
 
     xact_cxt->PGXCBucketMap = NULL;
     xact_cxt->PGXCNodeId = -1;
-	xact_cxt->inheritFileNode = false;	
+	xact_cxt->inheritFileNode = false;
+
+    xact_cxt->nParallelCurrentXids = 0;
+    xact_cxt->ParallelCurrentXids = NULL;
 }
 
 static void knl_t_mem_init(knl_t_mem_context* mem_cxt)
@@ -428,6 +431,7 @@ static void knl_t_xlog_init(knl_t_xlog_context* xlog_cxt)
     xlog_cxt->doPageWrites = false;
     xlog_cxt->RedoStartLSN = InvalidXLogRecPtr;
     xlog_cxt->server_mode = UNKNOWN_MODE;
+    xlog_cxt->is_cascade_standby = false;
     xlog_cxt->startup_processing = false;
     xlog_cxt->openLogFile = -1;
     xlog_cxt->readfrombuffer = false;
@@ -891,8 +895,6 @@ static void knl_t_pgxc_init(knl_t_pgxc_context* pgxc_cxt)
     securec_check(rc, "\0", "\0");
     rc = memset_s(pgxc_cxt->begin_cmd, BEGIN_CMD_BUFF_SIZE, 0, BEGIN_CMD_BUFF_SIZE);
     securec_check(rc, "\0", "\0");
-
-    pgxc_cxt->pgxc_cache_master_switch = false;
 }
 
 static void knl_t_conn_init(knl_t_conn_context* conn_cxt)

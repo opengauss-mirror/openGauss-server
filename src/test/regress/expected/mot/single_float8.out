@@ -167,8 +167,10 @@ SELECT '' AS one, f.* FROM FLOAT8_TBL f WHERE f.f1 = '1004.3';
 SELECT '' AS three, f.* FROM FLOAT8_TBL f WHERE '1004.3' > f.f1 ORDER BY f1;
  three |          f1          
 -------+----------------------
-       | 1.2345678901234e+200
-(1 row)
+       |               -34.84
+       |                    0
+       | 1.2345678901234e-200
+(3 rows)
 
 SELECT '' AS three, f.* FROM FLOAT8_TBL f WHERE  f.f1 < '1004.3' ORDER BY f1;
  three |          f1          
@@ -181,9 +183,11 @@ SELECT '' AS three, f.* FROM FLOAT8_TBL f WHERE  f.f1 < '1004.3' ORDER BY f1;
 SELECT '' AS four, f.* FROM FLOAT8_TBL f WHERE '1004.3' >= f.f1 ORDER BY f1;
  four |          f1          
 ------+----------------------
+      |               -34.84
+      |                    0
+      | 1.2345678901234e-200
       |               1004.3
-      | 1.2345678901234e+200
-(2 rows)
+(4 rows)
 
 SELECT '' AS four, f.* FROM FLOAT8_TBL f WHERE  f.f1 <= '1004.3' ORDER BY f1;
  four |          f1          
@@ -391,7 +395,7 @@ SELECT '' AS five, * FROM FLOAT8_TBL ORDER BY f1;
 UPDATE FLOAT8_TBL
    SET f1 = FLOAT8_TBL.f1 * '-1'
    WHERE FLOAT8_TBL.f1 > '0.0';
-ERROR:  Update of indexed column is not supported for main memory tables
+ERROR:  Update of indexed column is not supported for memory table
    
 SELECT '' AS bad, f.f1 * '1e200' from FLOAT8_TBL f ORDER BY f1;
 ERROR:  value out of range: overflow

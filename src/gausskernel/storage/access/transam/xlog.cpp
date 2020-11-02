@@ -939,6 +939,8 @@ static void CopyXLogRecordToWALForGroup(
     XLogPageHeader pagehdr;
     errno_t errorno = EOK;
 
+    pgstat_report_waitevent_count(WAIT_EVENT_WAL_BUFFER_ACCESS);
+
     /* Get a pointer to the right place in the right WAL buffer to start inserting to. */
     CurrPos = StartPos;
     currpos = GetXLogBuffer<true>(CurrPos, proc);
@@ -1011,6 +1013,8 @@ static void CopyXLogRecordToWALForGroup(
     if (SECUREC_UNLIKELY(CurrPos != EndPos)) {
         ereport(PANIC, (errmsg("space reserved for WAL record does not match what was written")));
     }
+
+    pgstat_report_waitevent_count(WAIT_EVENT_END);
 }
 
 #endif
@@ -1521,6 +1525,8 @@ static void CopyXLogRecordToWAL(
     XLogPageHeader pagehdr;
     errno_t errorno = EOK;
 
+    pgstat_report_waitevent_count(WAIT_EVENT_WAL_BUFFER_ACCESS);
+
     /*
      * Get a pointer to the right place in the right WAL buffer to start
      * inserting to.
@@ -1626,6 +1632,7 @@ static void CopyXLogRecordToWAL(
     if (CurrPos != EndPos) {
         ereport(PANIC, (errmsg("space reserved for WAL record does not match what was written")));
     }
+    pgstat_report_waitevent_count(WAIT_EVENT_END);
 }
 
 /*
@@ -2411,6 +2418,7 @@ static void AdvanceXLInsertBuffer(XLogRecPtr upto, bool opportunistic, PGPROC* p
                     WriteRqst.Write = OldPageRqstPtr;
                     WriteRqst.Flush = 0;
                     XLogWrite(WriteRqst, false);
+                    pgstat_report_wal_buffer_full_waitevent();
                     LWLockRelease(WALWriteLock);
                     TRACE_POSTGRESQL_WAL_BUFFER_WRITE_DIRTY_DONE();
                 }
@@ -2656,6 +2664,9 @@ static void XLogWrite(const XLogwrtRqst& WriteRqst, bool flexible)
             actualBytes = write(t_thrd.xlog_cxt.openLogFile, from, nbytes);
             INSTR_TIME_SET_CURRENT(endTime);
             INSTR_TIME_SUBTRACT(endTime, startTime);
+            /* when track_activities and enable_instr_track_wait are on,
+             * elapsedTime can be replaced by beentry->waitInfo.event_info.duration.
+             */
             elapsedTime = (PgStat_Counter)INSTR_TIME_GET_MICROSEC(endTime);
             pgstat_report_waitevent(WAIT_EVENT_END);
 
@@ -7413,7 +7424,11 @@ static bool recoveryStopsHere(XLogReaderState* record, bool* includeThis)
         return false;
     }
 
+#ifdef ENABLE_MULTIPLE_NODES
     if (t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_XID) {
+#else
+    if (t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_XID  && XLogRecGetRmid(record) == RM_XACT_ID) {
+#endif
         /*
          * There can be only one transaction end record with this exact
          * transactionid
@@ -7463,7 +7478,11 @@ static bool recoveryStopsHere(XLogReaderState* record, bool* includeThis)
 
         // Ignore recoveryTargetInclusive because this is not a transaction record
         *includeThis = false;
+#ifdef ENABLE_MULTIPLE_NODES
     } else if (t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_TIME) {
+#else
+    } else if (t_thrd.xlog_cxt.recoveryTarget == RECOVERY_TARGET_TIME && XLogRecGetRmid(record) == RM_XACT_ID) {
+#endif
         /*
          * There can be many transactions that share the same commit time, so
          * we stop after the last one, if we are inclusive, or stop at the
@@ -10931,10 +10950,6 @@ bool CreateRestartPoint(int flags)
     }
     CheckPointGuts(lastCheckPoint.redo, flags, true);
 
-    /*
-     * call the external checkpoint
-     *
-     */
     CallCheckpointCallback(EVENT_CHECKPOINT_BEGIN_CHECKPOINT, 0);
 
     /*
@@ -11402,7 +11417,7 @@ void UpdateTimeline(CheckPoint* checkPoint)
  * @Description: Assign Checkpoint data from the old version to the new version
  * @in: record, xlog record
  */
-CheckPoint update_checkpoint(XLogReaderState* record)
+CheckPoint update_checkpoint(XLogReaderState * record)
 {
     CheckPointOld checkPointOld;
     CheckPoint checkPoint;
@@ -12227,6 +12242,7 @@ XLogRecPtr do_pg_start_backup(const char* backupidstr, bool fast, char** labelfi
                 recptr = xlogctl->lastFpwDisableRecPtr;
                 SpinLockRelease(&xlogctl->info_lck);
 
+#ifdef ENABLE_MULTIPLE_NODES
                 if (!checkpointfpw || XLByteLE(startpoint, recptr)) {
                     ereport(ERROR,
                         (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -12237,6 +12253,7 @@ XLogRecPtr do_pg_start_backup(const char* backupidstr, bool fast, char** labelfi
                                     "Enable full_page_writes and run CHECKPOINT on the master, "
                                     "and then try an online backup again.")));
                 }
+#endif
 
                 /*
                  * During recovery, since we don't use the end-of-backup WAL
@@ -12590,6 +12607,9 @@ XLogRecPtr do_pg_stop_backup(char* labelfile, bool waitforarchive)
             if (unlink(fileName) != 0) {
                 ereport(ERROR, (errcode_for_file_access(), errmsg("could not remove file \"%s\": %m", fileName)));
             }
+            if (unlink(TABLESPACE_MAP) != 0) {
+                ereport(DEBUG1, (errcode_for_file_access(), errmsg("could not remove file \"%s\": %m", TABLESPACE_MAP)));
+            }
         }
     }
 
@@ -12672,6 +12692,7 @@ XLogRecPtr do_pg_stop_backup(char* labelfile, bool waitforarchive)
         recptr = xlogctl->lastFpwDisableRecPtr;
         SpinLockRelease(&xlogctl->info_lck);
 
+#ifdef ENABLE_MULTIPLE_NODES
         if (XLByteLE(startpoint, recptr)) {
             ereport(ERROR,
                 (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
@@ -12682,6 +12703,7 @@ XLogRecPtr do_pg_stop_backup(char* labelfile, bool waitforarchive)
                             "Enable full_page_writes and run CHECKPOINT on the master, "
                             "and then try an online backup again.")));
         }
+#endif
 
         LWLockAcquire(ControlFileLock, LW_SHARED);
         stoppoint = t_thrd.shemem_ptr_cxt.ControlFile->minRecoveryPoint;
@@ -13550,7 +13572,7 @@ void RedoSpeedDiag(XLogRecPtr readPtr, XLogRecPtr endPtr)
  *
  * Exported to allow WALReceiver to read the pointer directly.
  */
-XLogRecPtr GetXLogReplayRecPtr(TimeLineID* targetTLI, XLogRecPtr* ReplayReadPtr)
+XLogRecPtr GetXLogReplayRecPtr(TimeLineID * targetTLI, XLogRecPtr * ReplayReadPtr)
 {
     /* use volatile pointer to prevent code rearrangement */
     XLogCtlData* xlogctl = t_thrd.shemem_ptr_cxt.XLogCtl;
@@ -13632,7 +13654,7 @@ XLogRecPtr GetXLogReplayRecPtrInPending(void)
  * If 'targetTLI' is not NULL, it's set to the current recovery target
  * timeline.
  */
-XLogRecPtr GetStandbyFlushRecPtr(TimeLineID* targetTLI)
+XLogRecPtr GetStandbyFlushRecPtr(TimeLineID * targetTLI)
 {
     XLogRecPtr receivePtr;
     XLogRecPtr replayPtr;
@@ -14551,6 +14573,53 @@ int ParallelXLogPageRead(XLogReaderState *xlogreader, XLogRecPtr targetPagePtr, 
     return readLen;
 }
 
+static ReplConnTarget GetRepConntarget(void)
+{
+    if (t_thrd.xlog_cxt.is_cascade_standby) {
+        return REPCONNTARGET_STANDBY;
+    } else {
+        return REPCONNTARGET_PRIMARY;
+    }
+}
+
+static void HandleCascadeStandbyPromote(XLogRecPtr* recptr)
+{
+    if (!t_thrd.xlog_cxt.is_cascade_standby ||
+        t_thrd.xlog_cxt.server_mode != STANDBY_MODE ||
+        !IS_DN_MULTI_STANDYS_MODE()) {
+        return;
+    }
+
+    ShutdownWalRcv();
+
+    /* switchover */
+    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    t_thrd.xlog_cxt.receivedUpto = 0;
+    SpinLockAcquire(&walrcv->mutex);
+    walrcv->receivedUpto = 0;
+    SpinLockRelease(&walrcv->mutex);
+    t_thrd.xlog_cxt.is_cascade_standby = false;
+    t_thrd.xlog_cxt.switchover_triggered = false;
+
+    if (IsExtremeRtoRunning()) {
+        t_thrd.xlog_cxt.readfrombuffer = false;
+        /* restart from recvbuffer */
+        pg_atomic_write_u32(&(extreme_rto::g_recordbuffer->readWorkerState),
+                            extreme_rto::WORKER_STATE_STOP);
+    }
+
+    /* failover */
+    ResetFailoverTriggered();
+    t_thrd.xlog_cxt.failover_triggered = false;
+
+    SendPostmasterSignal(PMSIGNAL_UPDATE_NORMAL);
+
+    /* request postmaster to start walreceiver again. */
+    RequestXLogStreaming(recptr, t_thrd.xlog_cxt.PrimaryConnInfo,
+                         GetRepConntarget(),
+                         u_sess->attr.attr_storage.PrimarySlotName);
+}
+
 /*
  * Read the XLOG page containing RecPtr into readBuf (if not read already).
  * Returns number of bytes read, if the page is read successfully, or -1
@@ -14597,6 +14666,8 @@ int XLogPageRead(XLogReaderState* xlogreader, XLogRecPtr targetPagePtr, int reqL
     XLByteToSeg(targetPagePtr, targetSegNo);
 #endif
     targetPageOff = targetPagePtr % XLogSegSize;
+
+    load_server_mode();
 
     /*
      * See if we need to switch to a new segment because the requested record
@@ -14787,13 +14858,26 @@ retry:
                                 (uint32)(t_thrd.xlog_cxt.receivedUpto >> 32),
                                 (uint32)t_thrd.xlog_cxt.receivedUpto)));
 
-                        ereport(LOG,
-                            (errmsg("Secondary Standby has synchronized all the xlog and replication data, standby "
-                                    "promote to primary")));
+                        if (t_thrd.xlog_cxt.is_cascade_standby) {
+                            ereport(LOG,
+                                (errmsg("Cascade Standby has synchronized all the xlog and replication data, "
+                                        "promote to standby")));
+
+                        } else {
+                            ereport(LOG,
+                                (errmsg("Secondary Standby has synchronized all the xlog and replication data, standby "
+                                        "promote to primary")));
+                        }
 
                         ShutdownWalRcv();
                         ShutdownDataRcv();
-                        goto triggered;
+
+                        if (t_thrd.xlog_cxt.is_cascade_standby) {
+                            HandleCascadeStandbyPromote(fetching_ckpt ? &t_thrd.xlog_cxt.RedoStartLSN : &targetRecPtr);
+                            continue;
+                        } else {
+                            goto triggered;
+                        }
                     }
 
                     /*
@@ -14801,6 +14885,11 @@ retry:
                      * five seconds like in the WAL file polling case below.
                      */
                     if (CheckForSwitchoverTrigger() || CheckForFailoverTrigger()) {
+                        if (t_thrd.xlog_cxt.is_cascade_standby && t_thrd.xlog_cxt.server_mode == STANDBY_MODE) {
+                            HandleCascadeStandbyPromote(fetching_ckpt ? &t_thrd.xlog_cxt.RedoStartLSN : &targetRecPtr);
+                            continue;
+                        }
+
                         goto retry;
                     }
                     if (!processtrxn) {
@@ -14932,6 +15021,11 @@ retry:
 
                         /* Get xlog and data from DummyStandby */
                         if (CheckForFailoverTrigger()) {
+                            if (t_thrd.xlog_cxt.is_cascade_standby) {
+                                HandleCascadeStandbyPromote(fetching_ckpt ? &t_thrd.xlog_cxt.RedoStartLSN : &targetRecPtr);
+                                continue;
+                            }
+
                             if (!RecoveryFromDummyStandby()) {
                                 goto triggered;
                             }
@@ -15016,7 +15110,7 @@ retry:
                                                     extreme_rto::WORKER_STATE_STOP);
                             }
                             RequestXLogStreaming(fetching_ckpt ? &t_thrd.xlog_cxt.RedoStartLSN : &targetRecPtr,
-                                                 t_thrd.xlog_cxt.PrimaryConnInfo, REPCONNTARGET_PRIMARY,
+                                                 t_thrd.xlog_cxt.PrimaryConnInfo, GetRepConntarget(),
                                                  u_sess->attr.attr_storage.PrimarySlotName);
                             if (!g_instance.attr.attr_storage.enable_mix_replication && !IS_DN_MULTI_STANDYS_MODE()) {
                                 StartupDataStreaming();
@@ -15051,6 +15145,10 @@ retry:
                     }
 
                     if ((CheckForFailoverTrigger() && !RecoveryFromDummyStandby()) || CheckForSwitchoverTrigger()) {
+                        if (t_thrd.xlog_cxt.is_cascade_standby && t_thrd.xlog_cxt.server_mode == STANDBY_MODE) {
+                            HandleCascadeStandbyPromote(fetching_ckpt ? &t_thrd.xlog_cxt.RedoStartLSN : &targetRecPtr);
+                            continue;
+                        }
                         ereport(LOG,
                             (errmsg("read record failed when promoting, current lsn (%X/%X), received lsn(%X/%X),"
                                     "sources[%u], failedSources[%u], readSource[%u], readFile[%d], readId[%u],"
@@ -15641,6 +15739,7 @@ void load_server_mode(void)
 
     SpinLockAcquire(&hashmdata->mutex);
     t_thrd.xlog_cxt.server_mode = hashmdata->current_mode;
+    t_thrd.xlog_cxt.is_cascade_standby = hashmdata->is_cascade_standby;
     SpinLockRelease(&hashmdata->mutex);
 }
 

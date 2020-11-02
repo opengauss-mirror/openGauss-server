@@ -316,7 +316,8 @@ public:
                 break;
         }
     }
-    static MOT::TxnManager* InitTxnManager(MOT::ConnectionId connection_id = INVALID_CONNECTION_ID);
+    static MOT::TxnManager* InitTxnManager(
+        const char* callerSrc, MOT::ConnectionId connection_id = INVALID_CONNECTION_ID);
     static void DestroyTxn(int status, Datum ptr);
     static void DeleteTablePtr(MOT::Table* t);
 
@@ -381,7 +382,7 @@ public:
 
     // data conversion
     static void DatumToMOT(MOT::Column* col, Datum datum, Oid type, uint8_t* data);
-    static void DatumToMOTKey(MOT::Column* col, Expr* expr, Datum datum, Oid type, uint8_t* data, size_t len,
+    static void DatumToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, Oid type, uint8_t* data, size_t len,
         KEY_OPER oper, uint8_t fill = 0x00);
     static void MOTToDatum(MOT::Table* table, const Form_pg_attribute attr, uint8_t* data, Datum* value, bool* is_null);
 
@@ -406,10 +407,10 @@ public:
     static bool m_callbacks_initialized;
 };
 
-inline MOT::TxnManager* GetSafeTxn(::TransactionId txn_id = 0)
+inline MOT::TxnManager* GetSafeTxn(const char* callerSrc, ::TransactionId txn_id = 0)
 {
     if (!u_sess->mot_cxt.txn_manager) {
-        MOTAdaptor::InitTxnManager();
+        MOTAdaptor::InitTxnManager(callerSrc);
         if (u_sess->mot_cxt.txn_manager != nullptr) {
             if (txn_id != 0) {
                 u_sess->mot_cxt.txn_manager->SetTransactionId(txn_id);

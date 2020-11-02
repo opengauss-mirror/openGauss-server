@@ -33,6 +33,7 @@ INSTANCE_TYPE_UNDEFINED = -1
 MASTER_INSTANCE = 0
 STANDBY_INSTANCE = 1
 DUMMY_STANDBY_INSTANCE = 2
+CASCADE_STANDBY_INSTANCE = 3
 
 
 class DN_OLAP(Kernel):
@@ -103,6 +104,8 @@ class DN_OLAP(Kernel):
                             ("data directory [%s]" % self.instInfo.datadir))
 
         nodename = self.getInstanceNodeName()
+        # if nodename too long, obtains the first 22 digits
+        nodename = nodename[:22]
         if (self.dwsMode):
             image_path = DefaultValue.DWS_IMAGE_PATH
             # decompress package to files
@@ -186,38 +189,38 @@ class DN_OLAP(Kernel):
                 self.clusterType == DefaultValue.CLUSTER_TYPE_SINGLE_INST):
             tmpDNDict["enable_data_replicate"] = "off"
             tmpDNDict["replication_type"] = "1"
-            tmpDNDict["max_wal_senders"] = "8"
-            tmpDNDict["application_name"] = "'dn_%s'" % \
-                                            self.instInfo.instanceId
-            if len(azNames) == 1 and len(peerInsts) > 0:
-                if syncNum == -1 and len(peerInsts) > 1:
-                    num = len(peerInsts) - 1
-                    tmpDNDict["synchronous_standby_names"] = "'ANY %d(%s)'" % \
-                                                             (num,
-                                                              azNames[0])
+            tmpDNDict["max_wal_senders"] = "16"
+            totalnum = len(peerInsts)
+            for inst in peerInsts:
+                if inst.instanceType == CASCADE_STANDBY_INSTANCE:
+                    totalnum = totalnum - 1
+
+            if len(azNames) == 1 and totalnum > 0:
+                if syncNum == -1 and totalnum > 1:
+                    num = totalnum - 1
+                    tmpDNDict["synchronous_standby_names"] = \
+                        "'ANY %d(%s)'" % (num, azNames[0])
                 elif syncNum > 0:
-                    tmpDNDict["synchronous_standby_names"] = "'ANY %d(%s)'" % \
-                                                             (syncNum,
-                                                              azNames[0])
+                    tmpDNDict["synchronous_standby_names"] = \
+                        "'ANY %d(%s)'" % (syncNum, azNames[0])
                 elif syncNum == 0:
-                    tmpDNDict["synchronous_standby_names"] = "'ANY 1(%s)'" % \
-                                                             (azNames[0])
-            elif (len(azNames) == 2 and len(peerInsts) == 3):
-                tmpDNDict["synchronous_standby_names"] = "'ANY 2(%s,%s)'" % \
-                                                         (azNames[0],
-                                                          azNames[1])
-            elif (len(azNames) == 3 and len(peerInsts) == 3):
-                tmpDNDict["synchronous_standby_names"] = "'ANY 2(%s,%s)'" % \
-                                                         (azNames[0],
-                                                          azNames[1])
-            elif (len(azNames) == 3 and len(peerInsts) == 4):
-                tmpDNDict["synchronous_standby_names"] = "'ANY 2(%s,%s)'" % \
-                                                         (azNames[0],
-                                                          azNames[1])
-            elif (len(azNames) == 3 and len(peerInsts) <= 7):
-                tmpDNDict["synchronous_standby_names"] = "'ANY 3(%s,%s)'" % \
-                                                         (azNames[0],
-                                                          azNames[1])
+                    tmpDNDict["synchronous_standby_names"] = \
+                        "'ANY 1(%s)'" % (azNames[0])
+            elif len(azNames) == 2 and totalnum in (3, 4):
+                tmpDNDict["synchronous_standby_names"] = \
+                    "'ANY 2(%s,%s)'" % (azNames[0], azNames[1])
+            elif len(azNames) == 2 and totalnum in (5, 6, 7):
+                tmpDNDict["synchronous_standby_names"] = \
+                    "'ANY 3(%s,%s)'" % (azNames[0], azNames[1])
+            elif len(azNames) == 3 and totalnum in (3, 4):
+                tmpDNDict["synchronous_standby_names"] = \
+                    "'ANY 2(%s,%s,%s)'" % (azNames[0], azNames[1], azNames[2])
+            elif len(azNames) == 3 and totalnum in (5, 6, 7):
+                tmpDNDict["synchronous_standby_names"] = \
+                    "'ANY 3(%s,%s,%s)'" % (azNames[0], azNames[1], azNames[2])
+            if len(peerInsts) > 4:
+                if "synchronous_standby_names" in tmpDNDict:
+                    del tmpDNDict['synchronous_standby_names']
 
         if (self.clusterType == DefaultValue.CLUSTER_TYPE_SINGLE):
             tmpDNDict["replication_type"] = "2"
@@ -306,6 +309,11 @@ class DN_OLAP(Kernel):
                 tmpDict1 = {}
                 tmpDict1[connInfo] = "'%s'" % connInfo1[i]
                 self.setGucConfig(tmpDict1)
+                if "availablezone" in tmpDict1[connInfo]:
+                    tempazname = tmpDict1[connInfo].split("=")[-1].strip("'")
+            #if "availablezone" in str(connInfo1):
+            self.setGucConfig({"available_zone": "'%s'" %
+                                                 self.instInfo.azName})
         else:
             (connInfo1, connInfo2, dummyStandbyInst, nodename) = \
                 ClusterInstanceConfig.setReplConninfo(self.instInfo,

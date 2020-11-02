@@ -46,6 +46,9 @@
 #include "parser/parse_oper.h"
 #include "utils/lsyscache.h"
 #include "access/transam.h"
+#include "catalog/pg_operator.h"
+#include "nodes/pg_list.h"
+#include "optimizer/planner.h"
 
 typedef struct pullup_replace_vars_context {
     PlannerInfo* root;
@@ -88,7 +91,6 @@ static void fix_append_rel_relids(List* append_rel_list, int varno, Relids subre
 static Node* find_jointree_node_for_rel(Node* jtnode, int relid);
 static Node* deleteRelatedNullTest(Node* node, PlannerInfo* root);
 static Node* reduce_inequality_fulljoins_jointree_recurse(PlannerInfo* root, Node* jtnode);
-
 static bool find_rownum_in_quals(PlannerInfo *root);
 
 /*
@@ -1377,6 +1379,9 @@ static bool is_simple_subquery(Query* subquery)
      * that case the locking was originally declared in the upper query
      * anyway.
      */
+    if (contain_rownum_qual(subquery)) {
+        return false;
+    }
     if (subquery->hasAggs || subquery->hasWindowFuncs || subquery->groupClause || subquery->groupingSets ||
         subquery->havingQual || subquery->sortClause || subquery->distinctClause || subquery->limitOffset ||
         subquery->limitCount || subquery->hasForUpdate || subquery->cteList)
@@ -1442,6 +1447,10 @@ static bool is_simple_union_all(Query* subquery)
         return false;
     AssertEreport(
         IsA(topop, SetOperationStmt), MOD_OPT_REWRITE, "subquery's setOperations mismatch in is_simple_union_all");
+
+    if (contain_rownum_qual(subquery)) {
+        return false;
+    }
 
     /* Can't handle ORDER BY, LIMIT/OFFSET, locking, or WITH */
     if (subquery->sortClause || subquery->limitOffset || subquery->limitCount || subquery->rowMarks ||

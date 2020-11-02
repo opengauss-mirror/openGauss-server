@@ -1519,6 +1519,9 @@ extern  Datum remove_job_class_depend_internal(PG_FUNCTION_ARGS);
 
 extern Datum check_engine_status(PG_FUNCTION_ARGS);
 
+/* AI */
+extern Datum gs_index_advise(PG_FUNCTION_ARGS);
+
 /* MOT */
 extern Datum mot_global_memory_detail(PG_FUNCTION_ARGS);
 extern Datum mot_local_memory_detail(PG_FUNCTION_ARGS);
