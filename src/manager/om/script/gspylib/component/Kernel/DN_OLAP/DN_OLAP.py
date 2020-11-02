@@ -194,7 +194,8 @@ class DN_OLAP(Kernel):
             for inst in peerInsts:
                 if inst.instanceType == CASCADE_STANDBY_INSTANCE:
                     totalnum = totalnum - 1
-
+            tmpDNDict["application_name"] = "'dn_%s'" % \
+                                            self.instInfo.instanceId
             if len(azNames) == 1 and totalnum > 0:
                 if syncNum == -1 and totalnum > 1:
                     num = totalnum - 1
