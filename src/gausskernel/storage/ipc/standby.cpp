@@ -784,7 +784,7 @@ static XLogRecPtr LogCurrentRunningXacts(RunningTransactions CurrRunningXacts)
 {
     xl_running_xacts xlrec;
     XLogRecPtr recptr;
-    TransactionId recentXmin = t_thrd.xact_cxt.ShmemVariableCache->recentGlobalXmin;
+    TransactionId recentXmin = CurrRunningXacts->globalXmin;
 
     XLogBeginInsert();
     XLogRegisterData((char*)(&recentXmin), sizeof(TransactionId));
