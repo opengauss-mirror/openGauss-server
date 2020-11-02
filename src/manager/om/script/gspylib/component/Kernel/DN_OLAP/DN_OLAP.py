@@ -104,6 +104,8 @@ class DN_OLAP(Kernel):
                             ("data directory [%s]" % self.instInfo.datadir))
 
         nodename = self.getInstanceNodeName()
+        # if nodename too long, obtains the first 22 digits
+        nodename = nodename[:22]
         if (self.dwsMode):
             image_path = DefaultValue.DWS_IMAGE_PATH
             # decompress package to files
@@ -187,7 +189,7 @@ class DN_OLAP(Kernel):
                 self.clusterType == DefaultValue.CLUSTER_TYPE_SINGLE_INST):
             tmpDNDict["enable_data_replicate"] = "off"
             tmpDNDict["replication_type"] = "1"
-            tmpDNDict["max_wal_senders"] = "8"
+            tmpDNDict["max_wal_senders"] = "16"
             totalnum = len(peerInsts)
             for inst in peerInsts:
                 if inst.instanceType == CASCADE_STANDBY_INSTANCE:
@@ -216,6 +218,9 @@ class DN_OLAP(Kernel):
             elif len(azNames) == 3 and totalnum in (5, 6, 7):
                 tmpDNDict["synchronous_standby_names"] = \
                     "'ANY 3(%s,%s,%s)'" % (azNames[0], azNames[1], azNames[2])
+            if len(peerInsts) > 4:
+                if "synchronous_standby_names" in tmpDNDict:
+                    del tmpDNDict['synchronous_standby_names']
 
         if (self.clusterType == DefaultValue.CLUSTER_TYPE_SINGLE):
             tmpDNDict["replication_type"] = "2"
