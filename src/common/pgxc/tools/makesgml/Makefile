@@ -17,6 +17,12 @@ include $(top_builddir)/src/Makefile.global
 
 override CPPFLAGS := -I. -I$(srcdir) $(CPPFLAGS) -Wl,-z,relro,-z,now -fPIE
 
+ifeq ($(enable_profiling), no)
+  override CFLAGS += -pie
+else
+  override CFLAGS += -fPIC
+endif
+
 ifeq ($(enable_memory_check), yes)
   LDFLAGS += -l$(MEMCHECK_LIB_NAME_ASAN) -lpthread -ldl -lm -lrt
 else
@@ -35,7 +41,7 @@ endif
 OBJS = makesgml.o
 
 makesgml: $(OBJS)
-	$(CC) -Wl,-z,relro,-z,now -pie $(CFLAGS) $^ -o $@$(X) $(LDFLAGS)
+	$(CC) -Wl,-z,relro,-z,now $(CFLAGS) $^ -o $@$(X) $(LDFLAGS)
 
 all distprep html man: makesgml
 

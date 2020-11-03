@@ -186,6 +186,7 @@ enable_llt	= @enable_llt@
 enable_ut	= @enable_ut@
 enable_qunit      = @enable_qunit@
 enable_gstrace  = @enable_gstrace@
+enable_profiling = @enable_profiling@
 
 python_includespec	= @python_includespec@
 python_libdir		= @python_libdir@
@@ -624,7 +625,11 @@ else
         CPPFLAGS = @CPPFLAGS@ -fPIC
     else
         ifeq ($(enable_debug), no)
-            CPPFLAGS = @CPPFLAGS@ -fPIE
+            ifeq ($(enable_profiling), no)
+                CFLAGS = @CPPFLAGS@ -fPIE
+            else
+                CFLAGS = @CPPFLAGS@ -fPIC
+            endif
         endif
      endif
 endif
@@ -667,7 +672,11 @@ else
         CFLAGS = @CFLAGS@ $(PTHREAD_CFLAGS) -fPIC
     else
         ifeq ($(enable_debug), no)
-           CFLAGS = @CFLAGS@ $(PTHREAD_CFLAGS) -fPIE
+            ifeq ($(enable_profiling), no)
+                CFLAGS = @CFLAGS@ $(PTHREAD_CFLAGS) -fPIE
+            else
+                CFLAGS = @CFLAGS@ $(PTHREAD_CFLAGS) -fPIC
+            endif
         else
             CFLAGS = @CFLAGS@ $(PTHREAD_CFLAGS)
         endif
@@ -682,7 +691,11 @@ ifeq ($(enable_llt), no)
             CFLAGS = @CFLAGS@ -fPIC
         else
             ifeq ($(enable_debug), no)
-                CFLAGS = @CFLAGS@ -fPIE
+                ifeq ($(enable_profiling), no)
+                    CFLAGS = @CFLAGS@ -fPIE
+                else
+                    CFLAGS = @CFLAGS@ -fPIC
+                endif
             else
                 CFLAGS = @CFLAGS@
             endif
@@ -726,7 +739,10 @@ LIBS += -ledit -lssl -lcrypto # append linking lib from securec
 LIBS += -lsecurec
 # append linking lib for threading
 ifeq ($(enable_debug), no)
-LIBS += -pthread -D_REENTRANT -lrt -pie
+    LIBS += -pthread -D_REENTRANT -lrt
+    ifeq ($(enable_profiling), no)
+        LIBS += -pie
+    endif
 else
 LIBS += -pthread -D_REENTRANT -lrt
 endif

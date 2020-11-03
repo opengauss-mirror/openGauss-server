@@ -32,6 +32,10 @@ endif
 OBJS = foreignscancodegen.o
 
 # append include directory about zlib1.2.7
-  override CPPFLAGS += -I$(LIBLLVM_INCLUDE_PATH) -I$(top_builddir)/contrib/hdfs_fdw/orc/include -D_DEBUG -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -O2 -fomit-frame-pointer -fvisibility-inlines-hidden -fno-exceptions -fno-rtti -Woverloaded-virtual -Wcast-qual  -L$(LIBLLVM_LIB_PATH) -lz -pthread -D_REENTRANT -lncurses -lrt -ldl -lm $(LLVM_LIBS)
+  override CPPFLAGS += -I$(LIBLLVM_INCLUDE_PATH) -I$(top_builddir)/contrib/hdfs_fdw/orc/include -D_DEBUG -D_GNU_SOURCE -D__STDC_CONSTANT_MACROS -D__STDC_FORMAT_MACROS -D__STDC_LIMIT_MACROS -O2 -fvisibility-inlines-hidden -fno-exceptions -fno-rtti -Woverloaded-virtual -Wcast-qual  -L$(LIBLLVM_LIB_PATH) -lz -pthread -D_REENTRANT -lncurses -lrt -ldl -lm $(LLVM_LIBS)
+
+ifeq ($(enable_profiling), no)
+  override CPPFLAGS += -fomit-frame-pointer
+endif
 
 include $(top_srcdir)/src/gausskernel/common.mk

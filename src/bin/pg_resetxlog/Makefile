@@ -29,7 +29,11 @@ all: pg_resetxlog
 override CXXFLAGS += -fPIE
 override CPPFLAGS := -I$(libpq_srcdir) $(CPPFLAGS) 
 CFLAGS += -Wl,-z,relro,-z,now -fPIE
-LDFLAGS += -pie
+ifeq ($(enable_profiling), no)
+  LDFLAGS += -pie
+else
+  LDFLAGS += -fPIC
+endif
 
 pg_resetxlog: $(OBJS) | submake-libpgport
 	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o $@$(X)

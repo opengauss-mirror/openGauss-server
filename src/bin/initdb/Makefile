@@ -34,8 +34,14 @@ endif
 OBJS=	initdb.o findtimezone.o localtime.o encnames.o pqsignal.o $(WIN32RES) $(top_builddir)/src/lib/elog/elog.a
 all: gs_initdb
 
+ifeq ($(enable_profiling), no)
+  CAFLAGS = -fPIE -pie
+else
+  CAFLAGS = -fPIC
+endif
+
 gs_initdb: $(OBJS) | submake-libpgport
-	$(CC) -fPIE -pie $(CXXFLAGS) $(OBJS) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o $@$(X)
+	$(CC) $(CAFLAGS) $(CXXFLAGS) $(OBJS) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o $@$(X)
 utinitdb: $(OBJS) | submake-libpgport
 	$(CC) -fPIC -shared $(CXXFLAGS) $(OBJS) $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o libutinitdb.so
 	mv libutinitdb.so $(top_builddir)/src/test/ut/lib
