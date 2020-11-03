@@ -48,7 +48,7 @@ DROP SEQUENCE IF EXISTS xc_sequence_1;
 
 -- Columns with SERIAL
 -- Serial sequence is named xc_sequence_tab1_col2_seq
-CREATE TABLE xc_sequence_tab1 (col1 int, col2 serial) DISTRIBUTE BY ROUNDROBIN;
+CREATE TABLE xc_sequence_tab1 (col1 int, col2 serial);
 -- Some data
 INSERT INTO xc_sequence_tab1 VALUES (1, DEFAULT);
 INSERT INTO xc_sequence_tab1 VALUES (2, DEFAULT);
@@ -68,7 +68,7 @@ SELECT col1 FROM xc_sequence_tab1 ORDER BY 1;
 COMMIT;
 DROP TABLE xc_sequence_tab1;
 -- Need to recreate here, serial column is no more
-CREATE TABLE xc_sequence_tab1 (col1 int, col2 serial) DISTRIBUTE BY ROUNDROBIN;
+CREATE TABLE xc_sequence_tab1 (col1 int, col2 serial);
 INSERT INTO xc_sequence_tab1 VALUES (1234, DEFAULT);
 SELECT col1, col2 FROM xc_sequence_tab1 ORDER BY 1;
 -- Rollback of a table with SERIAL
@@ -92,3 +92,14 @@ SELECT setval('xc_sequence_neg_set', -99); -- ok
 SELECT nextval('xc_sequence_neg_set'); -- ok
 SELECT currval('xc_sequence_neg_set'); -- ok
 DROP SEQUENCE xc_sequence_neg_set;
+-- Alter sequence restart with
+CREATE SEQUENCE xc_sequence_restart INCREMENT BY 2 START WITH 1;
+SELECT xc_sequence_restart.nextval; -- ok
+SELECT xc_sequence_restart.nextval; -- ok
+ALTER SEQUENCE xc_sequence_restart RESTART 2;
+SELECT xc_sequence_restart.nextval; -- ok
+SELECT xc_sequence_restart.nextval; -- ok
+ALTER SEQUENCE xc_sequence_restart RESTART WITH 1;
+SELECT xc_sequence_restart.nextval; -- ok
+SELECT xc_sequence_restart.nextval; -- ok
+DROP SEQUENCE xc_sequence_restart;
