@@ -34,7 +34,7 @@ static int sort_order_cmp(const void* p1, const void* p2);
 
 #define checkEnumLableValue(val)                                                             \
     do {                                                                                     \
-        if (NAMEDATALEN < strlen(val) || 0 == strlen(val)) {                                 \
+        if (NAMEDATALEN - 1 < strlen(val) || 0 == strlen(val)) {                             \
             ereport(ERROR,                                                                   \
                 (errcode(ERRCODE_INVALID_NAME),                                              \
                     errmsg("invalid enum label \"%s\"", val),                                \
