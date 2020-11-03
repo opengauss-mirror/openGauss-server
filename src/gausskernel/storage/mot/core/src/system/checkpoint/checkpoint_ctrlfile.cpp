@@ -62,7 +62,7 @@ void CheckpointControlFile::Init()
             break;
         }
         m_fullPath.append("/");
-        m_fullPath.append(m_ctrlFileName);
+        m_fullPath.append(CTRL_FILE_NAME);
         MOT_LOG_TRACE("CheckpointControlFile: Fullpath - '%s'", m_fullPath.c_str());
         // try to open an old file
         if (!CheckpointUtils::FileExists(m_fullPath)) {

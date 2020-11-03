@@ -534,7 +534,7 @@ static PGconn* get_connection(void)
                 progname);
             securec_check_ss_c(ret, "\0", "\0");
         } else {
-#ifdef ENABLE_MULTIPLE_NODES        
+#ifdef ENABLE_MULTIPLE_NODES
             ret = snprintf_s(local_conninfo,
                 sizeof(local_conninfo),
                 sizeof(local_conninfo) - 1,
@@ -1036,11 +1036,11 @@ static PGPing test_postmaster_connection(pgpid_t pm_pid, bool do_checkpoint, str
             } else {
                 if (stat(gaussdb_state_file, &afterStat) != 0 && errno != ENOENT) {
                     pg_log(PG_WARNING,
-                         _("could not stat file gaussdb_state_file %s: %s\n"), 
-                        gaussdb_state_file, 
+                        _("could not stat file gaussdb_state_file %s: %s\n"),
+                        gaussdb_state_file,
                         strerror(errno));
                 } else if (errno != ENOENT) {
-                    if (beforeStat.st_mtim.tv_sec != afterStat.st_mtim.tv_sec || 
+                    if (beforeStat.st_mtim.tv_sec != afterStat.st_mtim.tv_sec ||
                         beforeStat.st_mtim.tv_nsec != afterStat.st_mtim.tv_nsec) {
                         nRet = memset_s(&state, sizeof(state), 0, sizeof(state));
                         securec_check_c(nRet, "\0", "\0");
@@ -1056,8 +1056,8 @@ static PGPing test_postmaster_connection(pgpid_t pm_pid, bool do_checkpoint, str
                                 return PQPING_OK;
                             case COREDUMP_STATE:
                                 pg_log(PG_WARNING, _(" gaussDB state is %s\n"), get_string_by_state(state.state));
-                                return PQPING_NO_RESPONSE;                        
-                            case STARTING_STATE:                                
+                                return PQPING_NO_RESPONSE;
+                            case STARTING_STATE:
                             case UNKNOWN_STATE:
                             default:
                                 /* nothing to do */
@@ -1091,11 +1091,11 @@ static PGPing test_postmaster_connection(pgpid_t pm_pid, bool do_checkpoint, str
 
         pg_usleep(1000000); /* 1 sec */
     }
-    
-#ifndef ENABLE_MULTIPLE_NODES  
-    if (i >= wait_seconds) {             
-        pg_log(PG_PROGRESS, _("start timeout after %d seconds, please check the process status manually. "), 
-            wait_seconds);
+
+#ifndef ENABLE_MULTIPLE_NODES
+    if (i >= wait_seconds) {
+        pg_log(
+            PG_PROGRESS, _("start timeout after %d seconds, please check the process status manually. "), wait_seconds);
     }
 #endif
 
@@ -1156,14 +1156,13 @@ static void read_post_opts(void)
                  * double-quote?
                  */
                 if ((arg1 = strstr(optline, " \"")) != NULL) {
-                    *arg1 = '\0';         /* terminate so we get only program name */
+                    *arg1 = '\0'; /* terminate so we get only program name */
 #ifdef ENABLE_MULTIPLE_NODES
                     post_opts = arg1 + 1; /* point past whitespace */
 #else
-                    tmp_postopts = arg1 + 1; 
+                    tmp_postopts = arg1 + 1;
                     post_opts = xstrdup(tmp_postopts);
 #endif
-
                 }
                 if (exec_path == NULL) {
                     exec_path = xstrdup(optline);
@@ -1531,7 +1530,7 @@ start_retry:
             case PQPING_NO_RESPONSE:
                 pg_log(PG_PRINT, _("\n"));
                 pg_log(PG_PROGRESS, _("stopped waiting\n"));
-                pg_log(PG_PROGRESS, _("could not start server\n"));                      
+                pg_log(PG_PROGRESS, _("could not start server\n"));
                 pg_log(PG_PROGRESS, _("Examine the log output.\n"));
                 if (ctl_command == BUILD_COMMAND && restart_count < 3) {
                     /*
@@ -1611,7 +1610,7 @@ static void do_stop(bool force)
             strerror(errno));
         if (errno == ESRCH) {
             return;
-        }            
+        }
         if (force || (shutdown_mode == IMMEDIATE_MODE)) {
             kill_proton_force();
             if (-1 == chmod(pid_file, 0600)) {
@@ -1640,7 +1639,7 @@ static void do_stop(bool force)
         print_msg(_("waiting for server to shut down..."));
 
         for (cnt = 0; cnt < wait_seconds; cnt++) {
-            if (((pid = get_pgpid()) != 0) || 
+            if (((pid = get_pgpid()) != 0) ||
                 (postmaster_is_alive((pid_t)tpid) && IsMyPostmasterPid((pid_t)tpid, pg_config))) {
                 print_msg(".");
                 pg_usleep(1000000); /* 1 sec */
@@ -1685,7 +1684,7 @@ static void do_stop(bool force)
 
 /*
  *	restart/reload routines
-*/
+ */
 static void do_restart(void)
 {
     int cnt;
@@ -1938,7 +1937,7 @@ static void do_failover(uint32 term)
 
 /*
  * promote
-*/
+ */
 static void do_promote(void)
 {
     FILE* prmfile = NULL;
@@ -2292,14 +2291,18 @@ static bool check_pid_exists(pgpid_t pid)
     char buf[1024] = {0};
     char command[128] = {0};
     
-    snprintf(command, sizeof(command), 
-        "ps ux | grep \"gaussdb\" | grep -v \"grep\" | awk \'{print $2}\' | grep -w %ld", pid);
+    int ret = snprintf_s(command,
+        sizeof(command),
+        sizeof(command) - 1,
+        "ps ux | grep \"gaussdb\" | grep -v \"grep\" | awk \'{print $2}\' | grep -w %ld",
+        pid);
+    securec_check_ss_c(ret, "\0", "\0");
     fp = popen(command, "r");
     if (fp == NULL) {
         pg_log(PG_WARNING, _("Failed to execute command %s \n"), command);
         return false;
     }
-    
+
     int readbuf = fread(buf, 1, sizeof(buf), fp);
     if (readbuf == 0) {
         pclose(fp);
@@ -2309,8 +2312,8 @@ static bool check_pid_exists(pgpid_t pid)
     if (atoi(buf) != pid) {
         pclose(fp);
         return false;
-    } 
-        
+    }
+
     pclose(fp);
     return true;
 }
@@ -2447,7 +2450,9 @@ static void do_switchover(uint32 term)
         pg_log(PG_PRINT, _("\n"));
         if ((origin_run_mode == STANDBY_MODE && run_mode != PRIMARY_MODE) ||
             (origin_run_mode == CASCADE_STANDBY_MODE && run_mode != STANDBY_MODE)) {
-            pg_log(PG_WARNING, _("\n switchover timeout after %d seconds. please manually check the cluster status.\n"), wait_seconds);
+            pg_log(PG_WARNING,
+                _("\n switchover timeout after %d seconds. please manually check the cluster status.\n"),
+                wait_seconds);
         } else {
             pg_log(PG_PROGRESS, _("done\n"));
             pg_log(PG_PROGRESS, _("switchover completed (%s)\n"), pg_data);
@@ -2457,7 +2462,7 @@ static void do_switchover(uint32 term)
 
 /*
  *	utility routines
-*/
+ */
 static bool postmaster_is_alive(pid_t pid)
 {
     /*
@@ -2652,10 +2657,7 @@ static void display_build_query(const GaussState* state)
         free(datasize);
         pg_log(PG_PRINT, _("        %-30s: %d%%\n"), process_opts, state->build_info.process_schedule);
         datasize = show_estimated_time(state->build_info.estimated_time);
-        pg_log(PG_PRINT,
-            _("        %-30s: %s\n"),
-            remain_time_opts,
-            datasize);
+        pg_log(PG_PRINT, _("        %-30s: %s\n"), remain_time_opts, datasize);
         free(datasize);
     }
     pg_log(PG_PRINT, _("\n"));
@@ -3393,7 +3395,7 @@ static void do_help(void)
              "                    [-S START-TYPE] [-w] [-t SECS] [-o \"OPTIONS\"]\n"),
         progname);
     printf(_("  %s unregister [-N SERVICENAME]\n"), progname);
-#endif 
+#endif
     (void)printf(_("  %s querybuild   [-D DATADIR]\n"), progname);
 #ifdef ENABLE_MULTIPLE_NODES
     (void)printf(_("  %s hotpatch  [-D DATADIR] [-a ACTION] [-n NAME]\n"), progname);
@@ -3408,7 +3410,7 @@ static void do_help(void)
     printf(_("  -W                     do not wait until operation completes\n"));
     printf(_("  -M                     the database start as the appointed  mode\n"));
     printf(_("  -T                     Failover requires a term\n"));
-#ifdef ENABLE_MULTIPLE_NODES  
+#ifdef ENABLE_MULTIPLE_NODES
     printf(_("  -L                     query lsn:XX/XX validity and show the max_lsn\n"));
 #endif
     printf(_("  -d                     more debug info will be print\n"));
@@ -3474,7 +3476,7 @@ static void do_help(void)
 
 #endif
     printf(_("\nBuild connection option:\n"));
-    
+
 #ifdef ENABLE_MULTIPLE_NODES
     printf(_("  -b, --mode=MODE        the mode of building the datanode.MODE can be \"full\", \"incremental\"\n"));
 #else
@@ -3483,13 +3485,10 @@ static void do_help(void)
     printf(_("  -r, --recvtimeout=INTERVAL    time that receiver waits for communication from server (in seconds)\n"));
     printf(_("  -q                     do not start automatically after build finishing, needed start by caller\n"));
 
-
-#ifndef ENABLE_MULTIPLE_NODES  
+#ifndef ENABLE_MULTIPLE_NODES
     printf(_("\nOption for query:\n"));
     printf(_("  -L                     query lsn:XX/XX validity and show the max_lsn\n"));
 #endif
-
-
 
 #ifdef ENABLE_MULTIPLE_NODES
     printf(_("  -C, connector    CN/DN connect to CN for build\n"));
@@ -3858,7 +3857,7 @@ static void do_incremental_build(uint32 term)
     BuildErrorCode status = BUILD_SUCCESS;
     set_build_pid(getpid());
     char connstrSource[1024];
-    char pgconfPath[1024] = {0};
+    char confPath[1024] = {0};
     char* motConfPath = NULL;
     char* motChkptDir = NULL;
 
@@ -3902,12 +3901,15 @@ static void do_incremental_build(uint32 term)
         pg_log(PG_PROGRESS, "fetching MOT checkpoint\n");
 
         /* see if we have an mot conf file configured */
-        tnRet = sprintf_s(pgconfPath, sizeof(pgconfPath), "%s/%s", pg_data, "postgresql.conf");
+        tnRet = sprintf_s(confPath, sizeof(confPath), "%s/%s", pg_data, "postgresql.conf");
         securec_check_ss_c(tnRet, "\0", "\0");
-        motConfPath = GetOptionValueFromFile(pgconfPath, "mot_config_file");
+        motConfPath = GetOptionValueFromFile(confPath, "mot_config_file");
         if (motConfPath != NULL) {
-            /* parse checkpoint_dir if exists */
             motChkptDir = GetOptionValueFromFile(motConfPath, "checkpoint_dir");
+        } else {
+            tnRet = sprintf_s(confPath, sizeof(confPath), "%s/%s", pg_data, "mot.conf");
+            securec_check_ss_c(tnRet, "\0", "\0");
+            motChkptDir = GetOptionValueFromFile(confPath, "checkpoint_dir");
         }
 
         FetchMotCheckpoint(motChkptDir ? (const char*)motChkptDir : (const char*)pg_data, streamConn, progname, true);
@@ -4496,7 +4498,7 @@ int main(int argc, char** argv)
     int ret;
     uint32 term = 1;
     errno_t tnRet = 0;
-    const char *progname_tmp = NULL;
+    const char* progname_tmp = NULL;
     process_id = getpid();
     uint32 queryxlogid = -1;
     uint32 queryxlogseg = -1;
@@ -4509,11 +4511,11 @@ int main(int argc, char** argv)
     /* Check and free program name */
     progname_tmp = get_progname(argv[0]);
     if (strcmp(progname, progname_tmp) != 0) {
-        free(const_cast<char *>(progname_tmp));
+        free(const_cast<char*>(progname_tmp));
         do_help();
         exit(0);
     }
-    free(const_cast<char *>(progname_tmp));
+    free(const_cast<char*>(progname_tmp));
     set_pglocale_pgservice(argv[0], PG_TEXTDOMAIN("gs_ctl"));
     start_time = time(NULL);
 
@@ -4567,7 +4569,7 @@ int main(int argc, char** argv)
         // The node defaults to a datanode
         FREE_AND_RESET(pgxcCommand);
         pgxcCommand = xstrdup("--datanode");
-        
+
         while ((c = getopt_long(argc, argv, "b:cD:l:m:M:N:o:p:P:r:sS:t:U:wWdqL:T:", long_options, &option_index)) != -1)
 #endif
         {
@@ -4644,7 +4646,7 @@ int main(int argc, char** argv)
                     FREE_AND_RESET(pgxcCommand);
 #ifndef ENABLE_MULTIPLE_NODES
                     if (strcmp(optarg, "coordinator") == 0 || strcmp(optarg, "datanode") == 0) {
-                        pg_log(PG_WARNING, 
+                        pg_log(PG_WARNING,
                             _(" --coordinator and --datanode option are not supported on single node mode\n"));
                         exit(1);
                     }
@@ -4680,7 +4682,7 @@ int main(int argc, char** argv)
 
                 case 'T': {
                     check_input_for_security(optarg);
-                    char *tmp = NULL;
+                    char* tmp = NULL;
                     term = (uint32)strtoul(optarg, &tmp, 10);
                     if (*tmp != '\0') {
                         pg_log(PG_WARNING, _("unexpected term specified\n"));

@@ -422,7 +422,7 @@ static void perform_base_backup(basebackup_options* opt, DIR* tblspcdir)
         if (nWalFiles < 1) {
             ereport(ERROR, (errmsg("could not find any WAL files")));
         }
-        
+
         walFiles = (char**)palloc0(nWalFiles * sizeof(char*));
         i = 0;
         foreach (lc, walFileList) {
@@ -458,7 +458,7 @@ static void perform_base_backup(basebackup_options* opt, DIR* tblspcdir)
             size_t cnt;
             pgoff_t len = 0;
 
-            int rt = snprintf_s(pathbuf, MAXPGPATH,MAXPGPATH -1, XLOGDIR "/%s", walFiles[i]);
+            int rt = snprintf_s(pathbuf, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%s", walFiles[i]);
             securec_check_ss_c(rt, "\0", "\0");
             XLogFromFileName(walFiles[i], &tli, &segno);
 
@@ -531,7 +531,7 @@ static void perform_base_backup(basebackup_options* opt, DIR* tblspcdir)
         foreach (lc, historyFileList) {
             char* fname = (char*)lfirst(lc);
 
-            int rt = snprintf_s(pathbuf, MAXPGPATH, MAXPGPATH-1, XLOGDIR "/%s", fname);
+            int rt = snprintf_s(pathbuf, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%s", fname);
             securec_check_ss_c(rt, "\0", "\0");
             if (lstat(pathbuf, &statbuf) != 0)
                 ereport(ERROR, (errcode_for_file_access(), errmsg("could not stat file \"%s\": %m", pathbuf)));
@@ -578,81 +578,42 @@ static void mot_checkpoint_fetch_cleanup(int code, Datum arg)
  */
 void PerformMotCheckpointFetch()
 {
-    char* chkptDir = NULL;
-    char* workingDir = NULL;
     char fullChkptDir[MAXPGPATH] = {0};
     char ctrlFilePath[MAXPGPATH] = {0};
-    char cwd[MAXPGPATH] = {0};
-    const char* motControlFile = "mot.ctrl";
-    uint64_t id = 0;
-    int rc = 0;
+    size_t basePathLen = 0;
 
     MOTCheckpointFetchLock();
     PG_ENSURE_ERROR_CLEANUP(mot_checkpoint_fetch_cleanup, (Datum)0);
     {
-        id = MOTCheckpointGetId();
-        if (id == 0) {
-            break; /* no checkpoint exists */
+        if (MOTCheckpointExists(ctrlFilePath, MAXPGPATH, fullChkptDir, MAXPGPATH, basePathLen) == false) {
+            /* no checkpoint exists */
+            break;
         }
-
-        if (getcwd(cwd, sizeof(cwd)) == NULL) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not get current work dir : %m")));
-        }
-
-        chkptDir = MOTCheckpointFetchDirName();
-        if (chkptDir == NULL) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not get mot checkpoint dir : %m")));
-        }
-
-        workingDir = MOTCheckpointFetchWorkingDir();
-        if (workingDir == NULL) {
-            ereport(ERROR, (errcode_for_file_access(), errmsg("could not get mot checkpoint working dir : %m")));
-        }
-
-        if (strncmp(cwd, workingDir, strlen(workingDir) - 1) == 0) {
-            /* checkpoint resides on the working dir (default) */
-            rc = snprintf_s(fullChkptDir, sizeof(fullChkptDir), sizeof(fullChkptDir) - 1, "./%s", chkptDir);
-            securec_check_ss(rc, "", "");
-            rc = snprintf_s(ctrlFilePath, sizeof(ctrlFilePath), sizeof(ctrlFilePath) - 1, "./%s", motControlFile);
-            securec_check_ss(rc, "", "");
-        } else {
-            /* checkpoint directory is elsewhere */
-            rc = snprintf_s(
-                fullChkptDir, sizeof(fullChkptDir), sizeof(fullChkptDir) - 1, "//%s%s", workingDir, chkptDir);
-            securec_check_ss(rc, "", "");
-            rc = snprintf_s(
-                ctrlFilePath, sizeof(ctrlFilePath), sizeof(ctrlFilePath) - 1, "//%s%s", workingDir, motControlFile);
-            securec_check_ss(rc, "", "");
-        }
-        securec_check_ss(rc, "", "");
-        pfree(chkptDir);
-        pfree(workingDir);
 
         /* send mot header */
         SendMotCheckpointHeader(fullChkptDir);
-        if (chkptDir != NULL) {
-            StringInfoData buf;
+        StringInfoData buf;
 
-            /* send mot.ctrl file */
-            pq_beginmessage(&buf, 'H');
-            pq_sendbyte(&buf, 0);  /* overall format */
-            pq_sendint16(&buf, 0); /* natts */
-            pq_endmessage_noblock(&buf);
+        /* send mot.ctrl file */
+        pq_beginmessage(&buf, 'H');
+        pq_sendbyte(&buf, 0);  /* overall format */
+        pq_sendint16(&buf, 0); /* natts */
+        pq_endmessage_noblock(&buf);
 
-            struct stat statbuf;
-            if (lstat(ctrlFilePath, &statbuf) != 0) {
-                ereport(ERROR,
-                    (errcode_for_file_access(), errmsg("could not stat mot control file \"%s\": %m", ctrlFilePath)));
-            }
-
-            sendFile((char*)ctrlFilePath, (char*)ctrlFilePath, &statbuf, false);
-
-            /* send the checkpoint dir */
-            sendDir(fullChkptDir, 1, false, NIL, false, false);
-
-            /* CopyDone */
-            pq_putemptymessage_noblock('c');
+        struct stat statbuf;
+        if (lstat(ctrlFilePath, &statbuf) != 0) {
+            ereport(
+                ERROR, (errcode_for_file_access(), errmsg("could not stat mot ctrl file \"%s\": %m", ctrlFilePath)));
         }
+
+        /* send the MOT control file */
+        sendFile(ctrlFilePath, "mot.ctrl", &statbuf, false);
+
+        /* send the checkpoint dir */
+        sendDir(fullChkptDir, (int)basePathLen, false, NIL, false, false);
+
+        /* CopyDone */
+        pq_putemptymessage_noblock('c');
     }
     PG_END_ENSURE_ERROR_CLEANUP(mot_checkpoint_fetch_cleanup, (Datum)0);
     mot_checkpoint_fetch_cleanup(0, (Datum)0);
@@ -1279,7 +1240,7 @@ static int64 sendDir(
                 }
             }
             size += 2560; /* Size of the header just added */
-            continue;    /* don't recurse into pg_xlog */
+            continue;     /* don't recurse into pg_xlog */
         }
         /* Allow symbolic links in pg_tblspc only */
         if (strcmp(path, "./pg_tblspc") == 0 &&

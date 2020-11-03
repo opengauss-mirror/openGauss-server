@@ -176,7 +176,7 @@ public:
         : m_logStats(nullptr),
           m_initialized(false),
           m_recoverFromCkptDone(false),
-          m_checkpointId(0),
+          m_checkpointId(CheckpointControlFile::invalidId),
           m_lsn(0),
           m_lastReplayLsn(0),
           m_numWorkers(GetGlobalConfiguration().m_checkpointRecoveryWorkers),

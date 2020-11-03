@@ -34,11 +34,10 @@
 #include "common/fe_memutils.h"
 
 #define disconnect_and_exit(code) \
-    {                             \
-        if (conn != NULL)         \
-            PQfinish(conn);       \
+    do {                          \
+        PQfinish(conn);           \
         exit(code);               \
-    }
+    } while (0)
 
 static uint64 totaldone = 0;
 
@@ -554,7 +553,7 @@ static void MotReceiveAndUnpackTarFile(const char* basedir, const char* chkptNam
  * @return Boolean value denoting success or failure.
  */
 void FetchMotCheckpoint(
-    const char* basedir, PGconn* fetchConn, const char* progname, bool verbose, const char format, int compresslevel)
+    const char* basedir, PGconn* conn, const char* progname, bool verbose, const char format, int compresslevel)
 {
     PGresult* res = NULL;
     const char* fetchQuery = "FETCH_MOT_CHECKPOINT";
@@ -564,46 +563,53 @@ void FetchMotCheckpoint(
     errno_t errorno = EOK;
     struct stat fileStat;
 
-    if (fetchConn == NULL) {
+    if (conn == NULL) {
         fprintf(stderr, "%s: FetchMotCheckpoint: bad connection\n", progname);
         exit(1);
     }
 
-    if (PQsendQuery(fetchConn, fetchQuery) == 0) {
+    if (PQsendQuery(conn, fetchQuery) == 0) {
         fprintf(stderr,
             "%s: could not send fetch mot checkpoint cmd \"%s\": %s",
             progname,
             fetchQuery,
-            PQerrorMessage(fetchConn));
-        exit(1);
+            PQerrorMessage(conn));
+        disconnect_and_exit(1);
     }
 
-    res = PQgetResult(fetchConn);
+    res = PQgetResult(conn);
     ExecStatusType curStatus = PQresultStatus(res);
-    if (curStatus != PGRES_TUPLES_OK) {
-        if (curStatus == PGRES_COMMAND_OK) {
-            if (verbose) {
-                fprintf(stderr, "%s: no mot checkpoint exists\n", progname);
-            }
-            PQclear(res);
-            return;
-        } else {
-            fprintf(stderr, "%s: could not fetch mot checkpoint info: %s", progname, PQerrorMessage(fetchConn));
-            exit(1);
+    if (curStatus == PGRES_COMMAND_OK) {
+        if (verbose) {
+            fprintf(stderr, "%s: no mot checkpoint exists\n", progname);
         }
+        PQclear(res);
+        return;
+    }
+
+    if (curStatus != PGRES_TUPLES_OK) {
+        fprintf(stderr,
+            "%s: could not fetch mot checkpoint info: %s, status: %u",
+            progname,
+            PQerrorMessage(conn),
+            curStatus);
+        PQclear(res);
+        disconnect_and_exit(1);
     }
 
     if (PQntuples(res) == 1) {
         char* chkptLine = PQgetvalue(res, 0, 0);
         if (NULL == chkptLine) {
             fprintf(stderr, "%s: cmd failed\n", progname);
-            exit(1);
+            PQclear(res);
+            disconnect_and_exit(1);
         }
 
         char* prefixStart = strstr(chkptLine, chkptPrefix);
         if (prefixStart == NULL) {
             fprintf(stderr, "%s: unable to parse checkpoint location\n", progname);
-            exit(1);
+            PQclear(res);
+            disconnect_and_exit(1);
         }
 
         errorno = strncpy_s(chkptName, sizeof(chkptName), prefixStart, sizeof(chkptName) - 1);
@@ -619,27 +625,30 @@ void FetchMotCheckpoint(
             if (stat(dirName, &fileStat) < 0) {
                 if (pg_mkdir_p(dirName, S_IRWXU) == -1) {
                     fprintf(stderr, "%s: could not create directory \"%s\": %s\n", progname, dirName, strerror(errno));
-                    exit(1);
+                    PQclear(res);
+                    disconnect_and_exit(1);
                 }
             } else {
-                fprintf(stderr, "%s: directory \"%s\" already exists, please remove it and try again\n", progname,
-                    dirName);
-                exit(1);
+                fprintf(
+                    stderr, "%s: directory \"%s\" already exists, please remove it and try again\n", progname, dirName);
+                PQclear(res);
+                disconnect_and_exit(1);
             }
-            MotReceiveAndUnpackTarFile(basedir, chkptName, fetchConn, progname);
+            MotReceiveAndUnpackTarFile(basedir, chkptName, conn, progname);
         } else if (format == 't') {
-            MotReceiveAndAppendTarFile(basedir, chkptName, fetchConn, progname, compresslevel);
+            MotReceiveAndAppendTarFile(basedir, chkptName, conn, progname, compresslevel);
         } else {
             fprintf(stderr, "%s: unsupport format type: \"%c\".\n", progname, format);
-            exit(1);
+            PQclear(res);
+            disconnect_and_exit(1);
         }
         if (verbose) {
             fprintf(stderr, "%s: finished fetching mot checkpoint\n", progname);
         }
     } else {
-        if (verbose) {
-            fprintf(stderr, "%s: mot checkpoint does not exist\n", progname);
-        }
+        fprintf(stderr, "%s: failed to obtain mot checkpoint header\n", progname);
+        PQclear(res);
+        disconnect_and_exit(1);
     }
 
     PQclear(res);

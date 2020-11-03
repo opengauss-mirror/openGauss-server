@@ -54,8 +54,8 @@ CheckpointManager::CheckpointManager()
       m_errorSet(false),
       m_counters{{0}},
       m_lsn(0),
-      m_id(0),
-      m_inProgressId(0),
+      m_id(CheckpointControlFile::invalidId),
+      m_inProgressId(CheckpointControlFile::invalidId),
       m_lastReplayLsn(0),
       m_emptyCheckpoint(false)
 {}

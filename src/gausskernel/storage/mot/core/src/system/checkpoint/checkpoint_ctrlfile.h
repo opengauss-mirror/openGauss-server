@@ -94,6 +94,8 @@ public:
 
     static const uint64_t invalidId = (uint64_t)(-1);
 
+    static constexpr const char* CTRL_FILE_NAME = "mot.ctrl";
+
 private:
     static constexpr int NUM_ELEMS = 1;
 
@@ -111,8 +113,6 @@ private:
     static bool initialized;
 
     static CheckpointControlFile* ctrlfileInst;
-
-    const char* m_ctrlFileName = "mot.ctrl";
 
     const char* m_defaultDir = "/tmp";
 
