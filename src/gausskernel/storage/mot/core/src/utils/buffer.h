@@ -66,11 +66,11 @@ public:
     Buffer& operator=(Buffer&& other) = delete;
     Buffer& operator=(const Buffer& other) = delete;
 
-    inline static std::string Dump(const uint8_t* buffer, uint32_t _size)
+    inline static std::string Dump(const uint8_t* buffer, uint32_t size)
     {
         std::stringstream ss;
         ss << std::hex;
-        for (uint i = 0; i < _size; i++) {
+        for (uint32_t i = 0; i < size; i++) {
             if (buffer[i] < 16)
                 ss << "0";
             ss << (uint)buffer[i] << "::";
@@ -80,7 +80,7 @@ public:
 
     inline bool AppendAt(const void* data, uint32_t size, uint32_t offset)
     {
-        if (offset + size < m_bufferSize) {
+        if (offset + size <= m_bufferSize) {
             errno_t erc = memcpy_s(&m_buffer[offset], m_bufferSize - offset, data, size);
             securec_check(erc, "\0", "\0");
             return true;
@@ -96,7 +96,7 @@ public:
     template <typename T>
     inline bool Append(const T x)
     {
-        if (m_nextFree + sizeof(T) < m_bufferSize) {
+        if (m_nextFree + sizeof(T) <= m_bufferSize) {
             T* ptr = (T*)&m_buffer[m_nextFree];
             *ptr = x;
             m_nextFree += sizeof(T);
@@ -113,7 +113,7 @@ public:
      */
     inline bool Append(const void* data, uint32_t size)
     {
-        if (m_nextFree + size < m_bufferSize) {
+        if (m_nextFree + size <= m_bufferSize) {
             errno_t erc = memcpy_s(&m_buffer[m_nextFree], m_bufferSize - m_nextFree, data, size);
             securec_check(erc, "\0", "\0");
             m_nextFree += size;
@@ -130,7 +130,7 @@ public:
      */
     bool Append(std::istream& is, uint32_t size)
     {
-        if (m_nextFree + size < m_bufferSize) {
+        if (m_nextFree + size <= m_bufferSize) {
             char* ptr = (char*)&m_buffer[m_nextFree];
             is.read(ptr, size);
             m_nextFree += size;
