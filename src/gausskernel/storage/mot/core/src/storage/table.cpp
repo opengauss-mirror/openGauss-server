@@ -522,7 +522,8 @@ Row* Table::RemoveRow(Row* row, uint64_t tid, GcManager* gc)
                 if (rc == RC::RC_INDEX_DELETE) {
                     currSentinel = ix->IndexRemove(&key, tid);
                     if (likely(gc != nullptr)) {
-                        gc->GcRecordObject(ix->GetIndexId(), currSentinel, nullptr, ix->SentinelDtor, SENTINEL_SIZE);
+                        gc->GcRecordObject(
+                            ix->GetIndexId(), currSentinel, nullptr, ix->SentinelDtor, SENTINEL_SIZE(ix));
                         gc->GcRecordObject(ix->GetIndexId(), row, nullptr, row->RowDtor, ROW_SIZE_FROM_POOL(this));
                     } else {
                         if (!MOTEngine::GetInstance()->IsRecovering()) {
@@ -544,7 +545,8 @@ Row* Table::RemoveRow(Row* row, uint64_t tid, GcManager* gc)
                 if (rc == RC::RC_INDEX_DELETE) {
                     currSentinel = ix->IndexRemove(&key, tid);
                     if (likely(gc != nullptr)) {
-                        gc->GcRecordObject(ix->GetIndexId(), currSentinel, nullptr, ix->SentinelDtor, SENTINEL_SIZE);
+                        gc->GcRecordObject(
+                            ix->GetIndexId(), currSentinel, nullptr, ix->SentinelDtor, SENTINEL_SIZE(ix));
                     } else {
                         if (!MOTEngine::GetInstance()->IsRecovering()) {
                             MOT_LOG_ERROR("RemoveRow called without GC when not recovering");
@@ -592,10 +594,10 @@ Row* Table::RemoveKeyFromIndex(Row* row, Sentinel* sentinel, uint64_t tid, GcMan
                     gc->GcRecordObject(
                         ix->GetIndexId(), currSentinel->GetStable(), nullptr, Row::RowDtor, ROW_SIZE_FROM_POOL(this));
                 }
-                gc->GcRecordObject(ix->GetIndexId(), currSentinel, nullptr, Index::SentinelDtor, SENTINEL_SIZE);
+                gc->GcRecordObject(ix->GetIndexId(), currSentinel, nullptr, Index::SentinelDtor, SENTINEL_SIZE(ix));
                 gc->GcRecordObject(ix->GetIndexId(), OutputRow, nullptr, Row::RowDtor, ROW_SIZE_FROM_POOL(this));
             } else {
-                gc->GcRecordObject(ix->GetIndexId(), currSentinel, nullptr, Index::SentinelDtor, SENTINEL_SIZE);
+                gc->GcRecordObject(ix->GetIndexId(), currSentinel, nullptr, Index::SentinelDtor, SENTINEL_SIZE(ix));
             }
         }
     }

@@ -475,7 +475,7 @@ RC TxnManager::RollbackInsert(Access* ac)
 #endif
         outputSen = index_->IndexRemove(&m_key, GetThdId());
         MOT_ASSERT(outputSen != nullptr);
-        GcSessionRecordRcu(index_->GetIndexId(), outputSen, nullptr, Index::SentinelDtor, SENTINEL_SIZE);
+        GcSessionRecordRcu(index_->GetIndexId(), outputSen, nullptr, Index::SentinelDtor, SENTINEL_SIZE(index_));
         // If we are the owner of the key and insert on top of a deleted row,
         // lets check if we can reclaim the deleted row
         if (ac->m_params.IsUpgradeInsert() and index_->IsPrimaryKey()) {
@@ -973,7 +973,7 @@ end:
                     Sentinel* outputSen = index_->IndexRemove(currentItem->m_key, m_manager->GetThdId());
                     MOT_ASSERT(outputSen != nullptr);
                     m_manager->GcSessionRecordRcu(
-                        index_->GetIndexId(), outputSen, nullptr, Index::SentinelDtor, SENTINEL_SIZE);
+                        index_->GetIndexId(), outputSen, nullptr, Index::SentinelDtor, SENTINEL_SIZE(index_));
                     m_manager->m_accessMgr->IncreaseTableStat(table);
                 }
             }
