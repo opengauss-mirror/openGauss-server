@@ -64,7 +64,6 @@
 
 #define STATIC_CONFIG_FILE "cluster_static_config"
 #define DYNAMIC_DNROLE_FILE "cluster_dnrole_config"
-#define CM_MAX_DATANODE_STANDBY_NUM 7
 
 #define MAX_VALUE_LEN 1024
 #define MAX_PARAM_LEN 1024
