@@ -1785,7 +1785,7 @@ static Form_pg_sequence read_seq_tuple(SeqTable elm, Relation rel, Buffer* buf, 
             /* isInit is true for DefineSequence, false for AlterSequence, we use it
              * to differentiate them
              */
-            if (strcmp(defel->defname, "owned_by") != 0 && strcmp(defel->defname, "maxvalue") != 0) {
+            if (strcmp(defel->defname, "owned_by") != 0 && strcmp(defel->defname, "maxvalue") != 0 && strcmp(defel->defname, "restart") != 0) {
                 ereport(
                     ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("ALTER SEQUENCE is not yet supported.")));
             }

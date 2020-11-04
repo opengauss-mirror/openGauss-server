@@ -49,7 +49,6 @@ insert into foo values(1,'One') returning f3, ctid;
 
 truncate table foo;
 alter sequence foo_f1_seq restart with 1;
-ERROR:  ALTER SEQUENCE is not yet supported.
 -------------------------------------------------------------
 -- single insert & multi-insert returning misc values
 -------------------------------------------------------------
@@ -113,7 +112,6 @@ select * from foo order by 1,2;
 
 truncate table foo;
 alter sequence foo_f1_seq restart with 1;
-ERROR:  ALTER SEQUENCE is not yet supported.
 -------------------------------------------------------------
 -- Make sure returning implementation works in case of inheritance
 -------------------------------------------------------------
@@ -152,7 +150,6 @@ HINT:  You need an unconditional ON INSERT DO INSTEAD rule or an INSTEAD OF INSE
 drop view voo;
 truncate table foo;
 alter sequence foo_f1_seq restart with 1;
-ERROR:  ALTER SEQUENCE is not yet supported.
 --------------------------------------------------------------------------------------------
 --------------------------------------------------------------------------------------------
 -- UPDATE Returning
@@ -180,49 +177,49 @@ truncate table bar;
 -------------------------------------------------------------
 INSERT INTO foo (f2,f3) VALUES ('test', DEFAULT), ('More', 11), (upper('more'), 7+9);
 update foo set f3 = f3+1 WHERE f1 < 2 RETURNING f3, f2, f1, f3-f1, least(f1,f3), ctid;
- f3 | f2 | f1 | ?column? | least | ctid 
-----+----+----+----------+-------+------
-(0 rows)
+ f3 |  f2  | f1 | ?column? | least | ctid  
+----+------+----+----------+-------+-------
+ 43 | test |  1 |       42 |     1 | (0,4)
+(1 row)
 
 truncate table foo;
 alter sequence foo_f1_seq restart with 1;
-ERROR:  ALTER SEQUENCE is not yet supported.
 -------------------------------------------------------------
 -- An example of a join where returning list contains columns from both tables
 -------------------------------------------------------------
 INSERT INTO foo (f2,f3) VALUES ('test', DEFAULT), ('More', 11), (upper('more'), 7+9);
 update foo set f3=f3*2 from xc_int4_tbl i WHERE (foo.f1 + (123456-1)) = i.f1 RETURNING foo.*, foo.f3-foo.f1,  i.f1 as "i.f1", foo.ctid, i.ctid;
- f1 | f2 | f3 | ?column? | i.f1 | ctid | ctid 
-----+----+----+----------+------+------+------
-(0 rows)
+ f1 |  f2  | f3 | ?column? |  i.f1  | ctid  | ctid  
+----+------+----+----------+--------+-------+-------
+  1 | test | 84 |       83 | 123456 | (0,4) | (0,2)
+(1 row)
 
 truncate table foo;
 alter sequence foo_f1_seq restart with 1;
-ERROR:  ALTER SEQUENCE is not yet supported.
 -------------------------------------------------------------
 -- sub-plan and init-plan in returning list
 -------------------------------------------------------------
 INSERT INTO foo (f2,f3) VALUES ('test', DEFAULT), ('More', 11), (upper('more'), 7+9);
 update foo set f3=f3*2 WHERE f1 < 2 RETURNING *, f3-f1, ctid, f1+112 IN (SELECT q1 FROM xc_int8_tbl) AS subplan, EXISTS(SELECT * FROM xc_int4_tbl) AS initplan;
- f1 | f2 | f3 | ?column? | ctid | subplan | initplan 
-----+----+----+----------+------+---------+----------
-(0 rows)
+ f1 |  f2  | f3 | ?column? | ctid  | subplan | initplan 
+----+------+----+----------+-------+---------+----------
+  1 | test | 84 |       83 | (0,4) | f       | t
+(1 row)
 
 truncate table foo;
 alter sequence foo_f1_seq restart with 1;
-ERROR:  ALTER SEQUENCE is not yet supported.
 -------------------------------------------------------------
 -- Test * in a join case when used in returning
 -------------------------------------------------------------
 INSERT INTO foo (f2,f3) VALUES ('test', DEFAULT), ('More', 11), (upper('more'), 7+9);
 update foo set f3=f3*2 from xc_int8_tbl i  WHERE foo.f1+122 = i.q1  RETURNING *, foo.ctid;
- f1 | f2 | f3 | q1 | q2 | ctid 
-----+----+----+----+----+------
-(0 rows)
+ f1 |  f2  | f3 | q1  | q2  | ctid  
+----+------+----+-----+-----+-------
+  1 | test | 84 | 123 | 456 | (0,4)
+(1 row)
 
 truncate table foo;
 alter sequence foo_f1_seq restart with 1;
-ERROR:  ALTER SEQUENCE is not yet supported.
 -------------------------------------------------------------
 -- Make sure returning implementation did not break update in case of inheritance
 -------------------------------------------------------------
@@ -393,7 +390,6 @@ HINT:  You need an unconditional ON UPDATE DO INSTEAD rule or an INSTEAD OF UPDA
 drop view voo;
 truncate table foo;
 alter sequence foo_f1_seq restart with 1;
-ERROR:  ALTER SEQUENCE is not yet supported.
 -------------------------------------------------------------
 -- returning in case of 3 levels of inheritance
 -------------------------------------------------------------
@@ -444,13 +440,12 @@ INSERT INTO foo (f2,f3) VALUES ('test', DEFAULT);
 update foo set f3=f3*2 from bar i RETURNING foo.*, foo.ctid foo_ctid, i.ctid i_ctid;
  f1 |  f2  | f3 | foo_ctid | i_ctid 
 ----+------+----+----------+--------
- 22 | test | 84 | (0,2)    | (0,1)
+  1 | test | 84 | (0,2)    | (0,1)
 (1 row)
 
 truncate table bar;
 truncate table foo;
 alter sequence foo_f1_seq restart with 1;
-ERROR:  ALTER SEQUENCE is not yet supported.
 ---------------------------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------------------------
 -- DELETE Returning
@@ -478,49 +473,49 @@ truncate table bar;
 -------------------------------------------------------------
 INSERT INTO foo (f2,f3) VALUES ('test', DEFAULT), ('More', 11), (upper('more'), 7+9);
 DELETE FROM foo WHERE f1 < 2 RETURNING f3, f2, f1, f3-f1, least(f1,f3);
- f3 | f2 | f1 | ?column? | least 
-----+----+----+----------+-------
-(0 rows)
+ f3 |  f2  | f1 | ?column? | least 
+----+------+----+----------+-------
+ 42 | test |  1 |       41 |     1
+(1 row)
 
 truncate table foo;
 alter sequence foo_f1_seq restart with 1;
-ERROR:  ALTER SEQUENCE is not yet supported.
 -------------------------------------------------------------
 -- An example of a join where returning list contains columns from both tables
 -------------------------------------------------------------
 INSERT INTO foo (f2,f3) VALUES ('test', DEFAULT), ('More', 11), (upper('more'), 7+9);
 DELETE FROM foo USING xc_int4_tbl i WHERE (foo.f1 + (123456-1)) = i.f1 RETURNING foo.*, foo.f3-foo.f1,  i.f1 as "i.f1";
- f1 | f2 | f3 | ?column? | i.f1 
-----+----+----+----------+------
-(0 rows)
+ f1 |  f2  | f3 | ?column? |  i.f1  
+----+------+----+----------+--------
+  1 | test | 42 |       41 | 123456
+(1 row)
 
 truncate table foo;
 alter sequence foo_f1_seq restart with 1;
-ERROR:  ALTER SEQUENCE is not yet supported.
 -------------------------------------------------------------
 -- sub-plan and init-plan in returning list
 -------------------------------------------------------------
 INSERT INTO foo (f2,f3) VALUES ('test', DEFAULT), ('More', 11), (upper('more'), 7+9);
 DELETE FROM foo WHERE f1 < 2 RETURNING *, f3-f1,  f1+112 IN (SELECT q1 FROM xc_int8_tbl) AS subplan, EXISTS(SELECT * FROM xc_int4_tbl) AS initplan;
- f1 | f2 | f3 | ?column? | subplan | initplan 
-----+----+----+----------+---------+----------
-(0 rows)
+ f1 |  f2  | f3 | ?column? | subplan | initplan 
+----+------+----+----------+---------+----------
+  1 | test | 42 |       41 | f       | t
+(1 row)
 
 truncate table foo;
 alter sequence foo_f1_seq restart with 1;
-ERROR:  ALTER SEQUENCE is not yet supported.
 -------------------------------------------------------------
 -- Test * in a join case when used in returning
 -------------------------------------------------------------
 INSERT INTO foo (f2,f3) VALUES ('test', DEFAULT), ('More', 11), (upper('more'), 7+9);
 DELETE FROM foo  USING xc_int8_tbl i  WHERE foo.f1+122 = i.q1  RETURNING *;
- f1 | f2 | f3 | q1 | q2 
-----+----+----+----+----
-(0 rows)
+ f1 |  f2  | f3 | q1  | q2  
+----+------+----+-----+-----
+  1 | test | 42 | 123 | 456
+(1 row)
 
 truncate table foo;
 alter sequence foo_f1_seq restart with 1;
-ERROR:  ALTER SEQUENCE is not yet supported.
 -------------------------------------------------------------
 -- Test delete returning in case of child tables and parent tables
 -------------------------------------------------------------
@@ -598,7 +593,6 @@ DELETE FROM foo WHERE f1 < 2 RETURNING *, f3-f1;
 drop view voo;
 truncate table foo;
 alter sequence foo_f1_seq restart with 1;
-ERROR:  ALTER SEQUENCE is not yet supported.
 -------------------------------------------------------------
 -- delete returning in case of 3 levels of inheritance
 -------------------------------------------------------------

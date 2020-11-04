@@ -291,23 +291,22 @@ SELECT nextval('sequence_test2');
 (1 row)
 
 ALTER SEQUENCE sequence_test2 RESTART;
-ERROR:  ALTER SEQUENCE is not yet supported.
 SELECT nextval('sequence_test2');
  nextval 
 ---------
-      38
+      32
 (1 row)
 
 SELECT nextval('sequence_test2');
  nextval 
 ---------
-      39
+      33
 (1 row)
 
 SELECT nextval('sequence_test2');
  nextval 
 ---------
-      40
+      34
 (1 row)
 
 -- Information schema
