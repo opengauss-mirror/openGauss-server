@@ -55,7 +55,13 @@
 
 #define CM_PRIMARY_STANDBY_NUM (8)  // supprot one primary and multi standby
 #define CM_MAX_CMSERVER_STANDBY_NUM (7)
+
+#ifndef ENABLE_MULTIPLE_NODES
+#define CM_MAX_DATANODE_STANDBY_NUM 8
+#else
 #define CM_MAX_DATANODE_STANDBY_NUM 7
+#endif
+
 #define CM_MAX_GTM_STANDBY_NUM (7)
 
 #define HAVE_GTM 1
