@@ -60,7 +60,7 @@
 using namespace llvm;
 using namespace std;
 
-bool GlobalCodeGenEnvironmentSuccess;
+bool GlobalCodeGenEnvironmentSuccess = false;
 static bool gscodegen_initialized = false;
 
 typedef void (*SignalHandlerPtr)(int);
@@ -864,7 +864,7 @@ static bool getCpuInfo(
 #endif
 }
 
-bool isCPUFeatureSupportCodegen()
+static bool isCPUFeatureSupportCodegen()
 {
 #ifdef __aarch64__
     return true;
@@ -890,6 +890,9 @@ bool isCPUFeatureSupportCodegen()
         /* try to check if the cpu support SSE4.2 */
         (void)getCpuInfo(1, &EAX, &EBX, &ECX, &EDX);
         isSupportSSE42 = (ECX >> 20) & 1;
+        if (!isSupportSSE42) {
+            ereport(LOG, (errmodule(MOD_LLVM), errmsg("SSE4.2 is not supported, disable codegen.")));
+        }
     }
 
     return isSupportSSE42;
@@ -913,19 +916,14 @@ bool canInitThreadCodeGen()
         return canInit;
     }
 
-    if (GlobalCodeGenEnvironmentSuccess && IS_PGXC_DATANODE && u_sess->attr.attr_sql.enable_codegen &&
+    if (IS_PGXC_DATANODE && u_sess->attr.attr_sql.enable_codegen &&
         !t_thrd.codegen_cxt.thr_codegen_obj) {
-#ifdef __aarch64__
-        canInit = true;
-#else
-        canInit = isCPUFeatureSupportCodegen();
+        /* GlobalCodeGenEnvironmentSuccess is true, means CPU feature support codegen */
+        canInit = GlobalCodeGenEnvironmentSuccess;
         if (!canInit) {
             u_sess->attr.attr_sql.enable_codegen = false;
-            ereport(LOG, (errmodule(MOD_LLVM), errmsg("SSE4.2 is not supported, disable codegen.")));
         }
-#endif
     }
-
     return canInit;
 }
 
@@ -934,7 +932,8 @@ bool canInitThreadCodeGen()
  */
 void CodeGenProcessInitialize()
 {
-    if (canInitCodegenInvironment()) {
+    /* before call InitializeLlvm, check whether CPU feature support codegen */
+    if (isCPUFeatureSupportCodegen() && canInitCodegenInvironment()) {
         MemoryContext current_context = CurrentMemoryContext;
 
         PG_TRY();

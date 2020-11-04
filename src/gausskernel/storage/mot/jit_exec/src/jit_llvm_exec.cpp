@@ -60,7 +60,6 @@
 #include "llvm/Config/llvm-config.h"
 
 extern bool GlobalCodeGenEnvironmentSuccess;
-extern bool isCPUFeatureSupportCodegen();
 
 namespace JitExec {
 DECLARE_LOGGER(JitLlvm, JitExec);
@@ -2875,8 +2874,8 @@ extern bool JitCanInitThreadCodeGen()
     return true;  // Using native llvm on ARM
 #else
     bool canInit = false;
-    if (GlobalCodeGenEnvironmentSuccess && IS_PGXC_DATANODE && IsMotCodegenEnabled()) {
-        canInit = isCPUFeatureSupportCodegen();
+    if (IS_PGXC_DATANODE && IsMotCodegenEnabled()) {
+        canInit = GlobalCodeGenEnvironmentSuccess;
         if (!canInit) {
             // turn off JIT
             DisableMotCodegen();
