@@ -666,16 +666,17 @@ int MOTConfiguration::GetMappedCore(int logicId) const
 }
 
 #define UPDATE_BOOL_CFG(var, cfgPath, defaultValue) \
-    UpdateBoolConfigItem(var, cfg->GetConfigValue(cfgPath, defaultValue), cfgPath)
+    UpdateBoolConfigItem(var, cfg->GetConfigValue(cfgPath, defaultValue, m_suppressLog == 0), cfgPath)
 
 #define UPDATE_USER_CFG(var, cfgPath, defaultValue) \
-    UpdateUserConfigItem(var, cfg->GetUserConfigValue(cfgPath, defaultValue), cfgPath)
+    UpdateUserConfigItem(var, cfg->GetUserConfigValue(cfgPath, defaultValue, m_suppressLog == 0), cfgPath)
 
 #define UPDATE_STRING_CFG(var, cfgPath, defaultValue) \
-    UpdateStringConfigItem(var, cfg->GetStringConfigValue(cfgPath, defaultValue), cfgPath)
+    UpdateStringConfigItem(var, cfg->GetStringConfigValue(cfgPath, defaultValue, m_suppressLog == 0), cfgPath)
 
 #define UPDATE_INT_CFG(var, cfgPath, defaultValue, lowerBound, upperBound) \
-    UpdateIntConfigItem(var, cfg->GetIntegerConfigValue(cfgPath, defaultValue), cfgPath, lowerBound, upperBound)
+    UpdateIntConfigItem(                                                   \
+        var, cfg->GetIntegerConfigValue(cfgPath, defaultValue, m_suppressLog == 0), cfgPath, lowerBound, upperBound)
 
 #define UPDATE_MEM_CFG(var, cfgPath, defaultValue, scale, lowerBound, upperBound) \
     UpdateMemConfigItem(var, cfgPath, defaultValue, scale, lowerBound, upperBound, true)
@@ -796,6 +797,11 @@ void MOTConfiguration::LoadConfig()
 
     // memory configuration
     UPDATE_BOOL_CFG(m_enableNuma, "enable_numa", DEFAULT_ENABLE_NUMA);
+
+    // Even though we allow loading these unexposed parameter (max_threads and max_connections), in reality it is
+    // always overridden by the external configuration loader GaussdbConfigLoader (so in effect whatever is defined
+    // in mot.conf is discarded). See GaussdbConfigLoader::ConfigureMaxThreads() and
+    // GaussdbConfigLoader::ConfigureMaxConnections() for more details.
     UPDATE_INT_CFG(m_maxThreads, "max_threads", DEFAULT_MAX_THREADS, MIN_MAX_THREADS, MAX_MAX_THREADS);
     UPDATE_INT_CFG(
         m_maxConnections, "max_connections", DEFAULT_MAX_CONNECTIONS, MIN_MAX_CONNECTIONS, MAX_MAX_CONNECTIONS);
@@ -1027,10 +1033,9 @@ void MOTConfiguration::LoadConfig()
     MOT_LOG_TRACE("Main configuration loaded");
 }
 
-void MOTConfiguration::UpdateMemConfigItem(uint64_t& oldValue, const char* name, const char* defaultStrValue,
+uint64_t MOTConfiguration::GetDefaultMemValueBytes(uint64_t& oldValue, const char* name, const char* defaultStrValue,
     uint64_t scale, uint64_t lowerBound, uint64_t upperBound, bool allowPercentage)
 {
-    // we prepare first a default value from the string default value
     ++m_suppressLog;
     uint64_t defaultValueBytes = allowPercentage ? ParseMemoryValueBytes(defaultStrValue, (uint64_t)-1, name)
                                                  : ParseMemoryUnit(defaultStrValue, (uint64_t)-1, name);
@@ -1038,6 +1043,15 @@ void MOTConfiguration::UpdateMemConfigItem(uint64_t& oldValue, const char* name,
     --m_suppressLog;
     MOT_LOG_TRACE(
         "Converted memory default string value %s to byte value: %" PRIu64, defaultStrValue, defaultValueBytes);
+    return defaultValueBytes;
+}
+
+void MOTConfiguration::UpdateMemConfigItem(uint64_t& oldValue, const char* name, const char* defaultStrValue,
+    uint64_t scale, uint64_t lowerBound, uint64_t upperBound, bool allowPercentage)
+{
+    // we prepare first a default value from the string default value
+    uint64_t defaultValueBytes =
+        GetDefaultMemValueBytes(oldValue, name, defaultStrValue, scale, lowerBound, upperBound, allowPercentage);
 
     // now we carefully examine the configuration item type
     const LayeredConfigTree* cfg = ConfigManager::GetInstance().GetLayeredConfigTree();
@@ -1046,40 +1060,52 @@ void MOTConfiguration::UpdateMemConfigItem(uint64_t& oldValue, const char* name,
         // just keep default
         MOT_LOG_TRACE("Configuration item %s not found, keeping default %" PRIu64 ".", name, defaultValueBytes);
     } else if (cfgItem->GetClass() != ConfigItemClass::CONFIG_ITEM_VALUE) {
-        MOT_LOG_ERROR("Invalid configuration for %s: expected value item, got %s item. Keeping default value %" PRIu64
-                      ".",
-            name,
-            ConfigItemClassToString(cfgItem->GetClass()),
-            defaultValueBytes);
+        if (m_suppressLog == 0) {
+            MOT_LOG_ERROR(
+                "Invalid configuration for %s: expected value item, got %s item. Keeping default value %" PRIu64 ".",
+                name,
+                ConfigItemClassToString(cfgItem->GetClass()),
+                defaultValueBytes);
+        }
         UpdateIntConfigItem(oldValue, defaultValueBytes / scale, name, lowerBound, upperBound);
     } else {
         // now we carefully examine the value type
         ConfigValue* cfgValue = (ConfigValue*)cfgItem;
         if (cfgValue->IsIntegral()) {
             // only a number was specified, so it is interpreted as bytes
-            uint64_t memoryValueBytes = cfg->GetIntegerConfigValue<uint64_t>(name, defaultValueBytes);
+            uint64_t memoryValueBytes =
+                cfg->GetIntegerConfigValue<uint64_t>(name, defaultValueBytes, m_suppressLog == 0);
             UpdateIntConfigItem(oldValue, memoryValueBytes / scale, name, lowerBound, upperBound);
             MOT_LOG_TRACE("Loading integral memory value %s as bytes: %" PRIu64, name, memoryValueBytes);
         } else if (cfgValue->GetConfigValueType() == ConfigValueType::CONFIG_VALUE_STRING) {
             // value was parsed as string, meaning we have units or percentage specifier
-            const char* strValue = cfg->GetStringConfigValue(name, defaultStrValue);
+            const char* strValue = cfg->GetStringConfigValue(name, defaultStrValue, m_suppressLog == 0);
             if ((strValue != nullptr) && (strValue[0] != 0)) {
                 uint64_t memoryValueBytes = allowPercentage ? ParseMemoryValueBytes(strValue, defaultValueBytes, name)
                                                             : ParseMemoryUnit(strValue, defaultValueBytes, name);
                 UpdateIntConfigItem(oldValue, memoryValueBytes / scale, name, lowerBound, upperBound);
+            } else {
+                if (m_suppressLog == 0) {
+                    MOT_LOG_WARN("Empty value specified for configuration item %s, using default value: %" PRIu64
+                                 " bytes",
+                        name,
+                        defaultValueBytes);
+                }
             }
         } else {
             // unexpected value type
-            MOT_LOG_WARN("Unexpected configuration item %s value type: %s. Keeping default value: %" PRIu64 ".",
-                name,
-                ConfigValueTypeToString(cfgValue->GetConfigValueType()),
-                defaultValueBytes);
+            if (m_suppressLog == 0) {
+                MOT_LOG_WARN("Unexpected configuration item %s value type: %s. Keeping default value: %" PRIu64 ".",
+                    name,
+                    ConfigValueTypeToString(cfgValue->GetConfigValueType()),
+                    defaultValueBytes);
+            }
             UpdateIntConfigItem(oldValue, defaultValueBytes / scale, name, lowerBound, upperBound);
         }
     }
 }
 
-void MOTConfiguration::UpdateTimeConfigItem(uint64_t& oldValue, const char* name, const char* defaultStrValue,
+uint64_t MOTConfiguration::GetDefaultTimeValueUSecs(uint64_t& oldValue, const char* name, const char* defaultStrValue,
     uint64_t scale, uint64_t lowerBound, uint64_t upperBound)
 {
     // we prepare first a default value from the string default value
@@ -1087,6 +1113,15 @@ void MOTConfiguration::UpdateTimeConfigItem(uint64_t& oldValue, const char* name
     uint64_t defaultValueUSecs = ParseTimeValueMicros(defaultStrValue, (uint64_t)-1, name);
     UpdateIntConfigItem(oldValue, defaultValueUSecs / scale, name, lowerBound, upperBound);
     --m_suppressLog;
+    return defaultValueUSecs;
+}
+
+void MOTConfiguration::UpdateTimeConfigItem(uint64_t& oldValue, const char* name, const char* defaultStrValue,
+    uint64_t scale, uint64_t lowerBound, uint64_t upperBound)
+{
+    // we prepare first a default value from the string default value
+    uint64_t defaultValueUSecs =
+        GetDefaultTimeValueUSecs(oldValue, name, defaultStrValue, scale, lowerBound, upperBound);
 
     MOT_LOG_TRACE("Converted time default string value %s to usec value: %" PRIu64, defaultStrValue, defaultValueUSecs);
 
@@ -1097,33 +1132,37 @@ void MOTConfiguration::UpdateTimeConfigItem(uint64_t& oldValue, const char* name
         // just keep default
         MOT_LOG_TRACE("Configuration item %s not found, keeping default %" PRIu64 ".", name, defaultValueUSecs);
     } else if (cfgItem->GetClass() != ConfigItemClass::CONFIG_ITEM_VALUE) {
-        MOT_LOG_ERROR("Invalid configuration for %s: expected value item, got %s item. Keeping default value %" PRIu64
-                      ".",
-            name,
-            ConfigItemClassToString(cfgItem->GetClass()),
-            defaultValueUSecs);
+        if (m_suppressLog == 0) {
+            MOT_LOG_ERROR(
+                "Invalid configuration for %s: expected value item, got %s item. Keeping default value %" PRIu64 ".",
+                name,
+                ConfigItemClassToString(cfgItem->GetClass()),
+                defaultValueUSecs);
+        }
         UpdateIntConfigItem(oldValue, defaultValueUSecs / scale, name, lowerBound, upperBound);
     } else {
         // now we carefully examine the value type
         ConfigValue* cfgValue = (ConfigValue*)cfgItem;
         if (cfgValue->IsIntegral()) {
             // only a number was specified, so it is interpreted as micro-seconds
-            uint64_t timeValueUSecs = cfg->GetIntegerConfigValue<uint64_t>(name, defaultValueUSecs);
+            uint64_t timeValueUSecs = cfg->GetIntegerConfigValue<uint64_t>(name, defaultValueUSecs, m_suppressLog == 0);
             UpdateIntConfigItem(oldValue, timeValueUSecs / scale, name, lowerBound, upperBound);
             MOT_LOG_TRACE("Loading integral time value %s as micro-seconds: %" PRIu64, name, timeValueUSecs);
         } else if (cfgValue->GetConfigValueType() == ConfigValueType::CONFIG_VALUE_STRING) {
             // value was parsed as string, meaning we have units
-            const char* strValue = cfg->GetStringConfigValue(name, defaultStrValue);
+            const char* strValue = cfg->GetStringConfigValue(name, defaultStrValue, m_suppressLog == 0);
             if ((strValue != nullptr) && (strValue[0] != 0)) {
                 uint64_t timeValueUSecs = ParseTimeValueMicros(strValue, defaultValueUSecs, name);
                 UpdateIntConfigItem(oldValue, timeValueUSecs / scale, name, lowerBound, upperBound);
             }
         } else {
             // unexpected value type
-            MOT_LOG_WARN("Unexpected configuration item %s value type: %s. Keeping default value: %" PRIu64 ".",
-                name,
-                ConfigValueTypeToString(cfgValue->GetConfigValueType()),
-                defaultValueUSecs);
+            if (m_suppressLog == 0) {
+                MOT_LOG_WARN("Unexpected configuration item %s value type: %s. Keeping default value: %" PRIu64 ".",
+                    name,
+                    ConfigValueTypeToString(cfgValue->GetConfigValueType()),
+                    defaultValueUSecs);
+            }
             UpdateIntConfigItem(oldValue, defaultValueUSecs / scale, name, lowerBound, upperBound);
         }
     }

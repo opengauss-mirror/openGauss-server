@@ -62,6 +62,12 @@ public:
         return m_isIntegral;
     }
 
+    /** @brief Queries if object construction succeeded. */
+    virtual bool IsValid() const
+    {
+        return true;
+    }
+
 private:
     /** @var The configuration value type. */
     ConfigValueType m_valueType;

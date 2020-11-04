@@ -26,6 +26,7 @@
 #define TYPED_CONFIG_VALUE_H
 
 #include "config_value.h"
+#include "type_formatter.h"
 
 namespace MOT {
 /**
@@ -77,12 +78,6 @@ public:
     /** @brief Destructor. */
     ~TypedConfigValue() override
     {}
-
-    /** @brief Queries if object construction succeeded. */
-    virtual bool IsValid() const
-    {
-        return true;
-    }
 
     /**
      * @brief Retrieves the value associated with this item.
@@ -321,7 +316,7 @@ typedef TypedConfigValue<int8_t> Int8ConfigValue;
 // floating point type
 typedef TypedConfigValue<double> DoubleConfigValue;
 
-// boolean type
+// Boolean type
 typedef TypedConfigValue<bool> BoolConfigValue;
 
 /**
@@ -355,6 +350,93 @@ template <>
 struct ConfigItemClassMapper<StringConfigValue> {
     static constexpr const ConfigItemClass CONFIG_ITEM_CLASS = ConfigItemClass::CONFIG_ITEM_VALUE;
     static constexpr const char* CONFIG_ITEM_CLASS_NAME = "ConfigValue";
+};
+
+// type formatter specialization for all primitive types
+#define SPEC_TYPE_FORMAT(typeName, formatStr)                                              \
+    template <>                                                                            \
+    class TypeFormatter<typeName> {                                                        \
+    public:                                                                                \
+        static inline const char* ToString(const typeName& value, mot_string& stringValue) \
+        {                                                                                  \
+            stringValue.format(formatStr, value);                                          \
+            return stringValue.c_str();                                                    \
+        }                                                                                  \
+        static inline bool FromString(const char* stringValue, typeName& value)            \
+        {                                                                                  \
+            return false;                                                                  \
+        }                                                                                  \
+    };
+
+SPEC_TYPE_FORMAT(uint64_t, "%" PRIu64)
+SPEC_TYPE_FORMAT(uint32_t, "%" PRIu32)
+SPEC_TYPE_FORMAT(uint16_t, "%" PRIu16)
+SPEC_TYPE_FORMAT(uint8_t, "%" PRIu8)
+
+SPEC_TYPE_FORMAT(int64_t, "%" PRId64)
+SPEC_TYPE_FORMAT(int32_t, "%" PRId32)
+SPEC_TYPE_FORMAT(int16_t, "%" PRId16)
+SPEC_TYPE_FORMAT(int8_t, "%" PRId8)
+
+SPEC_TYPE_FORMAT(double, "%0.2f")
+
+// specialization
+template <>
+class TypeFormatter<bool> {
+public:
+    /**
+     * @brief Converts a value to string.
+     * @param value The value to convert.
+     * @param[out] stringValue The resulting string.
+     */
+    static inline const char* ToString(const bool& value, mot_string& stringValue)
+    {
+        stringValue.format("%s", value ? "true" : "false");
+        return stringValue.c_str();
+    }
+
+    /**
+     * @brief Converts a string to a value.
+     * @param The string to convert.
+     * @param[out] The resulting value.
+     * @return Boolean value denoting whether the conversion succeeded or not.
+     */
+    static inline bool FromString(const char* stringValue, bool& value)
+    {
+        // by default not implemented
+        bool result = false;
+        if ((strcasecmp(stringValue, "true") == 0) || (strcasecmp(stringValue, "on") == 0) ||
+            (strcasecmp(stringValue, "yes") == 0)) {
+            result = true;
+        }
+        return result;
+    }
+};
+
+// specialization
+template <>
+class TypeFormatter<mot_string> {
+public:
+    /**
+     * @brief Converts a value to string.
+     * @param value The value to convert.
+     * @param[out] stringValue The resulting string.
+     */
+    static inline const char* ToString(const mot_string& value, mot_string& stringValue)
+    {
+        return value.c_str();
+    }
+
+    /**
+     * @brief Converts a string to a value.
+     * @param The string to convert.
+     * @param[out] The resulting value.
+     * @return Boolean value denoting whether the conversion succeeded or not.
+     */
+    static inline bool FromString(const char* stringValue, mot_string& value)
+    {
+        return value.assign(stringValue);
+    }
 };
 }  // namespace MOT
 
