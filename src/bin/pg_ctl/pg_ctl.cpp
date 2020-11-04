@@ -4973,15 +4973,15 @@ int main(int argc, char** argv)
 
     switch (ctl_command) {
         case INIT_COMMAND:
-            pg_log(PG_PROGRESS, _("gs_ctl init,datadir is %s \n"), pgdata_opt);
+            pg_log(PG_PROGRESS, _("gs_ctl init,datadir is %s \n"), pg_data);
             do_init();
             break;
         case STATUS_COMMAND:
-            pg_log(PG_PROGRESS, _("gs_ctl status,datadir is %s \n"), pgdata_opt);
+            pg_log(PG_PROGRESS, _("gs_ctl status,datadir is %s \n"), pg_data);
             do_status();
             break;
         case START_COMMAND:
-            pg_log(PG_PROGRESS, _("gs_ctl started,datadir is %s \n"), pgdata_opt);
+            pg_log(PG_PROGRESS, _("gs_ctl started,datadir is %s \n"), pg_data);
             if (-1 != pg_ctl_lock(pg_ctl_lockfile, &lockfile)) {
                 do_start();
                 pg_ctl_unlock(lockfile);
@@ -4990,7 +4990,7 @@ int main(int argc, char** argv)
             }
             break;
         case RESTART_COMMAND:
-            pg_log(PG_PROGRESS, _("gs_ctl restarted ,datadir is %s \n"), pgdata_opt);
+            pg_log(PG_PROGRESS, _("gs_ctl restarted ,datadir is %s \n"), pg_data);
             if (-1 != pg_ctl_lock(pg_ctl_lockfile, &lockfile)) {
                 do_restart();
                 pg_ctl_unlock(lockfile);
@@ -4999,15 +4999,15 @@ int main(int argc, char** argv)
             }
             break;
         case STOP_COMMAND:
-            pg_log(PG_PROGRESS, _("gs_ctl stopped ,datadir is %s \n"), pgdata_opt);
+            pg_log(PG_PROGRESS, _("gs_ctl stopped ,datadir is %s \n"), pg_data);
             do_stop(false);
             break;
         case RELOAD_COMMAND:
-            pg_log(PG_PROGRESS, _("gs_ctl reload ,datadir is %s \n"), pgdata_opt);
+            pg_log(PG_PROGRESS, _("gs_ctl reload ,datadir is %s \n"), pg_data);
             do_reload();
             break;
         case FAILOVER_COMMAND:
-            pg_log(PG_PROGRESS, _("gs_ctl failover ,datadir is %s \n"), pgdata_opt);
+            pg_log(PG_PROGRESS, _("gs_ctl failover ,datadir is %s \n"), pg_data);
             if (-1 != pg_ctl_lock(pg_ctl_lockfile, &lockfile)) {
                 do_failover(term);
                 pg_ctl_unlock(lockfile);
@@ -5016,7 +5016,7 @@ int main(int argc, char** argv)
             }
             break;
         case SWITCHOVER_COMMAND:
-            pg_log(PG_PROGRESS, _("gs_ctl switchover ,datadir is %s \n"), pgdata_opt);
+            pg_log(PG_PROGRESS, _("gs_ctl switchover ,datadir is %s \n"), pg_data);
             if (-1 != pg_ctl_lock(pg_ctl_lockfile, &lockfile)) {
                 do_switchover(term);
             } else {
@@ -5024,23 +5024,23 @@ int main(int argc, char** argv)
             }
             break;
         case PROMOTE_COMMAND:
-            pg_log(PG_PROGRESS, _("gs_ctl promote ,datadir is %s \n"), pgdata_opt);
+            pg_log(PG_PROGRESS, _("gs_ctl promote ,datadir is %s \n"), pg_data);
             do_promote();
             break;
         case NOTIFY_COMMAND:
-            pg_log(PG_PROGRESS, _("gs_ctl notify ,datadir is %s \n"), pgdata_opt);
+            pg_log(PG_PROGRESS, _("gs_ctl notify ,datadir is %s \n"), pg_data);
             do_notify(term);
             break;
         case QUERY_COMMAND:
-            pg_log(PG_PROGRESS, _("gs_ctl query ,datadir is %s \n"), pgdata_opt);
+            pg_log(PG_PROGRESS, _("gs_ctl query ,datadir is %s \n"), pg_data);
             do_query();
             break;
         case BUILD_QUERY_COMMAND:
-            pg_log(PG_PROGRESS, _("gs_ctl build query ,datadir is %s \n"), pgdata_opt);
+            pg_log(PG_PROGRESS, _("gs_ctl build query ,datadir is %s \n"), pg_data);
             do_build_query();
             break;
         case KILL_COMMAND:
-            pg_log(PG_PROGRESS, _("gs_ctl kill ,datadir is %s \n"), pgdata_opt);
+            pg_log(PG_PROGRESS, _("gs_ctl kill ,datadir is %s \n"), pg_data);
             do_kill(killproc);
             break;
 #if defined(WIN32) || defined(__CYGWIN__)
@@ -5059,13 +5059,13 @@ int main(int argc, char** argv)
                 pg_log(PG_PROGRESS,
                     _("gs_ctl %s build ,datadir is %s,conn_str is \'%s\'\n"),
                     build_mode == FULL_BUILD ? "full" : "incremental",
-                    pgdata_opt,
+                    pg_data,
                     conn_str);
             else
                 pg_log(PG_PROGRESS,
                     _("gs_ctl %s build ,datadir is %s\n"),
                     build_mode == FULL_BUILD ? "full" : "incremental",
-                    pgdata_opt);
+                    pg_data);
             if (-1 != pg_ctl_lock(pg_ctl_lockfile, &lockfile)) {
                 do_build(term);
                 (void)pg_ctl_unlock(lockfile);
