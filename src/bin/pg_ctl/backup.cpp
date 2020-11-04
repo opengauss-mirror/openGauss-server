@@ -303,7 +303,7 @@ static int tblspaceIndex = 0;
         securec_check_ss_c(rcm, "", "");                                                                        \
         rcm = snprintf_s(build_label_file, MAXPGPATH, MAXPGPATH - 1, "%s/%s", dirname, FULL_BACKUP_LABEL_FILE); \
         securec_check_ss_c(rcm, "", "");                                                                        \
-    } while(0)
+    } while (0)
 
 /* crete build start tag file */
 #define CREATE_BUILD_FILE(buildstart_file)                                          \
@@ -459,9 +459,14 @@ static int LogStreamerMain(logstreamer_param* param)
         return 1;
     }
 
-    if (!ReceiveXlogStream(param->bgconn, param->startptr, param->timeline, (const char*)param->sysidentifier,
-        (const char*)param->xlogdir, reached_end_position, standby_message_timeout, true)
-       ) {
+    if (!ReceiveXlogStream(param->bgconn,
+        param->startptr,
+        param->timeline,
+        (const char*)param->sysidentifier,
+        (const char*)param->xlogdir,
+        reached_end_position,
+        standby_message_timeout,
+        true)) {
         /*
          * Any errors will already have been reported in the function process,
          * but we need to tell the parent that we didn't shutdown in a nice
@@ -1012,7 +1017,7 @@ static void BaseBackup(const char* dirname, uint32 term)
     errno_t rc = EOK;
     int nRet = 0;
     struct stat st;
-    char pgconfPath[1024] = {0};
+    char confPath[1024] = {0};
     char* motConfPath = NULL;
     char* motChkptDir = NULL;
 
@@ -1403,12 +1408,15 @@ static void BaseBackup(const char* dirname, uint32 term)
     show_full_build_process("fetching MOT checkpoint");
 
     /* see if we have an mot conf file configured */
-    nRet = sprintf_s(pgconfPath, sizeof(pgconfPath), "%s/%s", dirname, "postgresql.conf");
+    nRet = sprintf_s(confPath, sizeof(confPath), "%s/%s", dirname, "postgresql.conf");
     securec_check_ss_c(nRet, "\0", "\0");
-    motConfPath = GetOptionValueFromFile(pgconfPath, "mot_config_file");
+    motConfPath = GetOptionValueFromFile(confPath, "mot_config_file");
     if (motConfPath != NULL) {
-        /* parse checkpoint_dir if exists */
         motChkptDir = GetOptionValueFromFile(motConfPath, "checkpoint_dir");
+    } else {
+        nRet = sprintf_s(confPath, sizeof(confPath), "%s/%s", dirname, "mot.conf");
+        securec_check_ss_c(nRet, "\0", "\0");
+        motChkptDir = GetOptionValueFromFile(confPath, "checkpoint_dir");
     }
 
     FetchMotCheckpoint(motChkptDir ? (const char*)motChkptDir : dirname, streamConn, progname, (bool)verbose);
@@ -1554,8 +1562,16 @@ static XLogRecPtr read_full_backup_label(
         disconnect_and_exit(1);
     }
 
-    if (fscanf_s(lfp, "START WAL LOCATION: %X/%X (file %08X%16s)%c", &hi, &lo, &tli, startxlogfilename, MAXFNAMELEN,
-        &ch, 1) != 5 || ch != '\n') {
+    if (fscanf_s(lfp,
+        "START WAL LOCATION: %X/%X (file %08X%16s)%c",
+        &hi,
+        &lo,
+        &tli,
+        startxlogfilename,
+        MAXFNAMELEN,
+        &ch,
+        1) != 5 ||
+        ch != '\n') {
         pg_log(PG_WARNING, _(" invalid wal data in file \"%s\"\n"), BACKUP_LABEL_FILE);
         fclose(lfp);
         lfp = NULL;
@@ -1827,7 +1843,7 @@ static void show_full_build_process(const char* errmg)
 static void backup_dw_file(const char* target_dir)
 {
 /* the max real path length in linux is 4096, adapt this for realpath func */
-#define MAX_REALPATH_LEN 4096    
+#define MAX_REALPATH_LEN 4096
     int rc;
     int fd = -1;
     char dw_file_path[MAXPGPATH];

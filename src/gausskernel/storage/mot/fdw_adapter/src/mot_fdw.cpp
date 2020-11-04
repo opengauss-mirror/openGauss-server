@@ -2141,37 +2141,49 @@ void MOTCheckpointFetchUnlock()
     }
 }
 
-char* MOTCheckpointFetchDirName()
+bool MOTCheckpointExists(
+    char* ctrlFilePath, size_t ctrlLen, char* checkpointDir, size_t checkpointLen, size_t& basePathLen)
 {
     MOT::MOTEngine* engine = MOT::MOTEngine::GetInstance();
-    if (engine != nullptr) {
-        std::string dirName;
-        if (engine->GetCheckpointManager()->GetCheckpointDirName(dirName) == true) {
-            return pstrdup(dirName.c_str());
-        }
+    if (engine == nullptr) {
+        return false;
     }
-    return nullptr;
-}
 
-char* MOTCheckpointFetchWorkingDir()
-{
-    MOT::MOTEngine* engine = MOT::MOTEngine::GetInstance();
-    if (engine != nullptr) {
-        std::string dirName;
-        if (engine->GetCheckpointManager()->GetCheckpointWorkingDir(dirName) == true) {
-            return pstrdup(dirName.c_str());
-        }
+    MOT::RecoveryManager* recoveryManager = engine->GetRecoveryManager();
+    MOT::CheckpointManager* checkpointManager = engine->GetCheckpointManager();
+    if (recoveryManager == nullptr || checkpointManager == nullptr) {
+        return false;
     }
-    return nullptr;
-}
 
-uint64_t MOTCheckpointGetId()
-{
-    MOT::MOTEngine* engine = MOT::MOTEngine::GetInstance();
-    if (engine != nullptr) {
-        return engine->GetRecoveryManager()->GetCheckpointId();
+    if (recoveryManager->GetCheckpointId() == MOT::CheckpointControlFile::invalidId) {
+        return false;
     }
-    return 0;
+
+    if (MOT::GetGlobalConfiguration().m_enableIncrementalCheckpoint == true) {
+        return false;
+    }
+
+    std::string workingDir;
+    if (checkpointManager->GetCheckpointWorkingDir(workingDir) == false) {
+        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmodule(MOD_MOT), errmsg("Failed to obtain working dir")));
+        return false;
+    }
+
+    std::string dirName;
+    if (checkpointManager->GetCheckpointDirName(dirName) == false) {
+        ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmodule(MOD_MOT), errmsg("Failed to obtain dir name")));
+        return false;
+    }
+
+    errno_t rc =
+        snprintf_s(checkpointDir, checkpointLen, checkpointLen - 1, "%s%s", workingDir.c_str(), dirName.c_str());
+    securec_check_ss(rc, "", "");
+    rc = snprintf_s(
+        ctrlFilePath, ctrlLen, ctrlLen - 1, "%s%s", workingDir.c_str(), MOT::CheckpointControlFile::CTRL_FILE_NAME);
+    securec_check_ss(rc, "", "");
+
+    basePathLen = workingDir.length() - 1;
+    return true;
 }
 
 inline bool IsNotEqualOper(OpExpr* op)

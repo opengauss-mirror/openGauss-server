@@ -76,8 +76,17 @@ extern void MOTOnSessionClose();
  */
 extern void MOTCheckpointFetchLock();
 extern void MOTCheckpointFetchUnlock();
-extern char* MOTCheckpointFetchDirName();
-extern char* MOTCheckpointFetchWorkingDir();
-extern uint64_t MOTCheckpointGetId();
+
+/**
+ * @brief Checks if an MOT checkpoint exists and returns its paths.
+ * @param ctrlFilePath a buffer to hold the MOT ctrl file path.
+ * @param ctrlLen the length of the given ctrl file path buffer.
+ * @param checkpointDir a buffer to hold the checkpoint path.
+ * @param checkpointLen the length of the given checkpoint path buffer.
+ * @param basePathLen  the length of the base path.
+ * @return True if an MOT checkpoint exists, False indicates that no MOT checkpoint is present.
+ */
+extern bool MOTCheckpointExists(
+    char* ctrlFilePath, size_t ctrlLen, char* checkpointDir, size_t checkpointLen, size_t& basePathLen);
 
 #endif  // MOT_FDW_H
