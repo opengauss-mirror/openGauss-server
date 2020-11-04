@@ -793,9 +793,13 @@ private:
         }
     }
 
+    uint64_t GetDefaultMemValueBytes(uint64_t& oldValue, const char* name, const char* strDefaultValue, uint64_t scale,
+        uint64_t lowerBound, uint64_t upperBound, bool allowPercentage);
     void UpdateMemConfigItem(uint64_t& oldValue, const char* name, const char* strDefaultValue, uint64_t scale,
         uint64_t lowerBound, uint64_t upperBound, bool allowPercentage);
 
+    uint64_t GetDefaultTimeValueUSecs(uint64_t& oldValue, const char* name, const char* strDefaultValue, uint64_t scale,
+        uint64_t lowerBound, uint64_t upperBound);
     void UpdateTimeConfigItem(uint64_t& oldValue, const char* name, const char* strDefaultValue, uint64_t scale,
         uint64_t lowerBound, uint64_t upperBound);
 

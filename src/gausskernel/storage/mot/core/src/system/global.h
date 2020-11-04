@@ -261,9 +261,8 @@ enum AccessType : uint8_t {
 /* Assumed size of a cache line. */
 #define CACHE_LINE_SIZE 64
 #define CL_SIZE CACHE_LINE_SIZE
-#define SENTINEL_SIZE (sizeof(Sentinel) + 8)
+#define SENTINEL_SIZE(x) x->GetSentinelSizeFromPool()
 #define KEY_SIZE_FROM_POOL(x) x->getKeyPoolSize()
-#define S_SENTINEL_SIZE(x) x->getKeyPoolSize() + SENTINEL_SIZE
 #define ROW_SIZE_FROM_POOL(t) t->GetRowSizeFromPool()
 #define ONE_MB 1048576
 

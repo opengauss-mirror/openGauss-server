@@ -270,6 +270,9 @@ protected:
         // load any relevant GUC values here
         bool result = ConfigureMaxConnections();
         if (result) {
+            result = ConfigureMaxThreads();
+        }
+        if (result) {
             result = ConfigureAffinity();
         }
         if (result) {
@@ -287,6 +290,61 @@ private:
         MOT_LOG_INFO("Loading max_connections from envelope into MOTEngine: %u",
             (unsigned)g_instance.attr.attr_network.MaxConnections);
         return AddExtUInt32ConfigItem("", "max_connections", (uint32_t)g_instance.attr.attr_network.MaxConnections);
+    }
+
+    void GetRequiredThreadCount(
+        uint32_t& startupThreadCount, uint32_t& runtimeThreadCount, uint32_t& sessionThreadCount) const
+    {
+        // NOTE: parallel redo recovery also requires thread ids when invoking MOT engine (in case it is configured)
+        MOT::MOTConfiguration& motCfg = MOT::GetGlobalConfiguration();
+        startupThreadCount = motCfg.m_checkpointRecoveryWorkers + motCfg.m_chunkPreallocWorkerCount;
+        runtimeThreadCount = motCfg.m_checkpointWorkers + 1;  // add one for statistics reporting thread
+
+        // get the number of threads used to manage user sessions
+        sessionThreadCount = 0;
+        if (g_instance.attr.attr_common.enable_thread_pool) {  // thread pool enabled
+            // use thread pool size in envelope configuration to determine the number of thread ids required
+            sessionThreadCount = g_threadPoolControler->GetThreadNum();
+        } else {  // thread-pool disabled
+            // use max_connections in envelope configuration to determine the number of thread ids required
+            sessionThreadCount = (uint32_t)g_instance.attr.attr_network.MaxConnections;
+        }
+        MOT_LOG_TRACE("Using %u threads for user sessions", sessionThreadCount);
+    }
+
+    bool ConfigureMaxThreads()
+    {
+        uint32_t startupThreadCount = 0;
+        uint32_t runtimeThreadCount = 0;
+        uint32_t sessionThreadCount = 0;
+
+        GetRequiredThreadCount(startupThreadCount, runtimeThreadCount, sessionThreadCount);
+
+        // compute total required number of threads, starting with run-time requirements
+        uint32_t totalThreadCount = runtimeThreadCount + sessionThreadCount;
+        MOT_LOG_TRACE("Total number of required threads: %u", totalThreadCount);
+
+        // first check: there is enough threads for startup tasks
+        bool warnIssued = false;
+        if (totalThreadCount < startupThreadCount) {
+            totalThreadCount = startupThreadCount;
+            MOT_LOG_WARN("Adjusted maximum number of threads to %u to accommodate for startup tasks", totalThreadCount);
+            warnIssued = true;
+        }
+
+        // second check: verify we did not breach total maximum
+        if (totalThreadCount > MAX_THREAD_COUNT) {
+            totalThreadCount = (unsigned)MAX_THREAD_COUNT;
+            MOT_LOG_WARN("Adjusted maximum number of threads to %u due to maximum limit", totalThreadCount);
+            warnIssued = true;
+        }
+
+        // print final value
+        if (!warnIssued) {
+            MOT_LOG_INFO("Adjusted maximum number of threads to %u", totalThreadCount);
+        }
+
+        return AddExtUInt32ConfigItem("", "max_threads", totalThreadCount);
     }
 
     bool ConfigureAffinity()

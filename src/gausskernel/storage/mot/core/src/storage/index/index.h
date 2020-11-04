@@ -593,6 +593,11 @@ public:
         return m_keyPool->m_size;
     }
 
+    inline uint32_t GetSentinelSizeFromPool() const
+    {
+        return m_sentinelPool->m_size;
+    }
+
     inline void SetUnique(bool unique)
     {
         m_unique = unique;

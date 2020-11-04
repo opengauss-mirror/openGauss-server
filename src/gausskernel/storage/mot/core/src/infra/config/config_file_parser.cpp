@@ -138,7 +138,7 @@ ConfigItem* ConfigFileParser::MakeArrayConfigValue(const mot_string& path, int a
 
 ConfigItem* ConfigFileParser::MakeIntConfigValue(const mot_string& path, const mot_string& name, int64_t value)
 {
-    // try to parse value as uint64_t
+    // try to parse value as integer starting from smallest type
     ConfigItem* result = nullptr;
 
     if ((value >= SCHAR_MIN) && (value <= SCHAR_MAX)) {
@@ -168,7 +168,7 @@ ConfigItem* ConfigFileParser::MakeIntConfigValue(const mot_string& path, const m
 
 ConfigItem* ConfigFileParser::MakeUIntConfigValue(const mot_string& path, const mot_string& name, uint64_t value)
 {
-    // try to parse value as uint64_t
+    // try to parse value as unsigned integer starting from smallest type
     ConfigItem* result = nullptr;
 
     if (value <= UCHAR_MAX) {
@@ -224,7 +224,7 @@ bool ConfigFileParser::Split(const char* str, char sep, mot_string_list& tokens)
 ConfigItem* ConfigFileParser::MakeIntConfigValue(
     const mot_string& sectionFullName, const mot_string& key, const mot_string& value)
 {
-    // try to parse value as uint64_t
+    // try to parse value as integer
     ConfigItem* result = nullptr;
     int64_t intValue = 0;
     if (ParseIntValue(sectionFullName, key, value, intValue)) {
@@ -256,7 +256,7 @@ ConfigItem* ConfigFileParser::MakeIntConfigValue(
 ConfigItem* ConfigFileParser::MakeUIntConfigValue(
     const mot_string& sectionFullName, const mot_string& key, const mot_string& value)
 {
-    // try to parse value as uint64_t
+    // try to parse value as unsigned integer
     ConfigItem* result = nullptr;
     uint64_t intValue = 0;
     if (ParseUIntValue(sectionFullName, key, value, intValue)) {
@@ -288,7 +288,7 @@ ConfigItem* ConfigFileParser::MakeUIntConfigValue(
 ConfigItem* ConfigFileParser::MakeDoubleConfigValue(
     const mot_string& sectionFullName, const mot_string& key, const mot_string& value)
 {
-    // try to parse value as uint64_t
+    // try to parse value as double
     ConfigItem* result = nullptr;
     char* endptr = NULL;
     double doubleValue = strtod(value.c_str(), &endptr);
@@ -321,19 +321,19 @@ ConfigItem* ConfigFileParser::MakeDoubleConfigValue(
 ConfigItem* ConfigFileParser::MakeBoolConfigValue(
     const mot_string& sectionFullName, const mot_string& key, const mot_string& value)
 {
-    // try to parse value as uint64_t
+    // try to parse value as Boolean
     ConfigItem* result = nullptr;
     if ((strcasecmp(value.c_str(), "true") == 0) || (strcasecmp(value.c_str(), "on") == 0) ||
         (strcasecmp(value.c_str(), "yes") == 0)) {
         result = CreateConfigValue<bool>(sectionFullName.c_str(), key.c_str(), true);
         if (result == nullptr) {
-            MOT_REPORT_ERROR(MOT_ERROR_OOM, "Load Configuration", "Failed to allocate boolean configuration value");
+            MOT_REPORT_ERROR(MOT_ERROR_OOM, "Load Configuration", "Failed to allocate Boolean configuration value");
         }
     } else if ((strcasecmp(value.c_str(), "false") == 0) || (strcasecmp(value.c_str(), "off") == 0) ||
                (strcasecmp(value.c_str(), "no") == 0)) {
         result = CreateConfigValue<bool>(sectionFullName.c_str(), key.c_str(), false);
         if (result == nullptr) {
-            MOT_REPORT_ERROR(MOT_ERROR_OOM, "Load Configuration", "Failed to allocate boolean configuration value");
+            MOT_REPORT_ERROR(MOT_ERROR_OOM, "Load Configuration", "Failed to allocate Boolean configuration value");
         }
     }
     return result;
@@ -357,7 +357,7 @@ ConfigItem* ConfigFileParser::MakeInt64ConfigValue(
 ConfigItem* ConfigFileParser::MakeInt32ConfigValue(
     const mot_string& sectionFullName, const mot_string& key, const mot_string& value)
 {
-    // try to parse value as uint64_t
+    // try to parse value as int32_t
     ConfigItem* result = nullptr;
     int64_t intValue = 0;
     if (ParseIntValue(sectionFullName, key, value, intValue)) {
@@ -374,7 +374,7 @@ ConfigItem* ConfigFileParser::MakeInt32ConfigValue(
 ConfigItem* ConfigFileParser::MakeInt16ConfigValue(
     const mot_string& sectionFullName, const mot_string& key, const mot_string& value)
 {
-    // try to parse value as uint64_t
+    // try to parse value as int16_t
     ConfigItem* result = nullptr;
     int64_t intValue = 0;
     if (ParseIntValue(sectionFullName, key, value, intValue)) {
@@ -391,7 +391,7 @@ ConfigItem* ConfigFileParser::MakeInt16ConfigValue(
 ConfigItem* ConfigFileParser::MakeInt8ConfigValue(
     const mot_string& sectionFullName, const mot_string& key, const mot_string& value)
 {
-    // try to parse value as uint64_t
+    // try to parse value as int8_t
     ConfigItem* result = nullptr;
     int64_t intValue = 0;
     if (ParseIntValue(sectionFullName, key, value, intValue)) {
@@ -423,7 +423,7 @@ ConfigItem* ConfigFileParser::MakeUInt64ConfigValue(
 ConfigItem* ConfigFileParser::MakeUInt32ConfigValue(
     const mot_string& sectionFullName, const mot_string& key, const mot_string& value)
 {
-    // try to parse value as uint64_t
+    // try to parse value as uint32_t
     ConfigItem* result = nullptr;
     uint64_t intValue = 0;
     if (ParseUIntValue(sectionFullName, key, value, intValue)) {
@@ -440,7 +440,7 @@ ConfigItem* ConfigFileParser::MakeUInt32ConfigValue(
 ConfigItem* ConfigFileParser::MakeUInt16ConfigValue(
     const mot_string& sectionFullName, const mot_string& key, const mot_string& value)
 {
-    // try to parse value as uint64_t
+    // try to parse value as uint16_t
     ConfigItem* result = nullptr;
     uint64_t intValue = 0;
     if (ParseUIntValue(sectionFullName, key, value, intValue)) {
@@ -457,7 +457,7 @@ ConfigItem* ConfigFileParser::MakeUInt16ConfigValue(
 ConfigItem* ConfigFileParser::MakeUInt8ConfigValue(
     const mot_string& sectionFullName, const mot_string& key, const mot_string& value)
 {
-    // try to parse value as uint64_t
+    // try to parse value as uint8_t
     ConfigItem* result = nullptr;
     uint64_t intValue = 0;
     if (ParseUIntValue(sectionFullName, key, value, intValue)) {
@@ -474,6 +474,7 @@ ConfigItem* ConfigFileParser::MakeUInt8ConfigValue(
 ConfigItem* ConfigFileParser::MakeUntypedConfigValue(
     const mot_string& sectionFullName, const mot_string& key, const mot_string& value)
 {
+    // try to infer the configuration value type
     MOT_LOG_TRACE("Attempting to parse signed integer value");
     ConfigItem* result = MakeIntConfigValue(sectionFullName, key, value);
     if (result == nullptr) {
@@ -485,7 +486,7 @@ ConfigItem* ConfigFileParser::MakeUntypedConfigValue(
         result = MakeDoubleConfigValue(sectionFullName, key, value);
     }
     if (result == nullptr) {
-        MOT_LOG_TRACE("Attempting to parse boolean value");
+        MOT_LOG_TRACE("Attempting to parse Boolean value");
         result = MakeBoolConfigValue(sectionFullName, key, value);
     }
     if (result == nullptr) {
@@ -501,6 +502,7 @@ ConfigItem* ConfigFileParser::MakeUntypedConfigValue(
 ConfigItem* ConfigFileParser::MakeTypedConfigValue(
     const mot_string& sectionFullName, const mot_string& typeName, const mot_string& key, const mot_string& value)
 {
+    // build a configuration value by given type name
     ConfigItem* result = nullptr;
     ConfigValueType valueType = ConfigValueTypeFromString(typeName.c_str());
     switch (valueType) {
