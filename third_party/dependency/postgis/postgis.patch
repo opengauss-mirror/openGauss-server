@@ -1,17 +1,159 @@
-From c53717b64050b2a66d5f5af53fa79edc038b5b5d Mon Sep 17 00:00:00 2001
-From: chen******** <13*******7@qq.com>
-Date: Fri, 18 Sep 2020 19:21:43 +0800
-Subject: [PATCH] patch
-
----
- postgis--2.4.2.sql          |  2 +-
- topology/postgis_topology.c | 50 ++++++++++++++++++++++-----------------------
- 2 files changed, 26 insertions(+), 26 deletions(-)
-
-diff --git a/postgis--2.4.2.sql b/postgis--2.4.2.sql
+diff --git a/contrib/postgis/extension_dependency.h b/contrib/postgis/extension_dependency.h
+old mode 100755
+new mode 100644
+index 3f0117e..9169ad8
+--- a/contrib/postgis/extension_dependency.h
++++ b/contrib/postgis/extension_dependency.h
+@@ -1,7 +1,5 @@
+ /*
+- * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+- * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
+- * Portions Copyright (c) 1994, Regents of the University of California
++ * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+  *
+  * openGauss is licensed under Mulan PSL v2.
+  * You can use this software according to the terms and conditions of the Mulan PSL v2.
+@@ -49,7 +47,11 @@
+ #include "utils/hsearch.h"
+ #include "utils/palloc.h"
+ #include "utils/syscache.h"
+-
++#include "executor/spi.h"
++#include "executor/executor.h"
++#include "utils/builtins.h"
++#include "catalog/pg_proc.h"
++#include "funcapi.h"
+ typedef int Buffer;
+ typedef uint16 StrategyNumber;
+ typedef int16 AttrNumber;
+@@ -94,6 +96,7 @@ typedef uint16 OffsetNumber;
+ typedef struct GISTPageOpaqueData GISTPageOpaqueData;
+ typedef GISTPageOpaqueData* GISTPageOpaque;
+ 
++#if 0
+ typedef struct SPITupleTable {
+     MemoryContext tuptabcxt; /* memory context of result table */
+     uint32 alloced;          /* of alloced vals */
+@@ -101,14 +104,17 @@ typedef struct SPITupleTable {
+     TupleDesc tupdesc;       /* tuple descriptor */
+     HeapTuple* vals;         /* tuples */
+ } SPITupleTable;
++#endif
+ 
+ /* funcapi.h */
++#if 0
+ typedef enum TypeFuncClass {
+     TYPEFUNC_SCALAR,    /* scalar result type */
+     TYPEFUNC_COMPOSITE, /* determinable rowtype result */
+     TYPEFUNC_RECORD,    /* indeterminate rowtype result */
+     TYPEFUNC_OTHER      /* bogus type, eg pseudotype */
+ } TypeFuncClass;
++#endif
+ 
+ /* nodes/execnodes.h */
+ typedef struct ExprContext ExprContext;
+@@ -116,13 +122,16 @@ typedef struct ExprContext ExprContext;
+ typedef struct Tuplestorestate Tuplestorestate;
+ 
+ /* nodes/execnodes.h */
++#if 0
+ typedef enum {
+     ExprSingleResult,   /* expression does not return a set */
+     ExprMultipleResult, /* this result is an element of a set */
+     ExprEndResult       /* there are no more elements in the set */
+ } ExprDoneCond;
++#endif
+ 
+ /* nodes/execnodes.h */
++#if 0
+ typedef enum {
+     SFRM_ValuePerCall = 0x01,         /* one value returned per call */
+     SFRM_Materialize = 0x02,          /* result set instantiated in Tuplestore */
+@@ -144,10 +153,12 @@ typedef struct ReturnSetInfo {
+     Tuplestorestate* setResult; /* holds the complete returned tuple set */
+     TupleDesc setDesc;          /* actual descriptor for returned tuples */
+ } ReturnSetInfo;
++#endif
+ 
+ typedef PageHeaderData* PageHeader;
+ 
+ /* funcapi.h */
++#if 0
+ typedef struct AttInMetadata {
+     /* full TupleDesc */
+     TupleDesc tupdesc;
+@@ -158,8 +169,10 @@ typedef struct AttInMetadata {
+     /* array of attribute typmod */
+     int32* atttypmods;
+ } AttInMetadata;
++#endif
+ 
+ /* funcapi.h */
++#if 0
+ typedef struct FuncCallContext {
+     /*
+      * Number of times we've been called before
+@@ -223,6 +236,7 @@ typedef struct FuncCallContext {
+      */
+     TupleDesc tuple_desc;
+ } FuncCallContext;
++#endif
+ 
+ /* windowapi.h */
+ typedef struct WindowAggState WindowAggState;
+@@ -274,14 +288,17 @@ typedef struct GIST_SPLITVEC {
+     bool spl_rdatum_exists;  /* true, if spl_rdatum already exists. */
+ } GIST_SPLITVEC;
+ 
++#if 0
+ typedef struct ItstDisKey {
+     List* superset_keys; /* list of superset keys list, several members possible */
+     List* matching_keys; /* list of exact matching keys,  */
+ } ItstDisKey;
++#endif
+ 
+ /* odes/relation.h */
+ typedef struct PlannerGlobal PlannerGlobal;
+ 
++#if 0
+ typedef struct PlannerInfo {
+     NodeTag type;
+ 
+@@ -474,6 +491,7 @@ typedef struct PlannerInfo {
+     bool is_under_recursive_tree;
+     bool has_recursive_correlated_rte; /* true if any RTE correlated with recursive cte */
+ } PlannerInfo;
++#endif
+ 
+ /* commands/vacuum.h */
+ typedef struct VacAttrStats VacAttrStats;
+@@ -589,7 +607,9 @@ extern THR_LOCAL PGDLLIMPORT volatile bool InterruptPending;
+ #define PointerIsValid(pointer) ((const void*)(pointer) != NULL)
+ 
+ extern int SPI_exec(const char* src, long tcount);
++#if 0
+ extern int SPI_connect(CommandDest dest = DestSPI, void (*spiCallbackfn)(void*) = NULL, void* clientData = NULL);
++#endif
+ extern int SPI_finish(void);
+ extern int SPI_execute(const char* src, bool read_only, long tcount);
+ extern char* SPI_getvalue(HeapTuple tuple, TupleDesc tupdesc, int fnumber);
+diff --git a/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/configure b/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/configure
+index ea25dd2..8e280bf 100755
+--- a/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/configure
++++ b/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/configure
+@@ -13515,7 +13515,7 @@ if test "x$LIBLWGEOM_ONLY" = "xno"; then
+   	  	  	  	  	PGSQL_MINOR_VERSION=0
+   fi
+ 
+-  POSTGIS_PGSQL_VERSION="$PGSQL_MAJOR_VERSION$PGSQL_MINOR_VERSION"
++  POSTGIS_PGSQL_VERSION=92
+ 
+   PGSQL_PKGLIBDIR=`"$PG_CONFIG" --pkglibdir`
+   PGSQL_LIBDIR=`"$PG_CONFIG" --libdir`
+diff --git a/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/postgis--2.4.2.sql b/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/postgis--2.4.2.sql
 index 74a34bf..b48f739 100644
---- a/postgis--2.4.2.sql
-+++ b/postgis--2.4.2.sql
+--- a/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/postgis--2.4.2.sql
++++ b/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/postgis--2.4.2.sql
 @@ -1720,7 +1720,7 @@ CREATE TABLE spatial_ref_sys (
  	 auth_srid integer,
  	 srtext varchar(2048),
@@ -21,10 +163,53 @@ index 74a34bf..b48f739 100644
  
  
  -----------------------------------------------------------------------
-diff --git a/topology/postgis_topology.c b/topology/postgis_topology.c
-index 5718b88..717edee 100644
---- a/topology/postgis_topology.c
-+++ b/topology/postgis_topology.c
+diff --git a/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/postgis_svn_revision.h b/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/postgis_svn_revision.h
+index 525c0e9..af82288 100644
+--- a/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/postgis_svn_revision.h
++++ b/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/postgis_svn_revision.h
+@@ -1 +1 @@
+-#define POSTGIS_SVN_REVISION "2.1.1"
++#define POSTGIS_SVN_REVISION '2.1.1'
+diff --git a/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/topology/postgis_topology.c b/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/topology/postgis_topology.c
+index 5718b88..fc3d1ec 100644
+--- a/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/topology/postgis_topology.c
++++ b/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/topology/postgis_topology.c
+@@ -209,7 +209,7 @@ cb_loadTopologyByName(const LWT_BE_DATA* be, const char *name)
+ 	  return NULL;
+   }
+ 
+-  topo = palloc(sizeof(LWT_BE_TOPOLOGY));
++  topo = (LWT_BE_TOPOLOGY *)palloc(sizeof(LWT_BE_TOPOLOGY));
+   topo->be_data = (LWT_BE_DATA *)be; /* const cast.. */
+   topo->name = pstrdup(name);
+ 
+@@ -846,7 +846,7 @@ cb_getEdgeById(const LWT_BE_TOPOLOGY* topo,
+     return NULL;
+   }
+ 
+-  edges = palloc( sizeof(LWT_ISO_EDGE) * SPI_processed );
++  edges = (LWT_ISO_EDGE *)palloc( sizeof(LWT_ISO_EDGE) * SPI_processed );
+   for ( i=0; i<SPI_processed; ++i )
+   {
+     HeapTuple row = SPI_tuptable->vals[i];
+@@ -904,7 +904,7 @@ cb_getEdgeByNode(const LWT_BE_TOPOLOGY* topo,
+     return NULL;
+   }
+ 
+-  edges = palloc( sizeof(LWT_ISO_EDGE) * SPI_processed );
++  edges = (LWT_ISO_EDGE *)palloc( sizeof(LWT_ISO_EDGE) * SPI_processed );
+   for ( i=0; i<SPI_processed; ++i )
+   {
+     HeapTuple row = SPI_tuptable->vals[i];
+@@ -934,7 +934,7 @@ cb_getEdgeByFace(const LWT_BE_TOPOLOGY* topo,
+   int nargs = 1;
+   GSERIALIZED *gser = NULL;
+ 
+-  datum_ids = palloc(sizeof(Datum)*(*numelems));
++  datum_ids = (Datum *)palloc(sizeof(Datum)*(*numelems));
+   for (i=0; i<*numelems; ++i) datum_ids[i] = Int32GetDatum(ids[i]);
+   array_ids = construct_array(datum_ids, *numelems, INT4OID, 4, true, 's');
+ 
 @@ -965,7 +965,7 @@ cb_getEdgeByFace(const LWT_BE_TOPOLOGY* topo,
    POSTGIS_DEBUGF(1, "data_changed is %d", topo->be_data->data_changed);
  
@@ -34,6 +219,69 @@ index 5718b88..717edee 100644
    pfree(array_ids); /* not needed anymore */
    if ( gser ) pfree(gser); /* not needed anymore */
    MemoryContextSwitchTo( oldcontext ); /* switch back */
+@@ -982,7 +982,7 @@ cb_getEdgeByFace(const LWT_BE_TOPOLOGY* topo,
+     return NULL;
+   }
+ 
+-  edges = palloc( sizeof(LWT_ISO_EDGE) * SPI_processed );
++  edges = (LWT_ISO_EDGE *)palloc( sizeof(LWT_ISO_EDGE) * SPI_processed );
+   for ( i=0; i<SPI_processed; ++i )
+   {
+     HeapTuple row = SPI_tuptable->vals[i];
+@@ -1034,7 +1034,7 @@ cb_getFacesById(const LWT_BE_TOPOLOGY* topo,
+     return NULL;
+   }
+ 
+-  faces = palloc( sizeof(LWT_ISO_EDGE) * SPI_processed );
++  faces = (LWT_ISO_FACE *)palloc( sizeof(LWT_ISO_EDGE) * SPI_processed );
+   for ( i=0; i<SPI_processed; ++i )
+   {
+     HeapTuple row = SPI_tuptable->vals[i];
+@@ -1097,7 +1097,7 @@ cb_getRingEdges(const LWT_BE_TOPOLOGY* topo,
+ 	  *numelems = -1; return NULL;
+   }
+ 
+-  edges = palloc( sizeof(LWT_ELEMID) * SPI_processed );
++  edges = (LWT_ELEMID *)palloc( sizeof(LWT_ELEMID) * SPI_processed );
+   rowdesc = SPI_tuptable->tupdesc;
+   for ( i=0; i<SPI_processed; ++i )
+   {
+@@ -1160,7 +1160,7 @@ cb_getNodeById(const LWT_BE_TOPOLOGY* topo,
+     return NULL;
+   }
+ 
+-  nodes = palloc( sizeof(LWT_ISO_NODE) * SPI_processed );
++  nodes = (LWT_ISO_NODE *)palloc( sizeof(LWT_ISO_NODE) * SPI_processed );
+   for ( i=0; i<SPI_processed; ++i )
+   {
+     HeapTuple row = SPI_tuptable->vals[i];
+@@ -1218,7 +1218,7 @@ cb_getNodeByFace(const LWT_BE_TOPOLOGY* topo,
+     return NULL;
+   }
+ 
+-  nodes = palloc( sizeof(LWT_ISO_NODE) * SPI_processed );
++  nodes = (LWT_ISO_NODE *)palloc( sizeof(LWT_ISO_NODE) * SPI_processed );
+   for ( i=0; i<SPI_processed; ++i )
+   {
+     HeapTuple row = SPI_tuptable->vals[i];
+@@ -1301,7 +1301,7 @@ cb_getEdgeWithinDistance2D(const LWT_BE_TOPOLOGY* topo,
+     return NULL;
+   }
+ 
+-  edges = palloc( sizeof(LWT_ISO_EDGE) * SPI_processed );
++  edges = (LWT_ISO_EDGE *)palloc( sizeof(LWT_ISO_EDGE) * SPI_processed );
+   for ( i=0; i<SPI_processed; ++i )
+   {
+     HeapTuple row = SPI_tuptable->vals[i];
+@@ -1390,7 +1390,7 @@ cb_getNodeWithinDistance2D(const LWT_BE_TOPOLOGY* topo,
+   }
+   else
+   {
+-    nodes = palloc( sizeof(LWT_ISO_EDGE) * SPI_processed );
++    nodes = (LWT_ISO_NODE *)palloc( sizeof(LWT_ISO_EDGE) * SPI_processed );
+     for ( i=0; i<SPI_processed; ++i )
+     {
+       HeapTuple row = SPI_tuptable->vals[i];
 @@ -2557,7 +2557,7 @@ cb_getFaceContainingPoint( const LWT_BE_TOPOLOGY* topo, const LWPOINT* pt )
    values[0] = PointerGetDatum(pts);
    argtypes[0] = topo->geometryOID;
@@ -43,6 +291,33 @@ index 5718b88..717edee 100644
    MemoryContextSwitchTo( oldcontext ); /* switch back */
    pfree(pts); /* not needed anymore */
    if ( spi_result != SPI_OK_SELECT ) {
+@@ -2722,7 +2722,7 @@ cb_getNodeWithinBox2D ( const LWT_BE_TOPOLOGY* topo, const GBOX* box,
+     return NULL;
+   }
+ 
+-  nodes = palloc( sizeof(LWT_ISO_EDGE) * SPI_processed );
++  nodes = (LWT_ISO_NODE *)palloc( sizeof(LWT_ISO_EDGE) * SPI_processed );
+   for ( i=0; i<SPI_processed; ++i )
+   {
+     HeapTuple row = SPI_tuptable->vals[i];
+@@ -2801,7 +2801,7 @@ cb_getEdgeWithinBox2D ( const LWT_BE_TOPOLOGY* topo, const GBOX* box,
+     return NULL;
+   }
+ 
+-  edges = palloc( sizeof(LWT_ISO_EDGE) * SPI_processed );
++  edges = (LWT_ISO_EDGE *)palloc( sizeof(LWT_ISO_EDGE) * SPI_processed );
+   for ( i=0; i<SPI_processed; ++i )
+   {
+     HeapTuple row = SPI_tuptable->vals[i];
+@@ -2878,7 +2878,7 @@ cb_getFaceWithinBox2D ( const LWT_BE_TOPOLOGY* topo, const GBOX* box,
+     return NULL;
+   }
+ 
+-  faces = palloc( sizeof(LWT_ISO_EDGE) * SPI_processed );
++  faces = (LWT_ISO_FACE *)palloc( sizeof(LWT_ISO_EDGE) * SPI_processed );
+   for ( i=0; i<SPI_processed; ++i )
+   {
+     HeapTuple row = SPI_tuptable->vals[i];
 @@ -2992,7 +2992,7 @@ _PG_fini(void)
  }
  
@@ -117,6 +392,24 @@ index 5718b88..717edee 100644
  PG_FUNCTION_INFO_V1(ST_GetFaceEdges);
  Datum ST_GetFaceEdges(PG_FUNCTION_ARGS)
  {
+@@ -3536,7 +3536,7 @@ Datum ST_GetFaceEdges(PG_FUNCTION_ARGS)
+       PG_RETURN_NULL();
+     }
+ 
+-    state = lwalloc(sizeof(FACEEDGESSTATE));
++    state = (FACEEDGESSTATE *)lwalloc(sizeof(FACEEDGESSTATE));
+     state->elems = elems;
+     state->nelems = nelems;
+     state->curr = 0;
+@@ -3566,7 +3566,7 @@ Datum ST_GetFaceEdges(PG_FUNCTION_ARGS)
+   funcctx = SRF_PERCALL_SETUP();
+ 
+   /* get state */
+-  state = funcctx->user_fctx;
++  state = (FACEEDGESSTATE *)funcctx->user_fctx;
+ 
+   if ( state->curr == state->nelems )
+   {
 @@ -3596,7 +3596,7 @@ Datum ST_GetFaceEdges(PG_FUNCTION_ARGS)
  }
  
@@ -234,6 +527,24 @@ index 5718b88..717edee 100644
  PG_FUNCTION_INFO_V1(TopoGeo_AddLinestring);
  Datum TopoGeo_AddLinestring(PG_FUNCTION_ARGS)
  {
+@@ -4430,7 +4430,7 @@ Datum TopoGeo_AddLinestring(PG_FUNCTION_ARGS)
+       PG_RETURN_NULL();
+     }
+ 
+-    state = lwalloc(sizeof(FACEEDGESSTATE));
++    state = (FACEEDGESSTATE *)lwalloc(sizeof(FACEEDGESSTATE));
+     state->elems = elems;
+     state->nelems = nelems;
+     state->curr = 0;
+@@ -4449,7 +4449,7 @@ Datum TopoGeo_AddLinestring(PG_FUNCTION_ARGS)
+   funcctx = SRF_PERCALL_SETUP();
+ 
+   /* get state */
+-  state = funcctx->user_fctx;
++  state = (FACEEDGESSTATE *)funcctx->user_fctx;
+ 
+   if ( state->curr == state->nelems )
+   {
 @@ -4467,7 +4467,7 @@ Datum TopoGeo_AddLinestring(PG_FUNCTION_ARGS)
  }
  
@@ -243,6 +554,119 @@ index 5718b88..717edee 100644
  PG_FUNCTION_INFO_V1(TopoGeo_AddPolygon);
  Datum TopoGeo_AddPolygon(PG_FUNCTION_ARGS)
  {
--- 
-2.6.4.windows.1
+@@ -4554,7 +4554,7 @@ Datum TopoGeo_AddPolygon(PG_FUNCTION_ARGS)
+       PG_RETURN_NULL();
+     }
+ 
+-    state = lwalloc(sizeof(FACEEDGESSTATE));
++    state = (FACEEDGESSTATE *)lwalloc(sizeof(FACEEDGESSTATE));
+     state->elems = elems;
+     state->nelems = nelems;
+     state->curr = 0;
+@@ -4573,7 +4573,7 @@ Datum TopoGeo_AddPolygon(PG_FUNCTION_ARGS)
+   funcctx = SRF_PERCALL_SETUP();
+ 
+   /* get state */
+-  state = funcctx->user_fctx;
++  state = (FACEEDGESSTATE *)funcctx->user_fctx;
+ 
+   if ( state->curr == state->nelems )
+   {
+diff --git a/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/topology/sql/topogeometry/totopogeom.sql.in b/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/topology/sql/topogeometry/totopogeom.sql.in
+index 8401a8c..7eb8950 100644
+--- a/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/topology/sql/topogeometry/totopogeom.sql.in
++++ b/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/topology/sql/topogeometry/totopogeom.sql.in
+@@ -199,7 +199,7 @@ BEGIN
+         'Layer "%" of topology "%" is %, cannot hold a collection feature.',
+         layer_info.layer_id, topology_info.name, layer_info.typename;
+     END IF;
+-    tg.type := 4;
++    tg.type_geo := 4;
+   ELSIF typ = 'POINT' OR typ = 'MULTIPOINT' THEN -- puntal
+     --  A point can go in puntal or collection layer
+     IF layer_info.feature_type != 4 and layer_info.feature_type != 1 THEN
+@@ -207,7 +207,7 @@ BEGIN
+         'Layer "%" of topology "%" is %, cannot hold a puntal feature.',
+         layer_info.layer_id, topology_info.name, layer_info.typename;
+     END IF;
+-    tg.type := 1;
++    tg.type_geo := 1;
+   ELSIF typ = 'LINESTRING' or typ = 'MULTILINESTRING' THEN -- lineal
+     --  A line can go in lineal or collection layer
+     IF layer_info.feature_type != 4 and layer_info.feature_type != 2 THEN
+@@ -215,7 +215,7 @@ BEGIN
+         'Layer "%" of topology "%" is %, cannot hold a lineal feature.',
+         layer_info.layer_id, topology_info.name, layer_info.typename;
+     END IF;
+-    tg.type := 2;
++    tg.type_geo := 2;
+   ELSIF typ = 'POLYGON' OR typ = 'MULTIPOLYGON' THEN -- areal
+     --  An area can go in areal or collection layer
+     IF layer_info.feature_type != 4 and layer_info.feature_type != 3 THEN
+@@ -223,7 +223,7 @@ BEGIN
+         'Layer "%" of topology "%" is %, cannot hold an areal feature.',
+         layer_info.layer_id, topology_info.name, layer_info.typename;
+     END IF;
+-    tg.type := 3;
++    tg.type_geo := 3;
+   ELSE
+       -- Should never happen
+       RAISE EXCEPTION
+diff --git a/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/topology/sql/topogeometry/type.sql.in b/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/topology/sql/topogeometry/type.sql.in
+index 5db267a..01bd092 100644
+--- a/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/topology/sql/topogeometry/type.sql.in
++++ b/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/topology/sql/topogeometry/type.sql.in
+@@ -24,10 +24,10 @@ CREATE OR REPLACE FUNCTION topology.GeometryType(tg topology.TopoGeometry)
+ AS
+ $$
+ 	SELECT CASE
+-		WHEN type($1) = 1 THEN 'MULTIPOINT'
+-		WHEN type($1) = 2 THEN 'MULTILINESTRING'
+-		WHEN type($1) = 3 THEN 'MULTIPOLYGON'
+-		WHEN type($1) = 4 THEN 'GEOMETRYCOLLECTION'
++		WHEN type_geo($1) = 1 THEN 'MULTIPOINT'
++		WHEN type_geo($1) = 2 THEN 'MULTILINESTRING'
++		WHEN type_geo($1) = 3 THEN 'MULTIPOLYGON'
++		WHEN type_geo($1) = 4 THEN 'GEOMETRYCOLLECTION'
+ 		ELSE 'UNEXPECTED'
+ 		END;
+ $$
+@@ -48,10 +48,10 @@ CREATE OR REPLACE FUNCTION topology.ST_GeometryType(tg topology.TopoGeometry)
+ AS
+ $$
+ 	SELECT CASE
+-		WHEN type($1) = 1 THEN 'ST_MultiPoint'
+-		WHEN type($1) = 2 THEN 'ST_MultiLinestring'
+-		WHEN type($1) = 3 THEN 'ST_MultiPolygon'
+-		WHEN type($1) = 4 THEN 'ST_GeometryCollection'
++		WHEN type_geo($1) = 1 THEN 'ST_MultiPoint'
++		WHEN type_geo($1) = 2 THEN 'ST_MultiLinestring'
++		WHEN type_geo($1) = 3 THEN 'ST_MultiPolygon'
++		WHEN type_geo($1) = 4 THEN 'ST_GeometryCollection'
+ 		ELSE 'ST_Unexpected'
+ 		END;
+ $$
+diff --git a/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/topology/topology.sql.in b/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/topology/topology.sql.in
+index 5eb1148..5562663 100644
+--- a/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/topology/topology.sql.in
++++ b/third_party/dependency/postgis/postgis-xc/postgis-2.4.2/topology/topology.sql.in
+@@ -340,7 +340,7 @@ CREATE TYPE topology.TopoGeometry AS (
+   topology_id integer,
+   layer_id integer,
+   id integer,
+-  type integer -- 1: [multi]point, 2: [multi]line,
++  type_geo integer -- 1: [multi]point, 2: [multi]line,
+                -- 3: [multi]polygon, 4: collection
+ );
+ 
+@@ -943,7 +943,7 @@ BEGIN
+ 
+   -- Set layer id and type in return object
+   ret.layer_id = layer_id;
+-  ret.type = tg_type;
++  ret.type_geo = tg_type;
+ 
+   --
+   -- Get new TopoGeo id from sequence
+
 
