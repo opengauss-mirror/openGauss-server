@@ -2685,6 +2685,7 @@ static Plan* _readPlan(Plan* local_node)
     READ_FLOAT_FIELD(multiple);
     READ_INT_FIELD(plan_width);
     READ_BOOL_FIELD(parallel_aware);
+    READ_BOOL_FIELD(parallel_safe);
     READ_NODE_FIELD(targetlist);
     READ_NODE_FIELD(qual);
     READ_NODE_FIELD(lefttree);
@@ -2735,6 +2736,7 @@ static SubPlan* _readSubPlan(SubPlan* local_node)
     READ_OID_FIELD(firstColCollation);
     READ_BOOL_FIELD(useHashTable);
     READ_BOOL_FIELD(unknownEqFalse);
+    READ_BOOL_FIELD(parallel_safe);
     READ_NODE_FIELD(setParam);
     READ_NODE_FIELD(parParam);
     READ_NODE_FIELD(args);

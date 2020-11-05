@@ -4,6 +4,7 @@
 --
 
 --dynamic smp+random plan, plan should be same
+set max_parallel_workers_per_gather=0;
 set plan_mode_seed = 1485495508;
 explain (costs off) select count(node_name) as dncnt
 	from pgxc_node where node_type='D'
@@ -286,3 +287,4 @@ drop table if exists replication_02;
 drop table if exists replication_06;
 
 drop schema hw_smp cascade;
+reset max_parallel_workers_per_gather;

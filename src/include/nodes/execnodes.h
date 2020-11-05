@@ -1608,6 +1608,8 @@ typedef struct {
  *		RuntimeContext	   expr context for evaling runtime Skeys
  *		RelationDesc	   index relation descriptor
  *		ScanDesc		   index scan descriptor
+ *
+ *		pscan_len		   size of parallel index scan descriptor
  * ----------------
  */
 typedef struct IndexScanState {
@@ -1626,6 +1628,8 @@ typedef struct IndexScanState {
     List* iss_IndexPartitionList;
     LOCKMODE lockMode;
     Relation iss_CurrentIndexPartition;
+
+    Size iss_PscanLen;
 } IndexScanState;
 
 /* ----------------

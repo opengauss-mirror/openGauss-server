@@ -162,6 +162,7 @@ void init_plan_cost(Plan* plan)
     plan->pred_total_time = -1.0;
     plan->pred_max_memory = -1;
     plan->parallel_aware = false;
+    plan->parallel_safe = false;
 }
 
 static inline void get_info_from_rel(
@@ -1012,7 +1013,7 @@ void cost_gather(GatherPath *path, RelOptInfo *rel, ParamPathInfo *param_info)
  * number of returned tuples, but they won't reduce the number of tuples
  * we have to fetch from the table, so they don't reduce the scan cost.
  */
-void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
+void cost_index(IndexPath* path, PlannerInfo* root, double loop_count, bool partial_path)
 {
     IndexOptInfo* index = path->indexinfo;
     RelOptInfo* baserel = index->rel;
@@ -1020,6 +1021,7 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
     List* allclauses = NIL;
     Cost startup_cost = 0;
     Cost run_cost = 0;
+    Cost cpu_run_cost = 0;
     Cost indexStartupCost;
     Cost indexTotalCost;
     Selectivity indexSelectivity;
@@ -1031,6 +1033,8 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
     double tuples_fetched;
     double pages_fetched;
     bool ispartitionedindex = path->indexinfo->rel->isPartitionedTable;
+    double rand_heap_pages;
+    double index_pages = 0.0;
 
     /* Should only be applied to base relations */
     AssertEreport(IsA(baserel, RelOptInfo) && IsA(index, IndexOptInfo),
@@ -1064,14 +1068,15 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
      * the fraction of main-table tuples we will have to retrieve) and its
      * correlation to the main-table tuple order.
      */
-    OidFunctionCall7(index->amcostestimate,
+    OidFunctionCall8(index->amcostestimate,
         PointerGetDatum(root),
         PointerGetDatum(path),
         Float8GetDatum(loop_count),
         PointerGetDatum(&indexStartupCost),
         PointerGetDatum(&indexTotalCost),
         PointerGetDatum(&indexSelectivity),
-        PointerGetDatum(&indexCorrelation));
+        PointerGetDatum(&indexCorrelation),
+        PointerGetDatum(&index_pages));
 
     /*
      * Save amcostestimate's results for possible use in bitmap scan planning.
@@ -1133,6 +1138,8 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
         if (indexonly)
             pages_fetched = ceil(pages_fetched * (1.0 - baserel->allvisfrac));
 
+        rand_heap_pages = pages_fetched;
+
         max_IO_cost = (pages_fetched * spc_random_page_cost) / loop_count;
 
         /*
@@ -1165,6 +1172,8 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
         if (indexonly)
             pages_fetched = ceil(pages_fetched * (1.0 - baserel->allvisfrac));
 
+        rand_heap_pages = pages_fetched;
+
         /* max_IO_cost is for the perfectly uncorrelated case (csquared=0) */
         max_IO_cost = pages_fetched * spc_random_page_cost;
 
@@ -1181,6 +1190,28 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
         } else {
             min_IO_cost = 0;
         }
+    }
+
+    if (partial_path) {
+        /*
+         * Estimate the number of parallel workers required to scan index. Use
+         * the number of heap pages computed considering heap fetches won't be
+         * sequential as for parallel scans the pages are accessed in random
+         * order.
+         */
+        path->path.parallel_workers =
+            compute_parallel_worker(baserel, (BlockNumber)rand_heap_pages, (BlockNumber)index_pages);
+
+        /*
+         * Fall out if workers can't be assigned for parallel scan, because in
+         * such a case this path will be rejected.  So there is no benefit in
+         * doing extra computation.
+         */
+        if (path->path.parallel_workers <= 0) {
+            return;
+        }
+
+        path->path.parallel_aware = true;
     }
 
     /*
@@ -1218,7 +1249,19 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count)
     else
         cpu_per_tuple = u_sess->attr.attr_sql.cpu_tuple_cost + qpqual_cost.per_tuple;
 
-    run_cost += cpu_per_tuple * tuples_fetched;
+    cpu_run_cost += cpu_per_tuple * tuples_fetched;
+
+    /* Adjust costing for parallelism, if used. */
+    if (path->path.parallel_workers > 0) {
+        double parallel_divisor = get_parallel_divisor(&path->path);
+
+        path->path.rows = clamp_row_est(path->path.rows / parallel_divisor);
+
+        /* The CPU cost is divided among all the workers. */
+        cpu_run_cost /= parallel_divisor;
+    }
+
+    run_cost += cpu_run_cost;
 
     path->path.startup_cost = startup_cost;
     path->path.total_cost = startup_cost + run_cost;

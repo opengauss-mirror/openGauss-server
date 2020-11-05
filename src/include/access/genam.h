@@ -82,6 +82,8 @@ typedef bool (*IndexBulkDeleteCallback)(ItemPointer itemptr, void* state, Oid pa
 typedef struct IndexScanDescData* IndexScanDesc;
 typedef struct SysScanDescData* SysScanDesc;
 
+typedef struct ParallelIndexScanDescData* ParallelIndexScanDesc;
+
 /*
  * Enumeration specifying the type of uniqueness check to perform in
  * index_insert().
@@ -132,6 +134,12 @@ extern void index_rescan(IndexScanDesc scan, ScanKey keys, int nkeys, ScanKey or
 extern void index_endscan(IndexScanDesc scan);
 extern void index_markpos(IndexScanDesc scan);
 extern void index_restrpos(IndexScanDesc scan);
+extern Size index_parallelscan_estimate(Relation indexRelation, Snapshot snapshot);
+extern void index_parallelscan_initialize(Relation heapRelation, Size pscan_len, Relation indexRelation,
+        Snapshot snapshot, ParallelIndexScanDesc target);
+extern void index_parallelrescan(IndexScanDesc scan);
+extern IndexScanDesc index_beginscan_parallel(Relation heaprel, Relation indexrel, int nkeys, int norderbys,
+    ParallelIndexScanDesc pscan);
 extern ItemPointer index_getnext_tid(IndexScanDesc scan, ScanDirection direction);
 extern HeapTuple index_fetch_heap(IndexScanDesc scan);
 extern HeapTuple index_getnext(IndexScanDesc scan, ScanDirection direction);

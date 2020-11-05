@@ -155,6 +155,7 @@ typedef struct IndexScanDescData {
     ScanKey orderByData;     /* array of ordering op descriptors */
     bool xs_want_itup;       /* caller requests index tuples */
     bool xs_want_ext_oid;    /* global partition index need partition oid */
+    bool xs_temp_snap;       /* unregister snapshot at scan end? */
 
     /* signaling to index AM about killing index tuples */
     bool kill_prior_tuple;      /* last-returned tuple is dead */
@@ -177,6 +178,10 @@ typedef struct IndexScanDescData {
 
     /* state data for traversing HOT chains in index_getnext */
     bool xs_continue_hot; /* T if must keep walking HOT chain */
+
+    /* parallel index scan information, in shared memory */
+    ParallelIndexScanDesc parallel_scan;
+
     /* put decompressed heap tuple data into xs_ctbuf_hdr be careful! when malloc memory  should give extra mem for
      *xs_ctbuf_hdr. t_bits which is varlength arr
      */
@@ -198,6 +203,16 @@ typedef struct IndexScanDescData {
  */
 #define IndexScanNeedSwitchPartRel(scan) \
     ((scan)->xs_want_ext_oid && GPIScanCheckPartOid((scan)->xs_gpi_scan, (scan)->heapRelation->rd_id))
+
+/* Generic structure for parallel scans */
+typedef struct ParallelIndexScanDescData {
+    int plan_node_id; /* used to identify speicific plan */
+    Oid ps_relid;
+    Oid ps_indexid;
+    Size ps_offset; /* Offset in bytes of am specific structure */
+    uint32 pscan_len; /* total size of this struct, including phs_snapshot_data */
+    char ps_snapshot_data[FLEXIBLE_ARRAY_MEMBER];
+} ParallelIndexScanDescData;
 
 typedef struct HBktIdxScanDescData {
     AbsIdxScanDescData sd;

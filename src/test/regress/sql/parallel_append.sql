@@ -78,14 +78,16 @@ select d2 from d except all (select d2 from d except select c1 from c) union all
 select * from a union all (select * from b union select * from c where c1 < 5);
 select * from a except select * from b union select * from c;
 select * from b union all (select * from (select * from a union all select * from b));
-select * from (select * from a union all select * from b)as x, (select * from d union all select* from e)as y where x.a1 = y.d1;
+select * from (select * from a union all select * from b)as x, (select * from d union all select* from e)as y
+    where x.a1 = y.d1 order by 1, 2, 3, 4, 5, 6;
 
 explain select * from e intersect (select * from a except select * from b union select * from c);
 explain select d2 from d except all (select d2 from d except select c1 from c) union all select e1 from e;
 explain select * from a union all (select * from b union select * from c where c1 < 5);
 explain select * from a except select * from b union select * from c;
 explain select * from b union all (select * from (select * from a union all select * from b));
-explain select * from (select * from a union all select * from b)as x, (select * from d union all select* from e)as y where x.a1 = y.d1;
+explain select * from (select * from a union all select * from b)as x, (select * from d union all select* from e)as y
+    where x.a1 = y.d1 order by 1, 2, 3, 4, 5, 6;
 ----------------------------------------
 -- clean up
 ----------------------------------------

@@ -593,6 +593,7 @@ typedef struct RelOptInfo {
     /* use "struct Plan" to avoid including plannodes.h here */
     struct Plan* subplan; /* if subquery */
     PlannerInfo* subroot; /* if subquery */
+    int rel_parallel_workers; /* wanted number of parallel workers */
     /* use "struct FdwRoutine" to avoid including fdwapi.h here */
     struct FdwRoutine* fdwroutine; /* if foreign table */
     void* fdw_private;             /* if foreign table */
@@ -700,6 +701,7 @@ typedef struct IndexOptInfo {
     bool amsearchnulls;  /* can AM search for NULL/NOT NULL entries? */
     bool amhasgettuple;  /* does AM have amgettuple interface? */
     bool amhasgetbitmap; /* does AM have amgetbitmap interface? */
+    bool amcanparallel;  /* does AM support parallel scan? */
 } IndexOptInfo;
 
 /*

@@ -7076,7 +7076,10 @@ bool plan_cluster_use_sort(Oid tableOid, Oid indexOid)
         (rel->orientation != REL_ROW_ORIENTED));
 
     /* Estimate the cost of index scan */
-    indexScanPath = create_index_path(root, indexInfo, NIL, NIL, NIL, NIL, NIL, ForwardScanDirection, false, NULL, 1.0);
+    indexScanPath = create_index_path(root, indexInfo,
+                                      NIL, NIL, NIL, NIL, NIL,
+                                      ForwardScanDirection, false,
+                                      NULL, 1.0, false);
 
     return (seqScanAndSortPath.total_cost < indexScanPath->path.total_cost);
 }
@@ -7142,7 +7145,8 @@ bool planClusterPartitionUseSort(Relation partRel, Oid indexOid, PlannerInfo* ro
         (relOptInfo->orientation != REL_ROW_ORIENTED));
 
     /* Estimate the cost of index scan */
-    indexScanPath = create_index_path(root, indexInfo, NIL, NIL, NIL, NIL, NIL, ForwardScanDirection, false, NULL, 1.0);
+    indexScanPath = create_index_path(root, indexInfo, NIL, NIL, NIL, NIL, 
+        NIL, ForwardScanDirection, false, NULL, 1.0, false);
 
     return (seqScanAndSortPath.total_cost < indexScanPath->path.total_cost);
 }

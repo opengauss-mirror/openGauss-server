@@ -7378,6 +7378,24 @@ static void init_configure_names_int()
             NULL
         },
         {
+            {
+                "min_parallel_index_scan_size",
+                PGC_USERSET,
+                QUERY_TUNING_COST,
+                gettext_noop("Sets the minimum amount of index data for a parallel scan."),
+                gettext_noop("If the planner estimates that it will read a number of index pages "
+                    "too small to reach this limit, a parallel scan will not be considered."),
+                GUC_UNIT_BLOCKS,
+            },
+            &u_sess->attr.attr_sql.min_parallel_index_scan_size,
+            (512 * 1024) / BLCKSZ,
+            0,
+            INT_MAX / 3,
+            NULL,
+            NULL,
+            NULL
+        },
+        {
             /* Can't be set in postgresql.conf */
             {
                 "server_version_num",

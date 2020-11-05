@@ -699,6 +699,7 @@ static Node* build_subplan(PlannerInfo* root, Plan* plan, PlannerInfo* subroot, 
     get_first_col_type(plan, &splan->firstColType, &splan->firstColTypmod, &splan->firstColCollation);
     splan->useHashTable = false;
     splan->unknownEqFalse = unknownEqFalse;
+    splan->parallel_safe = plan->parallel_safe;
     splan->setParam = NIL;
     splan->parParam = NIL;
     splan->args = NIL;
@@ -1341,6 +1342,11 @@ static void SS_process_one_cte(PlannerInfo* root, CommonTableExpr* cte, Query* s
     get_first_col_type(plan, &splan->firstColType, &splan->firstColTypmod, &splan->firstColCollation);
     splan->useHashTable = false;
     splan->unknownEqFalse = false;
+    /*
+     * CTE scans are not considered for parallelism (cf
+     * set_rel_consider_parallel).
+     */
+    splan->parallel_safe = false;
     splan->setParam = NIL;
     splan->parParam = NIL;
     splan->args = NIL;

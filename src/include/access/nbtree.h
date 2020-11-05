@@ -525,6 +525,7 @@ typedef struct BTScanPosItem { /* what we remember about each match */
 typedef struct BTScanPosData {
     Buffer buf; /* if valid, the buffer is pinned */
 
+    BlockNumber currPage; /* page referenced by items array */
     BlockNumber nextPage; /* page's right link when we scanned it */
 
     /*
@@ -579,6 +580,8 @@ typedef struct BTScanOpaqueData {
     ScanKey arrayKeyData;       /* modified copy of scan->keyData */
     int numArrayKeys;           /* number of equality-type array keys (-1 if
                                  * there are any unsatisfiable array keys) */
+    int arrayKeyCount; /* count indicating number of array scan keys
+                        * processed */
     BTArrayKeyInfo* arrayKeys;  /* info about each equality-type array key */
     MemoryContext arrayContext; /* scan-lifespan context for array data */
 
@@ -663,7 +666,7 @@ typedef struct BTOrderedIndexListElement {
 } BTOrderedIndexListElement;
 
 /*
- * prototypes for functions in nbtree.c (external entry points for btree)
+ * external entry points for btree, in nbtree.c
  */
 extern Datum btbuild(PG_FUNCTION_ARGS);
 extern Datum btbuildempty(PG_FUNCTION_ARGS);
@@ -680,6 +683,19 @@ extern Datum btbulkdelete(PG_FUNCTION_ARGS);
 extern Datum btvacuumcleanup(PG_FUNCTION_ARGS);
 extern Datum btcanreturn(PG_FUNCTION_ARGS);
 extern Datum btoptions(PG_FUNCTION_ARGS);
+
+extern Size btestimateparallelscan(void);
+extern void btinitparallelscan(void* bt_target);
+extern void btparallelrescan(IndexScanDesc scan);
+
+/*
+ * prototypes for internal functions in nbtree.c
+ */
+extern bool _bt_parallel_seize(IndexScanDesc scan, BlockNumber *pageno);
+extern void _bt_parallel_release(IndexScanDesc scan, BlockNumber scan_page);
+extern void _bt_parallel_done(IndexScanDesc scan);
+extern void _bt_parallel_advance_array_keys(IndexScanDesc scan);
+
 /* 
  * this is the interface of merge 2 or more index for btree index
  * we also have similar interfaces for other kind of indexes, like hash/gist/gin

@@ -611,6 +611,7 @@ static void _outPlanInfo(StringInfo str, Plan* node)
     WRITE_FLOAT_FIELD(multiple, "%.0f");
     WRITE_INT_FIELD(plan_width);
     WRITE_BOOL_FIELD(parallel_aware);
+    WRITE_BOOL_FIELD(parallel_safe);
     WRITE_NODE_FIELD(targetlist);
     WRITE_NODE_FIELD(qual);
     WRITE_NODE_FIELD(lefttree);
@@ -2267,6 +2268,7 @@ static void _outSubPlan(StringInfo str, SubPlan* node)
     WRITE_OID_FIELD(firstColCollation);
     WRITE_BOOL_FIELD(useHashTable);
     WRITE_BOOL_FIELD(unknownEqFalse);
+    WRITE_BOOL_FIELD(parallel_safe);
     WRITE_NODE_FIELD(setParam);
     WRITE_NODE_FIELD(parParam);
     WRITE_NODE_FIELD(args);

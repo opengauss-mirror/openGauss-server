@@ -27,6 +27,7 @@
 #include "executor/executor.h"
 #include "executor/nodeSeqscan.h"
 #include "executor/nodeAppend.h"
+#include "executor/nodeIndexscan.h"
 #include "executor/tqueue.h"
 #include "nodes/nodeFuncs.h"
 #include "optimizer/planmain.h"
@@ -115,7 +116,7 @@ static char *ExecSerializePlan(Plan *plan, EState *estate)
     pstmt->rtable = estate->es_range_table;
     pstmt->resultRelations = NIL;
     pstmt->utilityStmt = NULL;
-    pstmt->subplans = NIL;
+    pstmt->subplans = estate->es_plannedstmt->subplans;
     pstmt->rewindPlanIDs = NULL;
     pstmt->rowMarks = NIL;
     pstmt->nParamExec = estate->es_plannedstmt->nParamExec;
@@ -149,6 +150,9 @@ static bool ExecParallelEstimate(PlanState *planstate, ExecParallelEstimateConte
         switch (nodeTag(planstate)) {
             case T_SeqScanState:
                 ExecSeqScanEstimate((SeqScanState *)planstate, e->pcxt);
+                break;
+            case T_IndexScanState:
+                ExecIndexScanEstimate((IndexScanState*)planstate, e->pcxt);
                 break;
             case T_AppendState:
                 ExecAppendEstimate((AppendState*)planstate, e->pcxt);
@@ -193,6 +197,10 @@ static bool ExecParallelInitializeDSM(PlanState *planstate, ExecParallelInitiali
             case T_SeqScanState:
                 ExecSeqScanInitializeDSM((SeqScanState *)planstate, d->pcxt, cxt->pwCtx->queryInfo.pscan_num);
                 cxt->pwCtx->queryInfo.pscan_num++;
+                break;
+            case T_IndexScanState:
+                ExecIndexScanInitializeDSM((IndexScanState*)planstate, d->pcxt, cxt->pwCtx->queryInfo.piscan_num);
+                cxt->pwCtx->queryInfo.piscan_num++;
                 break;
             case T_AppendState:
                 ExecAppendInitializeDSM((AppendState *)planstate, d->pcxt, cxt->pwCtx->queryInfo.pappend_num);
@@ -364,6 +372,7 @@ ParallelExecutorInfo *ExecInitParallelPlan(PlanState *planstate, EState *estate,
     }
 
     queryInfo.pscan = (ParallelHeapScanDesc *)palloc0(sizeof(ParallelHeapScanDesc) * e.nnodes);
+    queryInfo.piscan = (ParallelIndexScanDesc *)palloc0(sizeof(ParallelIndexScanDesc) * e.nnodes);
     queryInfo.pappend = (ParallelAppendState**)palloc0(sizeof(ParallelAppendState*) * e.nnodes);
 
     /*
@@ -599,6 +608,9 @@ static bool ExecParallelInitializeWorker(PlanState *planstate, void *context)
         switch (nodeTag(planstate)) {
             case T_SeqScanState:
                 ExecSeqScanInitializeWorker((SeqScanState *)planstate, context);
+                break;
+            case T_IndexScanState:
+                ExecIndexScanInitializeWorker((IndexScanState *)planstate, context);
                 break;
             case T_AppendState:
                 ExecAppendInitializeWorker((AppendState *)planstate, context);
