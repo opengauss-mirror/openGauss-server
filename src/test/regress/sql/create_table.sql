@@ -1,6 +1,9 @@
 --
 -- CREATE_TABLE
 --
+-- CREATE TABLE SYNTAX
+\h create table 
+\h create table part
 --
 -- CLASS DEFINITIONS
 --

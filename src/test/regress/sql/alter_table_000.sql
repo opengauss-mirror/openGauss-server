@@ -1,6 +1,8 @@
 --
 --- ALTER TABLE related tickets or bugs fixed
 --
+-- ATLER TABLE SYNTAX
+\h alter table
 --custom script
 --create table
 CREATE TABLE TBL_DOMAIN
