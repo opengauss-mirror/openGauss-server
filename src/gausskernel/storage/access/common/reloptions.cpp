@@ -26,6 +26,7 @@
 #include "commands/defrem.h"
 #include "commands/tablespace.h"
 #include "nodes/makefuncs.h"
+#include "postmaster/postmaster.h"
 #include "pgxc/redistrib.h"
 #include "tsearch/ts_public.h"
 #include "utils/array.h"
@@ -177,6 +178,15 @@ static relopt_int intRelOpts[] = {{{"fillfactor", "Packs table pages only to thi
     },
 
     {{"rel_cn_oid", "rel oid on coordinator", RELOPT_KIND_HEAP}, 0, 0, 2000000000},
+
+    {
+        {
+            "parallel_workers",
+            "Number of parallel processes that can be used per executor node for this relation.",
+            RELOPT_KIND_HEAP
+        },
+        -1, 0, MAX_BACKENDS
+    },
 
     /* list terminator */
     {{NULL}}};
@@ -1444,8 +1454,7 @@ void ForbidToSetOptionsForPSort(List* options)
 }
 
 /*
- * Option parser for anything that uses StdRdOptions (i.e. fillfactor and
- * autovacuum)
+ * Option parser for anything that uses StdRdOptions.
  */
 bytea* default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
 {
@@ -1504,7 +1513,8 @@ bytea* default_reloptions(Datum reloptions, bool validate, relopt_kind kind)
         {"user_catalog_table", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, user_catalog_table)},
         {"hashbucket", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, hashbucket)},
         {"on_commit_delete_rows", RELOPT_TYPE_BOOL, offsetof(StdRdOptions, on_commit_delete_rows)},
-        {"wait_clean_gpi", RELOPT_TYPE_STRING, offsetof(StdRdOptions, wait_clean_gpi)}};
+        {"wait_clean_gpi", RELOPT_TYPE_STRING, offsetof(StdRdOptions, wait_clean_gpi)},
+        {"parallel_workers", RELOPT_TYPE_INT, offsetof(StdRdOptions, parallel_workers)}};
 
     options = parseRelOptions(reloptions, validate, kind, &numoptions);
 

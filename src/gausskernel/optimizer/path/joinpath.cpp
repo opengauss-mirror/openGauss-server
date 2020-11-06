@@ -246,10 +246,6 @@ void add_paths_to_joinrel(PlannerInfo* root, RelOptInfo* joinrel, RelOptInfo* ou
     if (u_sess->attr.attr_sql.enable_hashjoin || jointype == JOIN_FULL || hashjoin_hint != NIL) {
         hash_inner_and_outer(root, joinrel, outerrel, innerrel, jointype, &semifactors, &extra);
     }
-    /*
-     * 6. Consider gathering partial paths.
-     */
-    generate_gather_paths(root, joinrel);
 #ifdef PGXC
     /*
      * Can not generate join path. It is not necessary to this branch, otherwise

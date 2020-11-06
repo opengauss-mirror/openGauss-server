@@ -65,7 +65,7 @@ static void set_base_rel_pathlists(PlannerInfo* root);
 static void set_correlated_rel_pathlist(PlannerInfo* root, RelOptInfo* rel);
 static void set_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, Index rti, RangeTblEntry* rte);
 static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte);
-static void create_parallel_paths(PlannerInfo* root, RelOptInfo* rel);
+static void create_plain_partial_paths(PlannerInfo* root, RelOptInfo* rel);
 static void set_tablesample_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte);
 static void set_plain_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte);
 static void have_gather_plan_node(Plan* plan, void* context, const char* query_string);
@@ -667,6 +667,23 @@ static void set_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, Index rti, Rang
                 break;
         }
     }
+    /*
+     * If this is a baserel, consider gathering any partial paths we may have
+     * created for it.  (If we tried to gather inheritance children, we could
+     * end up with a very large number of gather nodes, each trying to grab
+     * its own pool of workers, so don't do this for otherrels.  Instead,
+     * we'll consider gathering partial paths for the parent appendrel.)
+     */
+    if (rel->reloptkind == RELOPT_BASEREL) {
+        generate_gather_paths(root, rel);
+    }
+
+    /* 
+     * Find the cheapest of the paths for this rel here because 
+     * generate_gather_paths may delete a path that some paths have
+     * a reference to.
+     */
+    set_cheapest(rel);
 
     debug1_print_rel(root, rel);
 
@@ -752,50 +769,21 @@ static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry
 }
 
 /*
- * create_parallel_paths
- *	  Build parallel access paths for a plain relation
+ * create_plain_partial__paths
+ *	  Build partial access paths for a plain relation
  */
-static void create_parallel_paths(PlannerInfo* root, RelOptInfo* rel)
+static void create_plain_partial_paths(PlannerInfo* root, RelOptInfo* rel)
 {
-    int parallel_threshold = u_sess->attr.attr_sql.min_parallel_table_scan_size;
-    int parallel_workers = 1;
-    int max_parallel_workers = u_sess->attr.attr_sql.max_parallel_workers_per_gather;
-    /*
-     * If this relation is too small to be worth a parallel scan, just return
-     * without doing anything ... unless it's an inheritance child.  In that case,
-     * we want to generate a parallel path here anyway.  It might not be worthwhile
-     * just for this relation, but when combined with all of its inheritance siblings
-     * it may well pay off.
-     */
-    if (rel->pages < parallel_threshold && rel->reloptkind == RELOPT_BASEREL) {
-        return;
-    }
+    int parallel_workers = 0;
 
-    /*
-     * Limit the degree of parallelism logarithmically based on the size of the
-     * relation.  This probably needs to be a good deal more sophisticated, but we
-     * need something here for now.
-     */
-    while (rel->pages > parallel_threshold * 3 && parallel_workers < max_parallel_workers) {
-        parallel_workers++;
-        parallel_threshold *= 3;
-        if (parallel_threshold >= PG_INT32_MAX / 3)
-            break;
+    parallel_workers = compute_parallel_worker(rel, rel->pages, 0);
+
+    if (parallel_workers <= 0) {
+        return;
     }
 
     /* Add an unordered partial path based on a parallel sequential scan. */
     add_partial_path(rel, create_seqscan_path(root, rel, NULL, 1, parallel_workers));
-
-    /*
-     * If this is a baserel, consider gathering any partial paths we may have
-     * just created.  If we gathered an inheritance child, we could end up
-     * with a very large number of gather nodes, each trying to grab its own
-     * pool of workers, so don't do this in that case.  Instead, we'll
-     * consider gathering partial paths for the appendrel.
-     */
-    if (rel->reloptkind == RELOPT_BASEREL) {
-        generate_gather_paths(root, rel);
-    }
 }
 
 
@@ -950,7 +938,7 @@ static void set_plain_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblE
 
                 /* Consider parallel sequential scan */
                 if (rel->consider_parallel) {
-                    create_parallel_paths(root, rel);
+                    create_plain_partial_paths(root, rel);
                 }
 
                 break;
@@ -994,9 +982,6 @@ static void set_plain_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblE
     }
 #endif
 
-    /* Now find the cheapest of the paths for this rel */
-    set_cheapest(rel);
-
     /* Consider partition's path for partitioned table */
 #ifdef PGXC
     if (!isrp)
@@ -1033,16 +1018,21 @@ static void have_gather_plan_node(Plan* plan, void* context, const char* query_s
 
 /*
  * If this relation could possibly be scanned from within a worker, then set
- * the consider_parallel flag.  The flag has previously been initialized to
- * false, so we just bail out if it becomes clear that we can't safely set it.
+ * its consider_parallel flag.
  */
 static void set_rel_consider_parallel(PlannerInfo *root, RelOptInfo *rel, RangeTblEntry *rte)
 {
+    /*
+     * The flag has previously been initialized to false, so we can just
+     * return if it becomes clear that we can't safely set it.
+     */
+    Assert(!rel->consider_parallel);
+
     /* Don't call this if parallelism is disallowed for the entire query. */
     Assert(root->glob->parallelModeOK);
 
-    /* Don't call this for non-baserels. */
-    Assert(rel->reloptkind == RELOPT_BASEREL);
+    /* This should only be called for baserels and appendrel children. */
+    Assert(rel->reloptkind == RELOPT_BASEREL || rel->reloptkind == RELOPT_OTHER_MEMBER_REL);
 
     /* Assorted checks based on rtekind. */
     switch (rte->rtekind) {
@@ -1361,9 +1351,6 @@ static void set_append_rel_size(PlannerInfo* root, RelOptInfo* rel, Index rti, R
             continue;
         }
 
-        /* Copy consider_parallel flag from parent. */
-        childrel->consider_parallel = rel->consider_parallel;
-
         /*
          * CE failed, so finish copying/modifying targetlist and join quals.
          *
@@ -1413,6 +1400,18 @@ static void set_append_rel_size(PlannerInfo* root, RelOptInfo* rel, Index rti, R
          * because attr_needed is only examined for base relations not
          * otherrels.  So we just leave the child's attr_needed empty.
          */
+
+        /*
+         * If parallelism is allowable for this query in general, see whether
+         * it's allowable for this childrel in particular.  But if we've
+         * already decided the appendrel is not parallel-safe as a whole,
+         * there's no point in considering parallelism for this child.  For
+         * consistency, do this before calling set_rel_size() for the child.
+         */
+        if (root->glob->parallelModeOK && rel->consider_parallel) {
+            set_rel_consider_parallel(root, childrel, childRTE);
+        }
+
         /*
          * Compute the child's size.
          */
@@ -1427,6 +1426,19 @@ static void set_append_rel_size(PlannerInfo* root, RelOptInfo* rel, Index rti, R
             continue;
 
         has_live_children = true;
+
+        /*
+         * If any live child is not parallel-safe, treat the whole appendrel
+         * as not parallel-safe.  In future we might be able to generate plans
+         * in which some children are farmed out to workers while others are
+         * not; but we don't have that today, so it's a waste to consider
+         * partial paths anywhere in the appendrel unless it's all safe.
+         * (Child rels visited before this one will be unmarked in
+         * set_append_rel_pathlist().)
+         */
+        if (!childrel->consider_parallel) {
+            rel->consider_parallel = false;
+        }
 
         /*
          * Accumulate size information from each live child.
@@ -1567,6 +1579,16 @@ static void set_append_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, Index rt
         childRTindex = appinfo->child_relid;
         childRTE = root->simple_rte_array[childRTindex];
         childrel = root->simple_rel_array[childRTindex];
+
+        /*
+         * If set_append_rel_size() decided the parent appendrel was
+         * parallel-unsafe at some point after visiting this child rel, we
+         * need to propagate the unsafety marking down to the child, so that
+         * we don't generate useless partial paths for it.
+         */
+        if (!rel->consider_parallel) {
+            childrel->consider_parallel = false;
+        }
 
         /*
          * Compute the child's access paths.
@@ -1772,9 +1794,6 @@ static void add_paths_to_append_rel(PlannerInfo *root, RelOptInfo *rel, List *li
  
         /* Add the path. */
         add_partial_path(rel, (Path *) appendpath);
-
-        /* Consider gathering it. */
-        generate_gather_paths(root, rel);
     }
 
     /*
@@ -1876,9 +1895,6 @@ static void add_paths_to_append_rel(PlannerInfo *root, RelOptInfo *rel, List *li
             }
         }
     }
-
-    /* Select cheapest paths */
-    set_cheapest(rel);
 }
 
 /*
@@ -2182,9 +2198,6 @@ static void set_subquery_pathlist(PlannerInfo* root, RelOptInfo* rel, Index rti,
 
     /* Generate appropriate path */
     add_path(root, rel, create_subqueryscan_path(root, rel, pathkeys, NULL));
-
-    /* Select cheapest path (pretty easy in this case...) */
-    set_cheapest(rel);
 }
 
 /*
@@ -2195,9 +2208,6 @@ static void set_function_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblEn
 {
     /* Generate appropriate path */
     add_path(root, rel, create_functionscan_path(root, rel));
-
-    /* Select cheapest path (pretty easy in this case...) */
-    set_cheapest(rel);
 }
 
 /*
@@ -2208,9 +2218,6 @@ static void set_values_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblEntr
 {
     /* Generate appropriate path */
     add_path(root, rel, create_valuesscan_path(root, rel));
-
-    /* Select cheapest path (pretty easy in this case...) */
-    set_cheapest(rel);
 }
 
 /*
@@ -2326,9 +2333,6 @@ static void set_cte_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* 
 
     /* Generate appropriate path */
     add_path(root, rel, create_ctescan_path(root, rel));
-
-    /* Select cheapest path (pretty easy in this case...) */
-    set_cheapest(rel);
 }
 
 /*
@@ -2379,15 +2383,16 @@ static void set_worktable_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblE
 
     /* Generate appropriate path */
     add_path(root, rel, create_worktablescan_path(root, rel));
-
-    /* Select cheapest path (pretty easy in this case...) */
-    set_cheapest(rel);
 }
 
 /*
  * generate_gather_paths
  *		Generate parallel access paths for a relation by pushing a Gather on
  *		top of a partial path.
+ *
+ * This must not be called until after we're done creating all partial paths
+ * for the specified relation.  (Otherwise, add_partial_path might delete a
+ * path that some GatherPath has a reference to.)
  */
 void generate_gather_paths(PlannerInfo* root, RelOptInfo* rel)
 {
@@ -2400,7 +2405,9 @@ void generate_gather_paths(PlannerInfo* root, RelOptInfo* rel)
 
     /*
      * The output of Gather is currently always unsorted, so there's only one
-     * partial path of interest: the cheapest one.
+     * partial path of interest: the cheapest one. That will be the one at
+     * the front of partial_pathlist because of the way add_partial_path
+     * works.
      *
      * Eventually, we should have a Gather Merge operation that can merge
      * multiple tuple streams together while preserving their ordering.  We
@@ -2551,10 +2558,17 @@ RelOptInfo* standard_join_search(PlannerInfo* root, int levels_needed, List* ini
         join_search_one_level(root, lev);
 
         /*
-         * Do cleanup work on each just-processed rel.
+         * Run generate_gather_paths() for each just-processed joinrel.  We
+         * could not do this earlier because both regular and partial paths
+         * can get added to a particular joinrel at multiple times within
+         * join_search_one_level.  After that, we're done creating paths
+         * for the joinrel, so run set_cheapest().
          */
         foreach (lc, root->join_rel_level[lev]) {
             rel = (RelOptInfo*)lfirst(lc);
+
+            /* Create GatherPaths for any useful partial paths for rel */
+            generate_gather_paths(root, rel);
 
             /* Find and save the cheapest paths for this rel */
             set_cheapest(rel, root);
@@ -3391,6 +3405,92 @@ bool is_single_baseresult_plan(Plan* plan)
     }
 
     return IsA(plan, BaseResult) ? (plan->lefttree == NULL) : false;
+}
+
+/*
+ * Compute the number of parallel workers that should be used to scan a
+ * relation.  We compute the parallel workers based on the size of the heap to
+ * be scanned and the size of the index to be scanned, then choose a minimum
+ * of those.
+ *
+ * "heap_pages" is the number of pages from the table that we expect to scan.
+ * "index_pages" is the number of pages from the index that we expect to scan.
+ */
+int compute_parallel_worker(RelOptInfo *rel, BlockNumber heap_pages, BlockNumber index_pages)
+{
+    int min_parallel_table_scan_size = u_sess->attr.attr_sql.min_parallel_table_scan_size;
+    int min_parallel_index_scan_size = u_sess->attr.attr_sql.min_parallel_index_scan_size;
+    int parallel_workers = 0;
+    int heap_parallel_workers = 1;
+    int index_parallel_workers = 1;
+
+    /*
+     * If the user has set the parallel_workers reloption, use that; otherwise
+     * select a default number of workers.
+     */
+    if (rel->rel_parallel_workers != -1) {
+        parallel_workers = rel->rel_parallel_workers;
+    } else {
+        int heap_parallel_threshold;
+        int index_parallel_threshold;
+
+        /*
+         * If this relation is too small to be worth a parallel scan, just
+         * return without doing anything ... unless it's an inheritance child.
+         * In that case, we want to generate a parallel path here anyway.  It
+         * might not be worthwhile just for this relation, but when combined
+         * with all of its inheritance siblings it may well pay off.
+         */
+        if (heap_pages < (BlockNumber)min_parallel_table_scan_size &&
+            index_pages < (BlockNumber)min_parallel_index_scan_size && rel->reloptkind == RELOPT_BASEREL) {
+            return 0;
+        }
+
+        if (heap_pages > 0) {
+            /*
+             * Select the number of workers based on the log of the size of
+             * the relation.  This probably needs to be a good deal more
+             * sophisticated, but we need something here for now.  Note that
+             * the upper limit of the min_parallel_table_scan_size GUC is
+             * chosen to prevent overflow here.
+             */
+            heap_parallel_threshold = Max(min_parallel_table_scan_size, 1);
+            while (heap_pages >= (BlockNumber)(heap_parallel_threshold * 3)) {
+                heap_parallel_workers++;
+                heap_parallel_threshold *= 3;
+                if (heap_parallel_threshold > INT_MAX / 3) {
+                    break; /* avoid overflow */
+                }
+            }
+
+            parallel_workers = heap_parallel_workers;
+        }
+
+        if (index_pages > 0) {
+            /* same calculation as for heap_pages above */
+            index_parallel_threshold = Max(min_parallel_index_scan_size, 1);
+            while (index_pages >= (BlockNumber)(index_parallel_threshold * 3)) {
+                index_parallel_workers++;
+                index_parallel_threshold *= 3;
+                if (index_parallel_threshold > INT_MAX / 3) {
+                    break; /* avoid overflow */
+                }
+            }
+
+            if (parallel_workers > 0) {
+                parallel_workers = Min(parallel_workers, index_parallel_workers);
+            } else {
+                parallel_workers = index_parallel_workers;
+            }
+        }
+    }
+
+    /*
+     * In no case use more than max_parallel_workers_per_gather workers.
+     */
+    parallel_workers = Min(parallel_workers, u_sess->attr.attr_sql.max_parallel_workers_per_gather);
+
+    return parallel_workers;
 }
 
 /*****************************************************************************

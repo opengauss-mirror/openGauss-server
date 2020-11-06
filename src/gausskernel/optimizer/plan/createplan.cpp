@@ -81,7 +81,7 @@ static Plan* create_plan_recurse(PlannerInfo* root, Path* best_path);
 static Plan* create_scan_plan(PlannerInfo* root, Path* best_path);
 static List* build_relation_tlist(RelOptInfo* rel);
 static bool use_physical_tlist(PlannerInfo* root, RelOptInfo* rel);
-static Plan* create_gating_plan(PlannerInfo* root, Plan* plan, List* quals);
+static Plan* create_gating_plan(PlannerInfo* root, Plan* plan, List* quals, bool parallel_safe);
 static Plan* create_join_plan(PlannerInfo* root, JoinPath* best_path);
 static Plan* create_append_plan(PlannerInfo* root, AppendPath* best_path);
 static Plan* create_merge_append_plan(PlannerInfo* root, MergeAppendPath* best_path);
@@ -691,7 +691,7 @@ static Plan* create_scan_plan(PlannerInfo* root, Path* best_path)
      * quals.
      */
     if (root->hasPseudoConstantQuals) {
-        plan = create_gating_plan(root, plan, scan_clauses);
+        plan = create_gating_plan(root, plan, scan_clauses, best_path->parallel_safe);
     }
 
     return plan;
@@ -896,7 +896,7 @@ void disuse_physical_tlist(Plan* plan, Path* path)
  * in most cases we have only a very bad idea of the probability of the gating
  * qual being true.
  */
-static Plan* create_gating_plan(PlannerInfo* root, Plan* plan, List* quals)
+static Plan* create_gating_plan(PlannerInfo* root, Plan* plan, List* quals, bool parallel_safe)
 {
     List* pseudoconstants = NIL;
 
@@ -910,7 +910,10 @@ static Plan* create_gating_plan(PlannerInfo* root, Plan* plan, List* quals)
         return plan;
     }
 
-    return (Plan*)make_result(root, plan->targetlist, (Node*)pseudoconstants, plan);
+    Plan *gplan = (Plan*)make_result(root, plan->targetlist, (Node*)pseudoconstants, plan);
+    /* Gating quals could be unsafe, so better use the Path's safety flag */
+    gplan->parallel_safe = parallel_safe;
+    return gplan;
 }
 
 /* If inner plan or outer plan exec on CN and other side has add stream or hashfilter for replication join,
@@ -1023,7 +1026,7 @@ static Plan* create_join_plan(PlannerInfo* root, JoinPath* best_path)
      * quals.
      */
     if (root->hasPseudoConstantQuals)
-        plan = create_gating_plan(root, plan, best_path->joinrestrictinfo);
+        plan = create_gating_plan(root, plan, best_path->joinrestrictinfo, best_path->path.parallel_safe);
 
 #ifdef NOT_USED
 
@@ -1125,7 +1128,8 @@ static Plan* create_append_plan(PlannerInfo* root, AppendPath* best_path)
      * quals.
      */
     if (root->hasPseudoConstantQuals) {
-        return create_gating_plan(root, (Plan*)plan, best_path->path.parent->baserestrictinfo);
+        return create_gating_plan(root, (Plan*)plan, best_path->path.parent->baserestrictinfo,
+            best_path->path.parallel_safe);
     }
 
     return (Plan*)plan;
@@ -2780,6 +2784,8 @@ static Plan* create_bitmap_subplan(PlannerInfo* root, Path* bitmapqual, List** q
         set_plan_rows(
             plan, clamp_row_est(apath->bitmapselectivity * apath->path.parent->tuples), apath->path.parent->multiple);
         plan->plan_width = 0; /* meaningless */
+        plan->parallel_aware = false;
+        plan->parallel_safe = apath->path.parallel_safe;
         *qual = subquals;
         *indexqual = subindexquals;
         *indexECs = subindexECs;
@@ -2840,6 +2846,8 @@ static Plan* create_bitmap_subplan(PlannerInfo* root, Path* bitmapqual, List** q
                 clamp_row_est(opath->bitmapselectivity * opath->path.parent->tuples),
                 opath->path.parent->multiple);
             plan->plan_width = 0; /* meaningless */
+            plan->parallel_aware = false;
+            plan->parallel_safe = opath->path.parallel_safe;
         }
 
         /*
@@ -2906,6 +2914,8 @@ static Plan* create_bitmap_subplan(PlannerInfo* root, Path* bitmapqual, List** q
         set_plan_rows(
             plan, clamp_row_est(ipath->indexselectivity * ipath->path.parent->tuples), ipath->path.parent->multiple);
         plan->plan_width = 0; /* meaningless */
+        plan->parallel_aware = false;
+        plan->parallel_safe = ipath->path.parallel_safe;
         *qual = get_actual_clauses(ipath->indexclauses);
         *indexqual = get_actual_clauses(ipath->indexquals);
         foreach (l, ipath->indexinfo->indpred) {
@@ -5241,6 +5251,7 @@ static void copy_path_costsize(Plan* dest, Path* src)
         dest->innerdistinct = src->innerdistinct;
         dest->outerdistinct = src->outerdistinct;
         dest->parallel_aware = src->parallel_aware;
+        dest->parallel_safe = src->parallel_safe;
     } else {
         /* init the cost field directly */
         init_plan_cost(dest);
@@ -5258,6 +5269,10 @@ void copy_plan_costsize(Plan* dest, Plan* src)
         dest->total_cost = src->total_cost;
         set_plan_rows_from_plan(dest, PLAN_LOCAL_ROWS(src), src->multiple);
         dest->plan_width = src->plan_width;
+        /* Assume the inserted node is not parallel-aware. */
+        dest->parallel_aware = false;
+        /* Assume the inserted node is parallel-safe, if child plan is. */
+        dest->parallel_safe = src->parallel_safe;
     } else {
         /* init the cost field directly */
         init_plan_cost(dest);
@@ -7190,6 +7205,8 @@ Plan* materialize_finished_plan(Plan* subplan, bool materialize_above_stream, bo
     /* parameter kluge --- see comments above */
     matplan->extParam = bms_copy(subplan->extParam);
     matplan->allParam = bms_copy(subplan->allParam);
+    matplan->parallel_aware = false;
+    matplan->parallel_safe = subplan->parallel_safe;
 
     return matplan;
 }
@@ -8900,9 +8917,9 @@ void pgxc_copy_path_costsize(Plan* dest, Path* src)
     copy_path_costsize(dest, src);
 }
 
-Plan* pgxc_create_gating_plan(PlannerInfo* root, Plan* plan, List* quals)
+Plan* pgxc_create_gating_plan(PlannerInfo* root, Plan* plan, List* quals, bool parallel_safe)
 {
-    return create_gating_plan(root, plan, quals);
+    return create_gating_plan(root, plan, quals, parallel_safe);
 }
 #endif /* PGXC */
 

@@ -87,7 +87,7 @@ extern void cost_samplescan(Path* path, PlannerInfo* root, RelOptInfo* baserel, 
 extern void cost_cstorescan(Path* path, PlannerInfo* root, RelOptInfo* baserel);
 extern void cost_dfsscan(Path* path, PlannerInfo* root, RelOptInfo* baserel);
 extern void cost_tsstorescan(Path *path, PlannerInfo *root, RelOptInfo *baserel);
-extern void cost_index(IndexPath* path, PlannerInfo* root, double loop_count);
+extern void cost_index(IndexPath* path, PlannerInfo* root, double loop_count, bool partial_path);
 extern void cost_bitmap_heap_scan(
     Path* path, PlannerInfo* root, RelOptInfo* baserel, ParamPathInfo* param_info, Path* bitmapqual, double loop_count);
 extern void cost_bitmap_and_node(BitmapAndPath* path, PlannerInfo* root);

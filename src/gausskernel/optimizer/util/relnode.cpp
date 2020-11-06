@@ -171,6 +171,7 @@ RelOptInfo* build_simple_rel(PlannerInfo* root, int relid, RelOptKind reloptkind
     rel->rows = 0;
     rel->width = 0;
     rel->consider_parallel = false; /* might get changed later */
+    rel->rel_parallel_workers = -1; /* set up in GetRelationInfo */
     rel->encodedwidth = 0;
     rel->encodednum = 0;
     rel->reltargetlist = NIL;

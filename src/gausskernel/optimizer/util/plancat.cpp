@@ -178,6 +178,9 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
             &rel->allvisfrac,
             &sampledPartitionIds);
 
+    /* Retrieve the parallel_workers reloption, or -1 if not set. */
+    rel->rel_parallel_workers = RelationGetParallelWorkers(relation, -1);
+
     /*
      * Make list of indexes.  Ignore indexes on system catalogs if told to.
      * Don't bother with indexes for an inheritance parent, either.
@@ -283,6 +286,7 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
             info->amoptionalkey = indexRelation->rd_am->amoptionalkey;
             info->amsearcharray = indexRelation->rd_am->amsearcharray;
             info->amsearchnulls = indexRelation->rd_am->amsearchnulls;
+            info->amcanparallel = indexRelation->rd_rel->relam == BTREE_AM_OID;
             info->amhasgettuple = OidIsValid(indexRelation->rd_am->amgettuple);
             info->amhasgetbitmap = OidIsValid(indexRelation->rd_am->amgetbitmap);
 

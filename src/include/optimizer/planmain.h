@@ -178,7 +178,7 @@ extern Plan* create_remotelimit_plan(PlannerInfo* root, Plan* local_plan);
 extern List* pgxc_order_qual_clauses(PlannerInfo* root, List* clauses);
 extern List* pgxc_build_relation_tlist(RelOptInfo* rel);
 extern void pgxc_copy_path_costsize(Plan* dest, Path* src);
-extern Plan* pgxc_create_gating_plan(PlannerInfo* root, Plan* plan, List* quals);
+extern Plan* pgxc_create_gating_plan(PlannerInfo* root, Plan* plan, List* quals, bool parallel_safe);
 #endif
 extern void expand_dfs_tables(PlannerInfo* root);
 extern void expand_internal_rtentry(PlannerInfo* root, RangeTblEntry* rte, Index rti);

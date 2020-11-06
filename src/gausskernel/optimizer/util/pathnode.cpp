@@ -970,8 +970,14 @@ void set_hint_value(RelOptInfo* join_rel, Path* new_path, HintState* hstate)
  *	  but just recycling discarded Path nodes is a very useful savings in
  *	  a large join tree.  We can recycle the List nodes of pathlist, too.
  *
- *	  BUT: we do not pfree IndexPath objects, since they may be referenced as
- *	  children of BitmapHeapPaths as well as being paths in their own right.
+ *	  As noted in optimizer/README, deleting a previously-accepted Path is
+ *	  safe because we know that Paths of this rel cannot yet be referenced
+ *	  from any other rel, such as a higher-level join.  However, in some cases
+ *	  it is possible that a Path is referenced by another Path for its own
+ *	  rel; we must not delete such a Path, even if it is dominated by the new
+ *	  Path.  Currently this occurs only for IndexPath objects, which may be
+ *	  referenced as children of BitmapHeapPaths as well as being paths in
+ *	  their own right.  Hence, we don't pfree IndexPaths when rejecting them.
  *
  * 'parent_rel' is the relation entry to which the path corresponds.
  * 'new_path' is a potential path for parent_rel.
@@ -1450,6 +1456,10 @@ static void add_parameterized_path(RelOptInfo* parent_rel, Path* new_path)
  *	  parallel such that each worker will generate a subset of the path's
  *	  overall result.
  *
+ *	  As in add_path, the partial_pathlist is kept sorted with the cheapest
+ *	  total path in front.  This is depended on by multiple places, which
+ *	  just take the front entry as the cheapest path without searching.
+ *
  *	  We don't generate parameterized partial paths for several reasons.  Most
  *	  importantly, they're not safe to execute, because there's nothing to
  *	  make sure that a parallel scan within the parameterized portion of the
@@ -1469,6 +1479,13 @@ static void add_parameterized_path(RelOptInfo* parent_rel, Path* new_path)
  *	  costs: parallelism is only used for plans that will be run to completion.
  *	  Therefore, this routine is much simpler than add_path: it needs to
  *	  consider only pathkeys and total cost.
+ *	  As with add_path, we pfree paths that are found to be dominated by
+ *	  another partial path; this requires that there be no other references to
+ *	  such paths yet.  Hence, GatherPaths must not be created for a rel until
+ *	  we're done creating all partial paths for it.  We do not currently build
+ *	  partial indexscan paths, so there is no need for an exception for
+ *	  IndexPaths here; for safety, we instead Assert that a path to be freed
+ *	  isn't an IndexPath.
  */
 void add_partial_path(RelOptInfo* parent_rel, Path* new_path)
 {
@@ -1529,8 +1546,7 @@ void add_partial_path(RelOptInfo* parent_rel, Path* new_path)
          */
         if (remove_old) {
             parent_rel->partial_pathlist = list_delete_cell(parent_rel->partial_pathlist, p1, p1_prev);
-            /* add_path has a special case for IndexPath; we don't need it */
-            Assert(!IsA(old_path, IndexPath));
+            /* we should not see IndexPaths here, so always safe to delete */
             pfree(old_path);
             /* p1_prev does not advance */
         } else {
@@ -1557,8 +1573,7 @@ void add_partial_path(RelOptInfo* parent_rel, Path* new_path)
         else
             parent_rel->partial_pathlist = lcons(new_path, parent_rel->partial_pathlist);
     } else {
-        /* add_path has a special case for IndexPath; we don't need it */
-        Assert(!IsA(new_path, IndexPath));
+        /* we should not see IndexPaths here, so always safe to delete */
         /* Reject and recycle the new path */
         pfree(new_path);
     }
@@ -1641,7 +1656,11 @@ Path* create_seqscan_path(PlannerInfo* root, RelOptInfo* rel, Relids required_ou
     pathnode->parallel_workers = parallel_workers;
 
 #ifdef STREAMPLAN
-    /* We need to set locator_type for parallel query, cause we may send this value to bg worker */
+    /* 
+     * We need to set locator_type for parallel query, cause we may send 
+     * this value to bg worker. If not, locator_type is the initial value '\0',
+     * which make the later serialized plan truncated.
+     */
     pathnode->locator_type = rel->locator_type;
     if (IS_STREAM_PLAN) {
         pathnode->distribute_keys = rel->distribute_keys;
@@ -1972,12 +1991,13 @@ bool is_pwj_path(Path* pwjpath)
  * 'required_outer' is the set of outer relids for a parameterized path.
  * 'loop_count' is the number of repetitions of the indexscan to factor into
  *		estimates of caching behavior.
+ * 'partial_path' is true if constructing a parallel index scan path.
  *
  * Returns the new path node.
  */
 IndexPath* create_index_path(PlannerInfo* root, IndexOptInfo* index, List* indexclauses, List* indexclausecols,
     List* indexorderbys, List* indexorderbycols, List* pathkeys, ScanDirection indexscandir, bool indexonly,
-    Relids required_outer, double loop_count)
+    Relids required_outer, double loop_count, bool partial_path)
 {
     IndexPath* pathnode = makeNode(IndexPath);
     RelOptInfo* rel = index->rel;
@@ -1987,6 +2007,9 @@ IndexPath* create_index_path(PlannerInfo* root, IndexOptInfo* index, List* index
     pathnode->path.pathtype = indexonly ? T_IndexOnlyScan : T_IndexScan;
     pathnode->path.parent = rel;
     pathnode->path.param_info = get_baserel_parampathinfo(root, rel, required_outer);
+    pathnode->path.parallel_aware = false;
+    pathnode->path.parallel_safe = rel->consider_parallel;
+    pathnode->path.parallel_workers = 0;
     pathnode->path.pathkeys = pathkeys;
 
     /* Convert clauses to indexquals the executor can handle */
@@ -2001,6 +2024,12 @@ IndexPath* create_index_path(PlannerInfo* root, IndexOptInfo* index, List* index
     pathnode->indexorderbycols = indexorderbycols;
     pathnode->indexscandir = indexscandir;
 #ifdef STREAMPLAN
+    /* 
+     * We need to set locator_type for parallel query, cause we may send 
+     * this value to bg worker. If not, locator_type is the initial value '\0',
+     * which make the later serialized plan truncated.
+     */
+    pathnode->path.locator_type = rel->locator_type;
     if (IS_STREAM_PLAN) {
         pathnode->path.distribute_keys = rel->distribute_keys;
         pathnode->path.locator_type = rel->locator_type;
@@ -2012,7 +2041,7 @@ IndexPath* create_index_path(PlannerInfo* root, IndexOptInfo* index, List* index
     }
 #endif
 
-    cost_index(pathnode, root, loop_count);
+    cost_index(pathnode, root, loop_count, partial_path);
 
     return pathnode;
 }
@@ -2178,7 +2207,9 @@ AppendPath* create_append_path(PlannerInfo* root, RelOptInfo* rel, List* subpath
     pathnode->path.parallel_aware = parallel_aware;
     pathnode->path.parallel_safe = rel->consider_parallel;
     pathnode->path.parallel_workers = parallel_workers;
-    pathnode->path.pathkeys = NIL; /* result is always considered unsorted */
+    pathnode->path.pathkeys = NIL; /* result is always considered
+                                    * unsorted */
+    pathnode->subpaths = subpaths;
 
     /*
      * For parallel append, non-partial paths are sorted by descending total
@@ -2995,6 +3026,9 @@ GatherPath *create_gather_path(PlannerInfo *root, RelOptInfo *rel, Path *subpath
     pathnode->subpath = subpath;
     pathnode->single_copy = false;
 
+#ifdef STREAMPLAN
+    inherit_path_locator_info((Path*)pathnode, subpath);
+#endif
     if (pathnode->path.parallel_workers == 0) {
         pathnode->path.pathkeys = subpath->pathkeys;
         pathnode->path.parallel_workers = 1;
@@ -3047,7 +3081,7 @@ Path* create_subqueryscan_path(PlannerInfo* root, RelOptInfo* rel, List* pathkey
     pathnode->param_info = get_baserel_parampathinfo(root, rel, required_outer);
 
     pathnode->parallel_aware = false;
-    pathnode->parallel_safe = rel->consider_parallel;
+    pathnode->parallel_safe = rel->consider_parallel && rel->subplan->parallel_safe;
     pathnode->parallel_workers = 0;
 
     pathnode->pathkeys = pathkeys;
@@ -3932,7 +3966,7 @@ Path* reparameterize_path(PlannerInfo* root, Path* path, Relids required_outer, 
             securec_check(errorno, "", "");
 
             newpath->path.param_info = get_baserel_parampathinfo(root, rel, required_outer);
-            cost_index(newpath, root, loop_count);
+            cost_index(newpath, root, loop_count, false);
             return (Path*)newpath;
         }
         case T_BitmapHeapScan: {

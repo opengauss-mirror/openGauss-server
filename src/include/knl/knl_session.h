@@ -2038,6 +2038,7 @@ typedef struct ParallelAppendState ParallelAppendState;
 
 /* Info need to pass from leader to worker */
 struct ParallelHeapScanDescData;
+struct ParallelIndexScanDescData;
 typedef uint64 XLogRecPtr;
 typedef struct ParallelQueryInfo {
     struct SharedExecutorInstrumentation *instrumentation;
@@ -2052,6 +2053,8 @@ typedef struct ParallelQueryInfo {
     ParallelHeapScanDescData **pscan;
     int pappend_num;
     ParallelAppendState **pappend;
+    int piscan_num;
+    ParallelIndexScanDescData **piscan;
 } ParallelQueryInfo;
 
 struct BTShared;

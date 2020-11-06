@@ -830,7 +830,7 @@ Plan* create_remotequery_plan(PlannerInfo* root, RemoteQueryPath* best_path)
             default:
                 elog(ERROR, "creating remote query plan for relations of type %d is not supported", rel->reloptkind);
         }
-        return pgxc_create_gating_plan(root, (Plan*)result_node, quals);
+        return pgxc_create_gating_plan(root, (Plan*)result_node, quals, best_path->path.parallel_safe);
     }
 
     return (Plan*)result_node;

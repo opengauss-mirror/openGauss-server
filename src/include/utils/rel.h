@@ -311,6 +311,8 @@ typedef struct StdRdOptions {
     char* end_ctid_internal;
     char        *merge_list;
     bool on_commit_delete_rows; /* global temp table */
+
+    int parallel_workers; /* max number of parallel workers */
 } StdRdOptions;
 
 #define HEAP_MIN_FILLFACTOR 10
@@ -325,6 +327,15 @@ typedef struct StdRdOptions {
     ((relation)->rd_options && \
      ((relation)->rd_rel->relkind == RELKIND_RELATION || (relation)->rd_rel->relkind == RELKIND_MATVIEW) ? \
         ((StdRdOptions*)(relation)->rd_options)->user_catalog_table : false)
+
+/*
+ * RelationGetParallelWorkers
+ *		Returns the relation's parallel_workers reloption setting.
+ *		Note multiple eval of argument!
+ */
+#define RelationGetParallelWorkers(relation, defaultpw) \
+    ((relation)->rd_options ? \
+     ((StdRdOptions *) (relation)->rd_options)->parallel_workers : (defaultpw))
 
 #define RelationIsInternal(relation) (RelationGetInternalMask(relation) != INTERNAL_MASK_DISABLE)
 

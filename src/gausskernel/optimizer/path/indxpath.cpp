@@ -697,7 +697,7 @@ static inline bool index_relation_has_bucket(IndexOptInfo* index)
 /*
  * build_index_paths
  *	  Given an index and a set of index clauses for it, construct zero
- *	  or more IndexPaths.
+ *	  or more IndexPaths. It also constructs zero or more partial IndexPaths.
  *
  * We return a list of paths because (1) this routine checks some cases
  * that should cause us to not generate any IndexPath, and (2) in some
@@ -896,8 +896,39 @@ static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo*
             index_is_ordered ? ForwardScanDirection : NoMovementScanDirection,
             index_only_scan,
             outer_relids,
-            loop_count);
+            loop_count,
+            false);
         result = lappend(result, ipath);
+
+        /*
+        * If appropriate, consider parallel index scan.  We don't allow
+        * parallel index scan for bitmap index scans.
+        */
+        if (index->amcanparallel && !index_only_scan && rel->consider_parallel && outer_relids == NULL &&
+            scantype != ST_BITMAPSCAN) {
+            ipath = create_index_path(root, 
+                index,
+                index_clauses,
+                clause_columns,
+                orderbyclauses,
+                orderbyclausecols,
+                useful_pathkeys,
+                index_is_ordered ? ForwardScanDirection : NoMovementScanDirection,
+                index_only_scan,
+                outer_relids,
+                loop_count,
+                true);
+
+            /*
+            * if, after costing the path, we find that it's not worth
+            * using parallel workers, just free it.
+            */
+            if (ipath->path.parallel_workers > 0) {
+                add_partial_path(rel, (Path*)ipath);
+            } else {
+                pfree(ipath);
+            }
+        }
     }
 
     /*
@@ -920,8 +951,35 @@ static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo*
                 BackwardScanDirection,
                 index_only_scan,
                 outer_relids,
-                loop_count);
+                loop_count,
+                false);
             result = lappend(result, ipath);
+
+            /* If appropriate, consider parallel index scan */
+            if (index->amcanparallel && !index_only_scan && rel->consider_parallel && outer_relids == NULL &&
+                scantype != ST_BITMAPSCAN) {
+                ipath = create_index_path(root,
+                    index, index_clauses,
+                    clause_columns,
+                    NIL,
+                    NIL,
+                    useful_pathkeys,
+                    BackwardScanDirection,
+                    index_only_scan,
+                    outer_relids,
+                    loop_count,
+                    true);
+
+                /*
+                 * if, after costing the path, we find that it's not worth
+                 * using parallel workers, just free it.
+                 */
+                if (ipath->path.parallel_workers > 0) {
+                    add_partial_path(rel, (Path*)ipath);
+                } else {
+                    pfree(ipath);
+                }
+            }
         }
     }
 

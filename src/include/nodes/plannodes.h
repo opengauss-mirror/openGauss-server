@@ -248,6 +248,7 @@ typedef struct Plan {
      * information needed for parallel query
      */
     bool parallel_aware; /* engage parallel-aware logic? */
+    bool parallel_safe;
 
     /*
      * machine learning model estimations

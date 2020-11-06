@@ -7459,6 +7459,7 @@ Datum gincostestimate(PG_FUNCTION_ARGS)
     Cost* index_total_cost = (Cost*)PG_GETARG_POINTER(4);
     Selectivity* index_selectivity = (Selectivity*)PG_GETARG_POINTER(5);
     double* index_correlation = (double*)PG_GETARG_POINTER(6);
+    double* index_pages = (double*)PG_GETARG_POINTER(7);
     IndexOptInfo* index = path->indexinfo;
     List* index_quals = path->indexquals;
     List* index_orderbys = path->indexorderbys;
@@ -7717,6 +7718,7 @@ Datum gincostestimate(PG_FUNCTION_ARGS)
     *index_total_cost += qual_arg_cost;
     *index_total_cost += ((num_tuples * *index_selectivity) *
         (u_sess->attr.attr_sql.cpu_index_tuple_cost + qual_op_cost));
+    *index_pages = data_pages_fetched;
 
     PG_RETURN_VOID();
 }

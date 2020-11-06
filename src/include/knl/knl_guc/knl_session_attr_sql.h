@@ -156,6 +156,7 @@ typedef struct knl_session_attr_sql {
     int max_cn_temp_file_size;
     int default_statistics_target;
     int min_parallel_table_scan_size;
+    int min_parallel_index_scan_size;
     /* Memory Limit user could set in session */
     int FencedUDFMemoryLimit;
     int64 g_default_expthresh;

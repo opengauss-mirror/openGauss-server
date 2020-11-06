@@ -21,6 +21,10 @@
  *		index_insert	- insert an index tuple into a relation
  *		index_markpos	- mark a scan position
  *		index_restrpos	- restore a scan position
+ *		index_parallelscan_estimate - estimate shared memory for parallel scan
+ *		index_parallelscan_initialize - initialize parallel scan
+ *		index_parallelrescan  - (re)start a parallel scan of an index
+ *		index_beginscan_parallel - join parallel index scan
  *		index_getnext_tid	- get the next TID from a scan
  *		index_fetch_heap		- get the scan's next heap tuple
  *		index_getnext	- get the next heap tuple from a scan
@@ -155,8 +159,13 @@ const IndexAm g_HeapIdxAm = {.idx_rescan = (idx_rescan_t)index_rescan,
     .idx_getnext = (idx_getnext_t)index_getnext,
     .idx_getbitmap = (idx_getbitmap_t)index_getbitmap};
 
-static IndexScanDesc index_beginscan_internal(Relation index_relation, int nkeys, int norderbys, Snapshot snapshot);
+static IndexScanDesc index_beginscan_internal(Relation index_relation, int nkeys,
+                                              int norderbys, Snapshot snapshot,
+                                              ParallelIndexScanDesc pscan, bool temp_snap);
 
+extern Size btestimateparallelscan(void);
+extern void btinitparallelscan(void* target);
+extern void btparallelrescan(IndexScanDesc scan);
 
 /* ----------------
  *		index_open - open an index relation by relation OID
@@ -252,7 +261,7 @@ IndexScanDesc index_beginscan(
 {
     IndexScanDesc scan;
 
-    scan = index_beginscan_internal(index_relation, nkeys, norderbys, snapshot);
+    scan = index_beginscan_internal(index_relation, nkeys, norderbys, snapshot, NULL, false);
 
     /*
      * Save additional parameters into the scandesc.  Everything else was set
@@ -278,7 +287,7 @@ IndexScanDesc index_beginscan_bitmap(Relation index_relation, Snapshot snapshot,
 {
     IndexScanDesc scan;
 
-    scan = index_beginscan_internal(index_relation, nkeys, 0, snapshot);
+    scan = index_beginscan_internal(index_relation, nkeys, 0, snapshot, NULL, false);
 
     /*
      * Save additional parameters into the scandesc.  Everything else was set
@@ -292,7 +301,9 @@ IndexScanDesc index_beginscan_bitmap(Relation index_relation, Snapshot snapshot,
 /*
  * index_beginscan_internal --- common code for index_beginscan variants
  */
-static IndexScanDesc index_beginscan_internal(Relation index_relation, int nkeys, int norderbys, Snapshot snapshot)
+static IndexScanDesc index_beginscan_internal(Relation index_relation, int nkeys,
+                                              int norderbys, Snapshot snapshot,
+                                              ParallelIndexScanDesc pscan, bool temp_snap)
 {
     IndexScanDesc scan;
     FmgrInfo* procedure = NULL;
@@ -316,6 +327,11 @@ static IndexScanDesc index_beginscan_internal(Relation index_relation, int nkeys
 
     scan->sd.type = T_ScanDesc_Index;
     scan->sd.idxAm = &g_HeapIdxAm;
+    
+    /* Initialize information for parallel scan. */
+    scan->parallel_scan = pscan;
+    scan->xs_temp_snap = temp_snap;
+
     return scan;
 }
 
@@ -386,6 +402,10 @@ void index_endscan(IndexScanDesc scan)
         GPIScanEnd(scan->xs_gpi_scan);
     }
 
+    if (scan->xs_temp_snap) {
+        UnregisterSnapshot(scan->xs_snapshot);
+    }
+
     /* Release the scan data structure itself */
     IndexScanEnd(scan);
 }
@@ -434,6 +454,102 @@ void index_restrpos(IndexScanDesc scan)
     scan->kill_prior_tuple = false; /* for safety */
 
     (void)FunctionCall1(procedure, PointerGetDatum(scan));
+}
+
+/*
+ * index_parallelscan_estimate - estimate shared memory for parallel scan
+ *
+ * Currently, we don't pass any information to the AM-specific estimator,
+ * so it can probably only return a constant.  In the future, we might need
+ * to pass more information.
+ */
+Size index_parallelscan_estimate(Relation index_relation, Snapshot snapshot)
+{
+    RELATION_CHECKS;
+
+    Size nbytes = offsetof(ParallelIndexScanDescData, ps_snapshot_data);
+    nbytes = add_size(nbytes, EstimateSnapshotSpace(snapshot));
+    nbytes = MAXALIGN(nbytes);
+
+    /* We reach heare only if the index type is btree */
+    Assert(index_relation->rd_rel->relam == BTREE_AM_OID);
+
+    /* add the needed size of parallel scan */
+    nbytes = add_size(nbytes, btestimateparallelscan());
+
+    return nbytes;
+}
+
+/*
+ * index_parallelscan_initialize - initialize parallel scan
+ *
+ * We initialize both the ParallelIndexScanDesc proper and the AM-specific
+ * information which follows it.
+ *
+ * This function calls access method specific initialization routine to
+ * initialize am specific information.  Call this just once in the leader
+ * process; then, individual workers attach via index_beginscan_parallel.
+ */
+void index_parallelscan_initialize(Relation heap_relation, Size pscan_len, Relation index_relation,
+        Snapshot snapshot, ParallelIndexScanDesc target)
+{
+    RELATION_CHECKS;
+
+    Size offset = add_size(offsetof(ParallelIndexScanDescData, ps_snapshot_data), EstimateSnapshotSpace(snapshot));
+    offset = MAXALIGN(offset);
+
+    target->ps_relid = RelationGetRelid(heap_relation);
+    target->ps_indexid = RelationGetRelid(index_relation);
+    target->ps_offset = offset;
+    SerializeSnapshot(snapshot, target->ps_snapshot_data,
+        pscan_len - offsetof(ParallelIndexScanDescData, ps_snapshot_data));
+
+    /* We reach heare only if the index type is btree */
+    Assert(index_relation->rd_rel->relam == BTREE_AM_OID);
+
+    /* Initial the parallel scan */
+    void *amtarget = OffsetToPointer(target, offset);
+    btinitparallelscan(amtarget);
+}
+
+/* ----------------
+ * 		index_parallelrescan  - (re)start a parallel scan of an index
+ * ----------------
+ */
+void index_parallelrescan(IndexScanDesc scan)
+{
+    SCAN_CHECKS;
+
+    /* We reach heare only if the index type is btree */
+    Assert(scan->indexRelation->rd_rel->relam == BTREE_AM_OID);
+
+    /* Reset the parallel scan */
+    btparallelrescan(scan);
+}
+
+/*
+ * index_beginscan_parallel - join parallel index scan
+ *
+ * Caller must be holding suitable locks on the heap and the index.
+ */
+IndexScanDesc index_beginscan_parallel(Relation heaprel, Relation indexrel, int nkeys, int norderbys,
+    ParallelIndexScanDesc pscan)
+{
+    Assert(RelationGetRelid(heaprel) == pscan->ps_relid);
+    Snapshot snapshot = RestoreSnapshot(pscan->ps_snapshot_data,
+        pscan->pscan_len - offsetof(ParallelIndexScanDescData, ps_snapshot_data));
+    RegisterSnapshot(snapshot);
+
+    IndexScanDesc scan = index_beginscan_internal(indexrel, nkeys, norderbys, snapshot, pscan, true);
+
+    /*
+     * Save additional parameters into the scandesc.  Everything else was set
+     * up by index_beginscan_internal.
+     */
+    scan->heapRelation = heaprel;
+    scan->xs_snapshot = snapshot;
+
+    return scan;
 }
 
 /* ----------------

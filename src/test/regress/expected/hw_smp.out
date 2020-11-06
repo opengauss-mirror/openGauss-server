@@ -3,6 +3,7 @@
 -- Create @ 2017-7-11
 --
 --dynamic smp+random plan, plan should be same
+set max_parallel_workers_per_gather=0;
 set plan_mode_seed = 1485495508;
 explain (costs off) select count(node_name) as dncnt
 	from pgxc_node where node_type='D'
@@ -469,3 +470,4 @@ drop cascades to table store_sales_extend_max_1t
 drop cascades to table item_inventory
 drop cascades to table item_inventory_plan
 drop cascades to table item_store_sold
+reset max_parallel_workers_per_gather;
