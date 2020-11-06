@@ -1081,11 +1081,13 @@ void Table::Serialize(char* dataOut)
 
 void Table::Deserialize(const char* in)
 {
+    // m_numIndexes will be incremented during each index addition
+    uint16_t savedNumIndexes = 0;
     SetDeserialized(false);
     char* dataIn = (char*)in;
     dataIn = SerializableSTR::Deserialize(dataIn, m_tableName);
     dataIn = SerializableSTR::Deserialize(dataIn, m_longTableName);
-    dataIn = SerializablePOD<uint16_t>::Deserialize(dataIn, m_numIndexes);
+    dataIn = SerializablePOD<uint16_t>::Deserialize(dataIn, savedNumIndexes);
     dataIn = SerializablePOD<uint32_t>::Deserialize(dataIn, m_tableId);
     dataIn = SerializablePOD<uint64_t>::Deserialize(dataIn, m_tableExId);
     dataIn = SerializablePOD<bool>::Deserialize(dataIn, m_fixedLengthRows);
@@ -1096,7 +1098,7 @@ void Table::Deserialize(const char* in)
     MOT_LOG_DEBUG("Table::%s: %s  num indexes: %d current Id: %u counter: %u",
         __func__,
         m_longTableName.c_str(),
-        m_numIndexes,
+        savedNumIndexes,
         m_tableId,
         tableCounter.load());
     if (m_tableId >= tableCounter.load()) {
@@ -1104,9 +1106,7 @@ void Table::Deserialize(const char* in)
         MOT_LOG_DEBUG("Setting tableCounter to %u", tableCounter.load());
     }
 
-    uint16_t savedNumIndexes = m_numIndexes;
     uint32_t saveFieldCount = m_fieldCnt;
-    m_numIndexes = 1; /* primary always exists */
     // OA: use interleaved allocation for table columns
     if (!Init(m_tableName.c_str(), m_longTableName.c_str(), m_fieldCnt, m_tableExId)) {
         MOT_LOG_ERROR("Table::Deserialize - failed to init table");
@@ -1142,6 +1142,7 @@ void Table::Deserialize(const char* in)
             return;
         }
     }
+    MOT_ASSERT(m_numIndexes == savedNumIndexes);
     SetDeserialized(true);
 }
 
