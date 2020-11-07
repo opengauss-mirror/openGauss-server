@@ -175,6 +175,9 @@ class ExpansionImpl():
         logPath = self.context.clusterInfoDict["logPath"]
         corePath = self.context.clusterInfoDict["corePath"]
         toolPath = self.context.clusterInfoDict["toolPath"]
+        tmpMppdbPath = DefaultValue.getEnv("PGHOST")
+        if not tmpMppdbPath:
+            tmpMppdbPath = toolPath
 
         xmlConfig = """\
 <?xml version="1.0" encoding="UTF-8"?>
@@ -186,6 +189,7 @@ class ExpansionImpl():
         <PARAM name="gaussdbAppPath" value="{appPath}" />
         <PARAM name="gaussdbLogPath" value="{logPath}" />
         <PARAM name="gaussdbToolPath" value="{toolPath}" />
+        <PARAM name="tmpMppdbPath" value="{mppdbPath}" />
         <PARAM name="corePath" value="{corePath}"/>
         <PARAM name="clusterType" value="single-inst"/>
     </CLUSTER>
@@ -205,7 +209,8 @@ class ExpansionImpl():
 </ROOT>
         """.format(nodeName=nodeName,backIp=backIp,appPath=appPath,
         logPath=logPath,toolPath=toolPath,corePath=corePath,
-        sshIp=sshIp,port=port,dataNode=dataNode,azName=self.context.azName)
+        sshIp=sshIp,port=port,dataNode=dataNode,azName=self.context.azName,
+        mppdbPath=tmpMppdbPath)
         return xmlConfig
 
     def changeUser(self):

@@ -2705,6 +2705,8 @@ Common options:
         root_scripts = ["gs_postuninstall", "gs_preinstall",
                         "gs_checkos"]
         common_scripts = ["gs_sshexkey", "killall"]
+        # the script files are not stored in the env path
+        not_in_env_scripts = ["gs_expansion"]
         root_save_files = root_scripts + common_scripts
         self.logger.debug("Delete user scripts in om root path.")
         # delete user scripts in om root path
@@ -2723,7 +2725,7 @@ Common options:
         user_om_files = os.listdir(om_user_path)
         for user_file in user_om_files:
             if user_file.startswith("gs_"):
-                if user_file in root_scripts:
+                if user_file in root_scripts or user_file in not_in_env_scripts:
                     g_file.removeFile("%s/%s" % (om_user_path, user_file))
         self.logger.debug("Delete cluster decompress package in root path.")
 
