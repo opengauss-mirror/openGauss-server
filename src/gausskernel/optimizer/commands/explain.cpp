@@ -2778,6 +2778,58 @@ static void ExplainNode(
             break;
     }
 
+    /* Show worker detail */
+    if (es->analyze && es->verbose && planstate->worker_instrument) {
+        WorkerInstrumentation* w = planstate->worker_instrument;
+        bool openedGroup = false;
+        int n;
+
+        for (n = 0; n < w->num_workers; ++n) {
+            Instrumentation* instrument = &w->instrument[n];
+            double nloops = instrument->nloops;
+            double startup_sec;
+            double total_sec;
+            double rows;
+
+            if (nloops <= 0) {
+                continue;
+            }
+            startup_sec = 1000.0 * instrument->startup / nloops;
+            total_sec = 1000.0 * instrument->total / nloops;
+            rows = instrument->ntuples / nloops;
+
+            if (es->format == EXPLAIN_FORMAT_TEXT) {
+                appendStringInfoSpaces(es->str, es->indent * 2);
+                appendStringInfo(es->str, "Worker %d: ", n);
+                if (es->timing) {
+                    appendStringInfo(
+                        es->str, "actual time=%.3f..%.3f rows=%.0f loops=%.0f\n", startup_sec, total_sec, rows, nloops);
+                } else {
+                    appendStringInfo(es->str, "actual rows=%.0f loops=%.0f\n", rows, nloops);
+                }
+            } else {
+                if (!openedGroup) {
+                    ExplainOpenGroup("Workers", "Workers", false, es);
+                    openedGroup = true;
+                }
+                ExplainOpenGroup("Worker", NULL, true, es);
+                ExplainPropertyInteger("Worker Number", n, es);
+
+                if (es->timing) {
+                    ExplainPropertyFloat("Actual Startup Time", startup_sec, 3, es);
+                    ExplainPropertyFloat("Actual Total Time", total_sec, 3, es);
+                }
+                ExplainPropertyFloat("Actual Rows", rows, 0, es);
+                ExplainPropertyFloat("Actual Loops", nloops, 0, es);
+                ExplainCloseGroup("Worker", NULL, true, es);
+            }
+        }
+
+        if (openedGroup) {
+            ExplainCloseGroup("Workers", "Workers", false, es);
+        }
+    }
+
 runnext:
 
     /* Get ready to display the child plans */
@@ -6475,9 +6527,9 @@ static void show_time(ExplainState* es, const Instrumentation* instrument, int i
 {
     if (instrument != NULL && instrument->nloops > 0) {
         double nloops = instrument->nloops;
-        const double startup_sec = 1000.0 * instrument->startup;
-        const double total_sec = 1000.0 * instrument->total;
-        double rows = instrument->ntuples;
+        const double startup_sec = 1000.0 * instrument->startup / nloops;
+        const double total_sec = 1000.0 * instrument->total / nloops;
+        double rows = instrument->ntuples / nloops;
         if (es->format == EXPLAIN_FORMAT_TEXT) {
             if (is_detail == false)
                 appendStringInfoSpaces(es->str, 1);

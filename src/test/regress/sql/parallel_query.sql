@@ -31,6 +31,7 @@ select count(*) from parallel_t1 where a = 5000;
 select count(*) from parallel_t1 where a > 5000;
 select count(*) from parallel_t1 where a < 5000;
 select count(*) from parallel_t1 where a <> 5000;
+explain (costs off,analyse on,verbose on) select count(*) from parallel_t1;
 
 --clean up
 drop table parallel_t1;
