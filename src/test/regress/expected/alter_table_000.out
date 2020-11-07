@@ -1,6 +1,93 @@
 --
 --- ALTER TABLE related tickets or bugs fixed
 --
+-- ATLER TABLE SYNTAX
+\h alter table
+Command:     ALTER TABLE
+Description: change the definition of a table
+Syntax:
+ALTER TABLE [ IF EXISTS ] { table_name  [*] | ONLY table_name | ONLY ( table_name  )}
+    action [, ... ];
+ALTER TABLE [ IF EXISTS ] table_name
+    ADD ( { column_name data_type [ compress_mode ] [ COLLATE collation ] [ column_constraint [ ... ] ]} [, ...] );
+ALTER TABLE [ IF EXISTS ] table_name
+    MODIFY ( { column_name data_type | column_name [ CONSTRAINT constraint_name ] NOT NULL [ ENABLE ] | column_name [ CONSTRAINT constraint_name ] NULL } [, ...] );
+ALTER TABLE [ IF EXISTS ] table_name
+    RENAME TO new_table_name;
+ALTER TABLE [ IF EXISTS ] { table_name  [*] | ONLY table_name | ONLY ( table_name  )}
+    RENAME [ COLUMN ] column_name TO new_column_name;
+ALTER TABLE [ IF EXISTS ] { table_name  [*] | ONLY table_name | ONLY ( table_name  )}
+    RENAME CONSTRAINT constraint_name TO new_constraint_name;
+ALTER TABLE [ IF EXISTS ] table_name
+    SET SCHEMA new_schema;
+
+where action can be:
+column_clause 
+    | ADD table_constraint [ NOT VALID ]
+    | ADD table_constraint_using_index
+    | VALIDATE CONSTRAINT constraint_name
+    | DROP CONSTRAINT [ IF EXISTS ]  constraint_name [ RESTRICT | CASCADE ]
+    | CLUSTER ON index_name
+    | SET WITHOUT CLUSTER
+    | SET ( {storage_parameter = value} [, ... ] )
+    | RESET ( storage_parameter [, ... ] )
+    | OWNER TO new_owner
+    | SET TABLESPACE new_tablespace
+    | SET {COMPRESS|NOCOMPRESS}
+    | TO { GROUP groupname | NODE ( nodename [, ... ] ) }
+    | ADD NODE ( nodename [, ... ] )
+    | DELETE NODE ( nodename [, ... ] )
+    | DISABLE TRIGGER [ trigger_name | ALL | USER ]
+    | ENABLE TRIGGER [ trigger_name | ALL | USER ]
+    | ENABLE REPLICA TRIGGER trigger_name
+    | ENABLE ALWAYS TRIGGER trigger_name
+    | ENABLE ROW LEVEL SECURITY
+    | DISABLE ROW LEVEL SECURITY
+    | FORCE ROW LEVEL SECURITY
+    | NO FORCE ROW LEVEL SECURITY
+where column_clause can be:
+ADD [ COLUMN ] column_name data_type [ compress_mode ] [ COLLATE collation ] [ column_constraint [ ... ] ]
+    | MODIFY column_name data_type
+    | MODIFY column_name [ CONSTRAINT constraint_name ] NOT NULL [ ENABLE ]
+    | MODIFY column_name [ CONSTRAINT constraint_name ] NULL
+    | DROP [ COLUMN ] [ IF EXISTS ] column_name [ RESTRICT | CASCADE ]
+    | ALTER [ COLUMN ] column_name [ SET DATA ] TYPE data_type [ COLLATE collation ] [ USING expression ]
+    | ALTER [ COLUMN ] column_name { SET DEFAULT expression | DROP DEFAULT }
+    | ALTER [ COLUMN ] column_name { SET | DROP } NOT NULL
+    | ALTER [ COLUMN ] column_name SET STATISTICS [PERCENT] integer
+    | ADD STATISTICS (( column_1_name, column_2_name [, ...] ))
+    | DELETE STATISTICS (( column_1_name, column_2_name [, ...] ))
+    | ALTER [ COLUMN ] column_name SET ( {attribute_option = value} [, ... ] )
+    | ALTER [ COLUMN ] column_name RESET ( attribute_option [, ... ] )
+    | ALTER [ COLUMN ] column_name SET STORAGE { PLAIN | EXTERNAL | EXTENDED | MAIN }
+where column_constraint can be:
+[ CONSTRAINT constraint_name ]
+    { NOT NULL |
+      NULL |
+      CHECK ( expression ) |
+      DEFAULT default_expr |
+      UNIQUE index_parameters |
+      PRIMARY KEY index_parameters }
+    [ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+where compress_mode can be:
+{ DELTA | PREFIX | DICTIONARY | NUMSTR | NOCOMPRESS }
+where table_constraint can be:
+[ CONSTRAINT constraint_name ]
+    { CHECK ( expression ) |
+      UNIQUE ( column_name [, ... ] ) index_parameters |
+      PRIMARY KEY ( column_name [, ... ] ) index_parameters |
+      PARTIAL CLUSTER KEY ( column_name [, ... ] ) |
+      FOREIGN KEY ( column_name [, ... ] ) REFERENCES reftable [ ( refcolumn [, ... ] ) ]
+        [ MATCH FULL | MATCH PARTIAL | MATCH SIMPLE ] [ ON DELETE action ] [ ON UPDATE action ] }
+    [ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+where index_parameters can be:
+[ WITH ( {storage_parameter = value} [, ... ] ) ]
+    [ USING INDEX TABLESPACE tablespace_name ]
+where table_constraint_using_index can be:
+[ CONSTRAINT constraint_name ]
+    { UNIQUE | PRIMARY KEY } USING INDEX index_name
+    [ DEFERRABLE | NOT DEFERRABLE | INITIALLY DEFERRED | INITIALLY IMMEDIATE ]
+
 --custom script
 --create table
 CREATE TABLE TBL_DOMAIN
