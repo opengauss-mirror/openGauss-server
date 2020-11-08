@@ -58,6 +58,52 @@ extern void SetDataRcvDummyStandbySyncPercent(int percent);
 #define AmWalReceiverForDummyStandby() \
     (t_thrd.walreceiver_cxt.AmWalReceiverForFailover && !t_thrd.walreceiver_cxt.AmWalReceiverForStandby)
 
+#ifndef ENABLE_MULTIPLE_NODES
+/*
+ * Identify remote az should be same with local for a cascade standby.
+ */
+static void IdentifyRemoteAvailableZone(void)
+{
+    if (!t_thrd.xlog_cxt.is_cascade_standby) {
+        return;
+    }
+
+    volatile WalRcvData* walrcv = t_thrd.walreceiverfuncs_cxt.WalRcv;
+    int nRet = 0;
+    PGresult* res = NULL;
+
+    /* Send query and get available zone of the remote server. */
+    res = libpqrcv_PQexec("IDENTIFY_AZ");
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        PQclear(res);
+        ereport(ERROR,
+            (errcode(ERRCODE_INVALID_STATUS),
+                errmsg("could not receive the ongoing az infomation from "
+                       "the remote server: %s",
+                    PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
+    }
+
+    /* check remote az */
+    char remoteAZname[NAMEDATALEN];
+    nRet = snprintf_s(remoteAZname, NAMEDATALEN, NAMEDATALEN -1, "%s", PQgetvalue(res, 0, 0));
+    securec_check_ss(nRet, "", "");
+
+    if (strcmp(remoteAZname, g_instance.attr.attr_storage.available_zone) != 0) {
+        PQclear(res);
+
+        SpinLockAcquire(&walrcv->mutex);
+        walrcv->conn_errno = REPL_INFO_ERROR;
+        SpinLockRelease(&walrcv->mutex);
+
+        ereport(ERROR,
+                (errcode(ERRCODE_INTERNAL_ERROR),
+                 errmsg("the remote available zone should be same with local, remote is %s, local is %s",
+                        remoteAZname, g_instance.attr.attr_storage.available_zone)));
+    }
+    PQclear(res);
+}
+#endif
+
 /*
  * Establish the connection to the primary server for XLOG streaming
  */
@@ -351,7 +397,7 @@ retry:
                         PQerrorMessage(t_thrd.libwalreceiver_cxt.streamConn))));
             return false;
         }
-        if (PQnfields(res) != 2 || PQntuples(res) != 1) {
+        if (PQnfields(res) != 1 || PQntuples(res) != 1) {
             int num_tuples = PQntuples(res);
             int num_fields = PQnfields(res);
 
@@ -360,7 +406,7 @@ retry:
                 (errcode(ERRCODE_INVALID_STATUS),
                     errmsg("invalid response from remote server"),
                     errdetail(
-                        "Expected 1 tuple with 2 fields, got %d tuples with %d fields.", num_tuples, num_fields)));
+                        "Expected 1 tuple with 1 fields, got %d tuples with %d fields.", num_tuples, num_fields)));
             return false;
         }
         remoteMode = (ServerMode)pg_strtoint32(PQgetvalue(res, 0, 0));
@@ -394,27 +440,14 @@ retry:
             return false;
         }
 
-        /* check remote az */
-        char remoteAZname[NAMEDATALEN];
-        nRet = snprintf_s(remoteAZname, NAMEDATALEN, NAMEDATALEN -1, "%s", PQgetvalue(res, 0, 1));
-        securec_check_ss(nRet, "", "");
-        if (t_thrd.xlog_cxt.is_cascade_standby &&
-            (strcmp(remoteAZname, g_instance.attr.attr_storage.available_zone) != 0)) {
-            PQclear(res);
-
-            SpinLockAcquire(&walrcv->mutex);
-            walrcv->conn_errno = REPL_INFO_ERROR;
-            SpinLockRelease(&walrcv->mutex);
-
-            ereport(ERROR,
-                    (errcode(ERRCODE_INTERNAL_ERROR),
-                     errmsg("the remote available zone should be same with local, remote is %s, local is %s",
-                            remoteAZname, g_instance.attr.attr_storage.available_zone)));
-            return false;
-        }
-
         PQclear(res);
     }
+
+#ifndef ENABLE_MULTIPLE_NODES
+    if (t_thrd.xlog_cxt.is_cascade_standby) {
+        IdentifyRemoteAvailableZone();
+    }
+#endif
 
     /*
      * Get the system identifier and timeline ID as a DataRow message from the

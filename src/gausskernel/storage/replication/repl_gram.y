@@ -81,6 +81,7 @@
 %token K_IDENTIFY_MAXLSN
 %token K_IDENTIFY_CONSISTENCE
 %token K_IDENTIFY_CHANNEL
+%token K_IDENTIFY_AZ
 %token K_LABEL
 %token K_PROGRESS
 %token K_FAST
@@ -97,7 +98,7 @@
 %token K_SLOT
 
 %type <node>	command
-%type <node>	base_backup start_replication start_data_replication fetch_mot_checkpoint start_logical_replication identify_system identify_version identify_mode identify_consistence create_replication_slot drop_replication_slot identify_maxlsn identify_channel
+%type <node>	base_backup start_replication start_data_replication fetch_mot_checkpoint start_logical_replication identify_system identify_version identify_mode identify_consistence create_replication_slot drop_replication_slot identify_maxlsn identify_channel identify_az
 %type <list>	base_backup_opt_list
 %type <defelt>	base_backup_opt
 %type <list>    plugin_options plugin_opt_list
@@ -130,6 +131,7 @@ command:
 			| drop_replication_slot
 			| identify_maxlsn
 			| identify_channel
+			| identify_az
 			;
 
 /*
@@ -199,6 +201,16 @@ identify_channel:
 					cmd->channel_identifier = $2;
 
 					$$ = (Node *) cmd;
+				}
+			;
+
+/*
+ * IDENTIFY_AZ
+ */
+identify_az:
+			K_IDENTIFY_AZ
+				{
+					$$ = (Node *) makeNode(IdentifyAZCmd);
 				}
 			;
 

@@ -781,7 +781,7 @@ static ServerMode get_remote_mode(PGconn* conn_get)
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
         goto exit;
     }
-    if (PQnfields(res) != 2 || PQntuples(res) != 1) {
+    if (PQnfields(res) != 1 || PQntuples(res) != 1) {
         goto exit;
     }
     primary_mode = (ServerMode)pg_atoi((const char*)PQgetvalue(res, 0, 0), 4, 0);
