@@ -2520,12 +2520,22 @@ void MOTAdaptor::DatumToMOTKey(
         case VARCHAROID:
         case CLOBOID:
         case BPCHAROID: {
-            if (expr && expr->expr && IsA(expr->expr, Const)) {  // OA: LLVM passes nullptr for expr parameter
-                Const* c = (Const*)expr->expr;
-
-                if (c->constbyval) {
-                    errno_t erc = memset_s(data, len, 0x00, len);
-                    securec_check(erc, "\0", "\0");
+            if (expr != nullptr) {  // OA: LLVM passes nullptr for expr parameter
+                bool noValue = false;
+                switch (expr->resultType) {
+                    case BYTEAOID:
+                    case TEXTOID:
+                    case VARCHAROID:
+                    case CLOBOID:
+                    case BPCHAROID:
+                        break;
+                    default:
+                        noValue = true;
+                        errno_t erc = memset_s(data, len, 0x00, len);
+                        securec_check(erc, "\0", "\0");
+                        break;
+                }
+                if (noValue) {
                     break;
                 }
             }
@@ -2560,10 +2570,8 @@ void MOTAdaptor::DatumToMOTKey(
             break;
         }
         case FLOAT4OID: {
-            if (expr && expr->expr && IsA(expr->expr, Const)) {  // OA: LLVM passes nullptr for expr parameter
-                Const* c = (Const*)expr->expr;
-
-                if (c->consttype == FLOAT8OID) {
+            if (expr != nullptr) {  // OA: LLVM passes nullptr for expr parameter
+                if (expr->resultType == FLOAT8OID) {
                     MOT::DoubleConvT dc;
                     MOT::FloatConvT fc;
                     dc.m_r = (uint64_t)datum;
@@ -2573,6 +2581,8 @@ void MOTAdaptor::DatumToMOTKey(
                 } else {
                     col->PackKey(data, datum, col->m_size);
                 }
+            } else {
+                col->PackKey(data, datum, col->m_size);
             }
             break;
         }
@@ -2586,36 +2596,48 @@ void MOTAdaptor::DatumToMOTKey(
             break;
         }
         case TIMESTAMPOID: {
-            if (expr->resultType == TIMESTAMPTZOID) {
-                Timestamp result = DatumGetTimestamp(DirectFunctionCall1(timestamptz_timestamp, datum));
-                col->PackKey(data, result, col->m_size);
-            } else if (expr->resultType == DATEOID) {
-                Timestamp result = DatumGetTimestamp(DirectFunctionCall1(date_timestamp, datum));
-                col->PackKey(data, result, col->m_size);
+            if (expr != nullptr) {
+                if (expr->resultType == TIMESTAMPTZOID) {
+                    Timestamp result = DatumGetTimestamp(DirectFunctionCall1(timestamptz_timestamp, datum));
+                    col->PackKey(data, result, col->m_size);
+                } else if (expr->resultType == DATEOID) {
+                    Timestamp result = DatumGetTimestamp(DirectFunctionCall1(date_timestamp, datum));
+                    col->PackKey(data, result, col->m_size);
+                } else {
+                    col->PackKey(data, datum, col->m_size);
+                }
             } else {
                 col->PackKey(data, datum, col->m_size);
             }
             break;
         }
         case TIMESTAMPTZOID: {
-            if (expr->resultType == TIMESTAMPOID) {
-                TimestampTz result = DatumGetTimestampTz(DirectFunctionCall1(timestamp_timestamptz, datum));
-                col->PackKey(data, result, col->m_size);
-            } else if (expr->resultType == DATEOID) {
-                TimestampTz result = DatumGetTimestampTz(DirectFunctionCall1(date_timestamptz, datum));
-                col->PackKey(data, result, col->m_size);
+            if (expr != nullptr) {
+                if (expr->resultType == TIMESTAMPOID) {
+                    TimestampTz result = DatumGetTimestampTz(DirectFunctionCall1(timestamp_timestamptz, datum));
+                    col->PackKey(data, result, col->m_size);
+                } else if (expr->resultType == DATEOID) {
+                    TimestampTz result = DatumGetTimestampTz(DirectFunctionCall1(date_timestamptz, datum));
+                    col->PackKey(data, result, col->m_size);
+                } else {
+                    col->PackKey(data, datum, col->m_size);
+                }
             } else {
                 col->PackKey(data, datum, col->m_size);
             }
             break;
         }
         case DATEOID: {
-            if (expr->resultType == TIMESTAMPOID) {
-                DateADT result = DatumGetDateADT(DirectFunctionCall1(timestamp_date, datum));
-                col->PackKey(data, result, col->m_size);
-            } else if (expr->resultType == TIMESTAMPTZOID) {
-                DateADT result = DatumGetDateADT(DirectFunctionCall1(timestamptz_date, datum));
-                col->PackKey(data, result, col->m_size);
+            if (expr != nullptr) {
+                if (expr->resultType == TIMESTAMPOID) {
+                    DateADT result = DatumGetDateADT(DirectFunctionCall1(timestamp_date, datum));
+                    col->PackKey(data, result, col->m_size);
+                } else if (expr->resultType == TIMESTAMPTZOID) {
+                    DateADT result = DatumGetDateADT(DirectFunctionCall1(timestamptz_date, datum));
+                    col->PackKey(data, result, col->m_size);
+                } else {
+                    col->PackKey(data, datum, col->m_size);
+                }
             } else {
                 col->PackKey(data, datum, col->m_size);
             }
