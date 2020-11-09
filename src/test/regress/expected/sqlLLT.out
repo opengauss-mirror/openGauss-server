@@ -3209,7 +3209,6 @@ create type alter_llt1.ctype as (f1 int, f2 text);
 create function alter_llt1.same(alter_llt1.ctype, alter_llt1.ctype) returns boolean language sql
 as 'select $1.f1 is not distinct from $2.f1 and $1.f2 is not distinct from $2.f2';
 create operator alter_llt2.> (procedure = alter_llt1.same, leftarg  = alter_llt1.ctype, rightarg = alter_llt1.ctype);
-ERROR:  user defined operator is not yet supported.
 --do_to_timestamp
 select to_timestamp('20130101a','YYYYMMdd');
 ERROR:  invalid data for match  in date string
@@ -3332,7 +3331,8 @@ ERROR:  UNLISTEN statement is not yet supported.
 NOTIFY virtual;
 ERROR:  NOFITY statement is not yet supported.
 CREATE LANGUAGE plperl;
-ERROR:  new language is not yet supported.
+ERROR:  Error: environment variable "$libdir/plperl" contain invaild symbol "$".
+
 CREATE OPERATOR FAMILY name USING
 ALTER OPERATOR FAMILY integer_ops USING btree ADD
 OPERATOR 1 < (int4, int2) ,

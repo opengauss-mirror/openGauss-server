@@ -441,7 +441,7 @@ inline void PageSetLSN(Page page, XLogRecPtr LSN, bool check = true)
 #define GlobalTempRelationPageIsNotInitialized(rel, page) \
     ((rel)->rd_rel->relpersistence == RELPERSISTENCE_GLOBAL_TEMP && PageIsNew(page))
 
-constexpr int PAGE_INDEX_CAN_TUPLE_DELETE = 2;
+const int PAGE_INDEX_CAN_TUPLE_DELETE = 2;
 
 /* ----------------------------------------------------------------
  *		extern declarations

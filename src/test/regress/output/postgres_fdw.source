@@ -453,7 +453,6 @@ CREATE OPERATOR === (
     COMMUTATOR = ===,
     NEGATOR = !==
 );
-ERROR:  user defined operator is not yet supported.
 EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE t1.c1 = postgres_fdw_abs(t1.c2);
                                QUERY PLAN                                
 -------------------------------------------------------------------------
@@ -464,10 +463,14 @@ EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE t1.c1 = postgres_fdw_a
 (4 rows)
 
 EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE t1.c1 === t1.c2;
-ERROR:  operator does not exist: integer === integer
-LINE 1: ...SE, COSTS false) SELECT * FROM ft1 t1 WHERE t1.c1 === t1.c2;
-                                                             ^
-HINT:  No operator matches the given name and argument type(s). You might need to add explicit type casts.
+                               QUERY PLAN                                
+-------------------------------------------------------------------------
+ Foreign Scan on public.ft1 t1
+   Output: c1, c2, c3, c4, c5, c6, c7, c8
+   Filter: (t1.c1 === t1.c2)
+   Remote SQL: SELECT "C 1", c2, c3, c4, c5, c6, c7, c8 FROM "S 1"."T 1"
+(4 rows)
+
 EXPLAIN (VERBOSE, COSTS false) SELECT * FROM ft1 t1 WHERE t1.c1 = abs(t1.c2);
                                             QUERY PLAN                                             
 ---------------------------------------------------------------------------------------------------

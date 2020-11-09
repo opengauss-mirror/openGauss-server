@@ -147,6 +147,13 @@ Query* parse_analyze(
 
     free_parsestate(pstate);
 
+    /* For plpy CTAS query. CTAS is a recursive call. CREATE query is the first rewrited.
+     * thd 2nd rewrited query is INSERT SELECT. Without this attribute, DB will have
+     * an error that has no idea about $x when INSERT SELECT query is analyzed.
+     */
+    query->fixed_paramTypes = paramTypes;
+    query->fixed_numParams = numParams;
+
     return query;
 }
 

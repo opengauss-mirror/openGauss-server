@@ -38,8 +38,9 @@ typedef uint16 StrategyNumber;
 
 #define BTMaxStrategyNumber 5
 
+#ifndef MADLIB
 static_assert(BTMaxStrategyNumber == 5, "Strategy Number is not matched");
-
+#endif
 
 /*
  * A ScanKey represents the application of a comparison operator between

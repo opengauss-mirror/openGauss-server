@@ -126,10 +126,12 @@ extern Datum bool_int8(PG_FUNCTION_ARGS);
 extern Datum generate_series_int8(PG_FUNCTION_ARGS);
 extern Datum generate_series_step_int8(PG_FUNCTION_ARGS);
 
+#ifndef MADLIB
 #include "../../gausskernel/runtime/vecexecutor/vecprimitive/int8.inl"
 #include "../../gausskernel/runtime/vecexecutor/vecprimitive/int4.inl"
 #include "../../gausskernel/runtime/vecexecutor/vecprimitive/float.inl"
 #include "../../gausskernel/runtime/vecexecutor/vecprimitive/numeric.inl"
 #include "../../gausskernel/runtime/vecexecutor/vecprimitive/varchar.inl"
+#endif
 
 #endif /* INT8_H */

@@ -2874,10 +2874,19 @@ List* QueryRewriteCTAS(Query* parsetree)
         appendStringInfo(&cquery, " %s", selectstr);
 
     raw_parsetree_list = pg_parse_query(cquery.data);
-    if (stmt->parserSetup != NULL)
+    if (stmt->parserSetup != NULL) {
         return pg_analyze_and_rewrite_params(
             (Node*)linitial(raw_parsetree_list), cquery.data, (ParserSetupHook)stmt->parserSetup, stmt->parserSetupArg);
-    else
-        return pg_analyze_and_rewrite((Node*)linitial(raw_parsetree_list), cquery.data, NULL, 0);
+    } else {
+        if (strchr(cquery.data, '$') == NULL) {
+            return pg_analyze_and_rewrite((Node*)linitial(raw_parsetree_list), cquery.data, NULL, 0);
+        } else {
+            /* For plpy CTAS with $1, $2... */
+            return pg_analyze_and_rewrite((Node*)linitial(raw_parsetree_list),
+                cquery.data,
+                parsetree->fixed_paramTypes,
+                parsetree->fixed_numParams);
+        }
+    }
 }
 #endif

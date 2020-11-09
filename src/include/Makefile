@@ -49,6 +49,10 @@ install: all installdirs
 	$(INSTALL_DATA) pg_config_os.h '$(DESTDIR)$(includedir_server)'
 	$(INSTALL_DATA) utils/errcodes.h '$(DESTDIR)$(includedir_server)/utils'
 	$(INSTALL_DATA) utils/fmgroids.h '$(DESTDIR)$(includedir_server)/utils'
+# These headers are needed by madlib
+	$(INSTALL_DATA) $(with_3rd)/$(BINARYPATH)/cjson/comm/include/cjson/cJSON.h '$(DESTDIR)$(includedir_server)'/cjson/cJSON.h
+	$(INSTALL_DATA) $(with_3rd)/$(BINARYPATH)/libobs/comm/include/eSDKOBS.h '$(DESTDIR)$(includedir_server)'/access/obs/eSDKOBS.h
+	$(INSTALL_DATA) $(srcdir)/access/hash.inl '$(DESTDIR)$(includedir_server)'/access/hash.inl
 # These headers are needed by fdw
 	$(INSTALL_DATA) gssignal/gs_signal.h '$(DESTDIR)$(includedir_server)/gssignal/gs_signal.h'
 	$(INSTALL_DATA) libcomm/libcomm.h '$(DESTDIR)$(includedir_server)/libcomm/libcomm.h'
