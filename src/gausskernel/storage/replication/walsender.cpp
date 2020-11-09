@@ -677,7 +677,7 @@ void IdentifyMode(void)
 
     /* Send a RowDescription message */
     pq_beginmessage(&buf, 'T');
-    pq_sendint16(&buf, 2); /* 2 fields */
+    pq_sendint16(&buf, 1); /* 1 fields */
 
     /* first field */
     pq_sendstring(&buf, "smode"); /* col name */
@@ -687,8 +687,34 @@ void IdentifyMode(void)
     pq_sendint16(&buf, 4);        /* typlen */
     pq_sendint32(&buf, 0);        /* typmod */
     pq_sendint16(&buf, 0);        /* format code */
+    pq_endmessage_noblock(&buf);
 
-    /* second field */
+    /* Send a DataRow message */
+    pq_beginmessage(&buf, 'D');
+    pq_sendint16(&buf, 1);             /* # of columns */
+    pq_sendint32(&buf, strlen(smode)); /* col1 len */
+    pq_sendbytes(&buf, (char*)smode, strlen(smode));
+    pq_endmessage_noblock(&buf);
+
+    /* Send CommandComplete and ReadyForQuery messages */
+    EndCommand_noblock("SELECT", DestRemote);
+    ReadyForQuery_noblock(DestRemote, u_sess->attr.attr_storage.wal_sender_timeout);
+    /* ReadyForQuery did pq_flush_if_available for us */
+}
+
+#ifndef ENABLE_MULTIPLE_NODES
+/*
+ * IDENTIFY_AZ
+ */
+void IdentifyAvailableZone(void)
+{
+    StringInfoData buf;
+
+    /* Send a RowDescription message */
+    pq_beginmessage(&buf, 'T');
+    pq_sendint16(&buf, 1); /* 1 fields */
+
+    /* first field */
     pq_sendstring(&buf, "azname"); /* col name */
     pq_sendint32(&buf, 0);          /* table oid */
     pq_sendint16(&buf, 0);          /* attnum */
@@ -700,12 +726,9 @@ void IdentifyMode(void)
 
     /* Send a DataRow message */
     pq_beginmessage(&buf, 'D');
-    pq_sendint16(&buf, 2);             /* # of columns */
-    pq_sendint32(&buf, strlen(smode)); /* col1 len */
-    pq_sendbytes(&buf, (char*)smode, strlen(smode));
-
+    pq_sendint16(&buf, 1);             /* # of columns */
     char* azname = g_instance.attr.attr_storage.available_zone;
-    pq_sendint32(&buf, strlen(azname)); /* col2 len */
+    pq_sendint32(&buf, strlen(azname)); /* col1 len */
     pq_sendbytes(&buf, (char*)azname, strlen(azname));
     pq_endmessage_noblock(&buf);
 
@@ -714,6 +737,7 @@ void IdentifyMode(void)
     ReadyForQuery_noblock(DestRemote, u_sess->attr.attr_storage.wal_sender_timeout);
     /* ReadyForQuery did pq_flush_if_available for us */
 }
+#endif
 
 /*
  * IDENTIFY_MAXLSN
@@ -1763,6 +1787,11 @@ static bool HandleWalReplicationCommand(const char* cmd_string)
             IdentifyChannel((IdentifyChannelCmd*)cmd_node);
             break;
 
+#ifndef ENABLE_MULTIPLE_NODES
+        case T_IdentifyAZCmd:
+            IdentifyAvailableZone();
+            break;
+#endif
         case T_BaseBackupCmd:
             MarkPostmasterChildNormal();
             SetWalSndPeerMode(STANDBY_MODE);

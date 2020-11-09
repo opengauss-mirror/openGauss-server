@@ -513,6 +513,9 @@ typedef enum NodeTag {
     T_IdentifyMaxLsnCmd,
     T_IdentifyConsistenceCmd,
     T_IdentifyChannelCmd,
+#ifndef ENABLE_MULTIPLE_NODES
+    T_IdentifyAZCmd,
+#endif
     T_BaseBackupCmd,
     T_CreateReplicationSlotCmd,
     T_DropReplicationSlotCmd,
