@@ -1,2 +1,4 @@
 \! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "password_min_length=88" -c "password_max_length=32"
 \! @abs_bindir@/gs_guc reload -D @abs_srcdir@/tmp_check/datanode1/ -c "password_min_length=8" -c "password_max_length=32"
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "default_text_search_config = 'abc'"
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "default_text_search_config = 'pg_catalog.english'"

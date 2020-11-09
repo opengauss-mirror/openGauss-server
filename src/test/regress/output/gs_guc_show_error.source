@@ -17,3 +17,14 @@ server signaled
 Total instances: 1. Failed instances: 0.
 Success to perform gs_guc!
 
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "default_text_search_config = 'abc'"
+ERROR: The value "abc" is outside the valid range(pg_catalog.english,pg_catalog.simple,english,simple) for parameter "default_text_search_config".
+ERROR: The value "'abc'" for parameter "default_text_search_config" is incorrect.
+Try "gs_guc --help" for more information.
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "default_text_search_config = 'pg_catalog.english'"
+expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+gs_guc set: default_text_search_config='pg_catalog.english': [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
