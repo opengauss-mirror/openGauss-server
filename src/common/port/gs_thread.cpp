@@ -125,7 +125,7 @@ static void check_backend_name(const char* argv, char** name_thread)
     }
 
     if (strncmp(argv, "--forkbackend", strlen("--forkbackend")) == 0) {
-        *name_thread = "postgres";
+        *name_thread = "gaussdb";
     }
 
     return;
@@ -190,7 +190,7 @@ static void check_jobworker_name(const char* argv, char** name_thread)
     }
 
     if (strncmp(argv, "--forkjobworker", strlen("--forkjobworker")) == 0) {
-        *name_thread = "JobExecuteWorker";
+        *name_thread = "JobExecutor";
     }
 
     return;
@@ -216,7 +216,7 @@ static void check_arch_name(const char* argv, char** name_thread)
     }
 
     if (strncmp(argv, "--forkarch", strlen("--forkarch")) == 0) {
-        *name_thread = "PgArchiver";
+        *name_thread = "Archiver";
     }
 
     return;
@@ -229,7 +229,7 @@ static void check_col_name(const char* argv, char** name_thread)
     }
 
     if (strncmp(argv, "--forkcol", strlen("--forkcol")) == 0) {
-        *name_thread = "PgstatCollector";
+        *name_thread = "StatCollector";
     }
 
     return;
@@ -268,7 +268,7 @@ static void check_audit_name(const char* argv, char** name_thread)
     }
 
     if (strncmp(argv, "--forkaudit", strlen("--forkaudit")) == 0) {  // exp: @suppress("Function cannot be resolved")
-        *name_thread = "PgAuditor";
+        *name_thread = "Auditor";
     }
 
     return;
@@ -278,7 +278,7 @@ static void check_boot_name_internel(AuxProcType aux_thread_type, char** name_th
 {
     switch (aux_thread_type) {
         case StartupProcess: {
-            *name_thread = "Startup";
+            *name_thread = "StartupProcess";
             break;
         }
         case BgWriterProcess: {
@@ -302,7 +302,7 @@ static void check_boot_name_internel(AuxProcType aux_thread_type, char** name_th
             break;
         }
         case RemoteServiceProcess: {
-            *name_thread = "RemoteService";
+            *name_thread = "RemoteSrv";
             break;
         }
         default: {
