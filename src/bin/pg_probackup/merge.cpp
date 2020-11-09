@@ -511,7 +511,7 @@ merge_chain(parray *parent_chain, pgBackup *full_backup, pgBackup *dest_backup)
 		if (parse_program_version(backup->program_version) >
 			parse_program_version(PROGRAM_VERSION))
 		{
-			elog(ERROR, "Backup %s has been produced by pg_probackup version %s, "
+			elog(ERROR, "Backup %s has been produced by gs_probackup version %s, "
 						"but current program version is %s. Forward compatibility "
 						"is not supported.",
 				base36enc(backup->start_time),

@@ -222,9 +222,9 @@ do_backup_instance(PGconn *backup_conn, PGNodeInfo *nodeInfo, bool no_sync, bool
 	if (prev_backup)
 	{
         if (parse_program_version(prev_backup->program_version) > parse_program_version(PROGRAM_VERSION))
-            elog(ERROR, "pg_probackup binary version is %s, but backup %s version is %s. "
-                        "pg_probackup do not guarantee to be forward compatible. "
-                        "Please upgrade pg_probackup binary.",
+            elog(ERROR, "gs_probackup binary version is %s, but backup %s version is %s. "
+                        "gs_probackup do not guarantee to be forward compatible. "
+                        "Please upgrade gs_probackup binary.",
                         PROGRAM_VERSION, base36enc(prev_backup->start_time), prev_backup->program_version);
 
 		elog(INFO, "Parent backup: %s", base36enc(prev_backup->start_time));
@@ -246,7 +246,7 @@ do_backup_instance(PGconn *backup_conn, PGNodeInfo *nodeInfo, bool no_sync, bool
 	if (current.backup_mode != BACKUP_MODE_FULL &&
 		prev_backup->start_lsn > current.start_lsn)
 			elog(ERROR, "Current START LSN %X/%X is lower than START LSN %X/%X of previous backup %s. "
-				"It may indicate that we are trying to backup PostgreSQL instance from the past.",
+				"It may indicate that we are trying to backup openGauss instance from the past.",
 				(uint32) (current.start_lsn >> 32), (uint32) (current.start_lsn),
 				(uint32) (prev_backup->start_lsn >> 32), (uint32) (prev_backup->start_lsn),
 				base36enc(prev_backup->start_time));
@@ -336,7 +336,7 @@ do_backup_instance(PGconn *backup_conn, PGNodeInfo *nodeInfo, bool no_sync, bool
 
 	if (parray_num(backup_files_list) < 100)
 		elog(ERROR, "PGDATA is almost empty. Either it was concurrently deleted or "
-			"pg_probackup do not possess sufficient permissions to list PGDATA content");
+			"gs_probackup do not possess sufficient permissions to list PGDATA content");
 
 	/* Calculate pgdata_bytes */
 	for (i = 0; i < parray_num(backup_files_list); i++)
@@ -632,7 +632,7 @@ do_backup_instance(PGconn *backup_conn, PGNodeInfo *nodeInfo, bool no_sync, bool
 	if (current.backup_mode != BACKUP_MODE_FULL &&
 		current.stop_lsn < prev_backup->stop_lsn)
 			elog(ERROR, "Current backup STOP LSN %X/%X is lower than STOP LSN %X/%X of previous backup %s. "
-				"It may indicate that we are trying to backup PostgreSQL instance from the past.",
+				"It may indicate that we are trying to backup openGauss instance from the past.",
 				(uint32) (current.stop_lsn >> 32), (uint32) (current.stop_lsn),
 				(uint32) (prev_backup->stop_lsn >> 32), (uint32) (prev_backup->stop_lsn),
 				base36enc(prev_backup->stop_lsn));
@@ -701,15 +701,15 @@ pgdata_basic_setup(ConnectionOptions conn_opt, PGNodeInfo *nodeInfo)
 	nodeInfo->checksum_version = current.checksum_version;
 
 	if (current.checksum_version)
-		elog(LOG, "This PostgreSQL instance was initialized with data block checksums. "
+		elog(LOG, "This openGauss instance was initialized with data block checksums. "
 					"Data block corruption will be detected");
 	else
-		elog(WARNING, "This PostgreSQL instance was initialized without data block checksums. "
-						"pg_probackup have no way to detect data block corruption without them. "
+		elog(WARNING, "This openGauss instance was initialized without data block checksums. "
+						"gs_probackup have no way to detect data block corruption without them. "
 						"Reinitialize PGDATA with option '--data-checksums'.");
 
 	if (nodeInfo->is_superuser)
-		elog(WARNING, "Current PostgreSQL role is superuser. "
+		elog(WARNING, "Current openGauss role is superuser. "
 						"It is not recommended to run backup as superuser.");
 
 	StrNCpy(current.server_version, "9.2",
@@ -751,7 +751,7 @@ do_backup(time_t start_time, pgSetBackupParams *set_backup_params,
 		(pg_strcasecmp(instance_config.external_dir_str, "none") != 0))
 		current.external_dir_str = instance_config.external_dir_str;
 
-	elog(INFO, "Backup start, pg_probackup version: %s, instance: %s, backup ID: %s, backup mode: %s, "
+	elog(INFO, "Backup start, gs_probackup version: %s, instance: %s, backup ID: %s, backup mode: %s, "
 			"wal mode: %s, remote: %s, compress-algorithm: %s, compress-level: %i",
 			PROGRAM_VERSION, instance_name, base36enc(start_time), pgBackupGetBackupMode(&current),
 			current.stream ? "STREAM" : "ARCHIVE", IsSshProtocol()  ? "true" : "false",
@@ -1260,7 +1260,7 @@ wait_wal_lsn(XLogRecPtr target_lsn, bool is_start_lsn, TimeLineID tli,
 		}
 
 		if (!stream_wal && is_start_lsn && try_count == 30)
-			elog(WARNING, "By default pg_probackup assume WAL delivery method to be ARCHIVE. "
+			elog(WARNING, "By default gs_probackup assume WAL delivery method to be ARCHIVE. "
 				 "If continuous archiving is not set up, use '--stream' option to make autonomous backup. "
 				 "Otherwise check that continuous archiving works correctly.");
 
@@ -2344,13 +2344,13 @@ IdentifySystem(StreamThreadArg *stream_thread_arg)
 		elog(ERROR, "%s is not system_identifier", stream_conn_sysidentifier_str);
 
 	if (stream_conn_sysidentifier != instance_config.system_identifier)
-		elog(ERROR, "System identifier mismatch. Connected PostgreSQL instance has system id: "
+		elog(ERROR, "System identifier mismatch. Connected openGauss instance has system id: "
 			"" UINT64_FORMAT ". Expected: " UINT64_FORMAT ".",
 					stream_conn_sysidentifier, instance_config.system_identifier);
 
 	if (stream_conn_tli != current.tli)
 		elog(ERROR, "Timeline identifier mismatch. "
-			"Connected PostgreSQL instance has timeline id: %X. Expected: %X.",
+			"Connected openGauss instance has timeline id: %X. Expected: %X.",
 			stream_conn_tli, current.tli);
 
 	PQclear(res);

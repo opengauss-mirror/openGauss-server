@@ -26,8 +26,6 @@ const char  *PROGRAM_NAME = NULL;		/* PROGRAM_NAME_FULL without .exe suffix
 										 * if any */
 const char  *PROGRAM_NAME_FULL = NULL;
 const char  *PROGRAM_FULL_PATH = NULL;
-const char  *PROGRAM_URL = "https://github.com/postgrespro/pg_probackup";
-const char  *PROGRAM_EMAIL = "https://github.com/postgrespro/pg_probackup/issues";
 
 typedef enum ProbackupSubcmd
 {
@@ -312,8 +310,8 @@ int main(int argc, char *argv[])
 			 */
 			if (argc > 2)
 			{
-				elog(ERROR, "Version mismatch, pg_probackup binary with version '%s' "
-						"is launched as an agent for pg_probackup binary with version '%s'",
+				elog(ERROR, "Version mismatch, gs_probackup binary with version '%s' "
+						"is launched as an agent for gs_probackup binary with version '%s'",
 						PROGRAM_VERSION, argv[2]);
 			}
 			fio_communicate(STDIN_FILENO, STDOUT_FILENO);

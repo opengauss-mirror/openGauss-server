@@ -50,8 +50,6 @@
 extern const char  *PROGRAM_NAME;
 extern const char  *PROGRAM_NAME_FULL;
 extern const char  *PROGRAM_FULL_PATH;
-extern const char  *PROGRAM_URL;
-extern const char  *PROGRAM_EMAIL;
 
 //#define SUPPORT_MULTI_TIMELINE 0
 
