@@ -65,8 +65,13 @@ ifneq "$(MAKECMDGOALS)" "clean"
   endif
 endif
 
-override CXXFLAGS += -fPIE
-LDFLAGS += -pie
+ifeq ($(enable_profiling), no)
+  override CXXFLAGS += -fPIE
+  LDFLAGS += -pie
+else
+  override CXXFLAGS += -fPIC
+  LDFLAGS += -fPIC
+endif
 
 OBJS = gstrace_tool.o $(top_builddir)/src/lib/gstrace/common/libgstrace.a
 

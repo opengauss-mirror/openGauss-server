@@ -37,8 +37,13 @@ override CPPFLAGS += -DVAL_LDFLAGS="\"$(STD_LDFLAGS)\""
 override CPPFLAGS += -DVAL_LDFLAGS_EX="\"$(LDFLAGS_EX)\""
 override CPPFLAGS += -DVAL_LDFLAGS_SL="\"$(LDFLAGS_SL)\""
 override CPPFLAGS += -DVAL_LIBS="\"$(LIBS)\""
-override CPPFLAGS += -fstack-protector-all -fPIE
-LDFLAGS += -pie
+ifeq ($(enable_profiling), no)
+  override CPPFLAGS += -fstack-protector-all -fPIE
+  LDFLAGS += -pie
+else
+  override CPPFLAGS += -fstack-protector-all -fPIC
+  LDFLAGS += -fPIC
+endif
 all: pg_config
 
 pg_config: $(OBJS) | submake-libpgport
