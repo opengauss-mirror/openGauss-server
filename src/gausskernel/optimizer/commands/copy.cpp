@@ -4755,7 +4755,7 @@ CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist, L
     defmap = (int*)palloc(num_phys_attrs * sizeof(int));
     defexprs = (ExprState**)palloc(num_phys_attrs * sizeof(ExprState*));
 
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
     /*
      * Don't support COPY FROM table with INSERT trigger as whether or not fire
      * INSERT trigger in this condition will both cause confusion.
@@ -4765,10 +4765,10 @@ CopyState BeginCopyFrom(Relation rel, const char* filename, List* attnamelist, L
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                 errmsg("Don't suppport COPY FROM table with INSERT triggers"),
                 errhint("You may need drop the INSERT trigger first.")));
+#endif
 
     /* Output functions are required to convert default values to output form */
     cstate->out_functions = (FmgrInfo*)palloc(num_phys_attrs * sizeof(FmgrInfo));
-#endif
 
     for (attnum = 1; attnum <= num_phys_attrs; attnum++) {
         /* We don't need info for dropped attributes */

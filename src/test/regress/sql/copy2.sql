@@ -116,7 +116,7 @@ COPY no_oids TO stdout WITH OIDS;
 
 -- check copy out
 COPY (select * from x order by 1,2,3,4,5) TO stdout;
-COPY (select c,e from x order by 1,2) TO stdout;
+COPY (select c,e from x where c != 'N' order by 1,2) TO stdout;
 COPY (select b,e from x order by 1,2) TO stdout WITH NULL 'I''m null';
 
 CREATE TEMP TABLE y (

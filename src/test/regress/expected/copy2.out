@@ -24,82 +24,32 @@ FOR EACH ROW EXECUTE PROCEDURE fn_x_after();
 CREATE TRIGGER trg_x_before BEFORE INSERT ON x
 FOR EACH ROW EXECUTE PROCEDURE fn_x_before();
 COPY x (a, b, c, d, e) from stdin;
-ERROR:  Don't suppport COPY FROM table with INSERT triggers
-HINT:  You may need drop the INSERT trigger first.
-9999	\N	\\N	\NN	\N
-invalid command \N
-10000	21	31	41	51
-\.
-invalid command \.
 COPY x (b, d) from stdin;
-ERROR:  syntax error at or near "9999"
-LINE 1: 9999 
-        ^
-1	test_1
-\.
-invalid command \.
 COPY x (b, d) from stdin;
-ERROR:  syntax error at or near "1"
-LINE 1: 1 test_1
-        ^
-2	test_2
-3	test_3
-4	test_4
-5	test_5
-\.
-invalid command \.
 COPY x (a, b, c, d, e) from stdin;
-ERROR:  syntax error at or near "2"
-LINE 1: 2 test_2
-        ^
-10001	22	32	42	52
-10002	23	33	43	53
-10003	24	34	44	54
-10004	25	35	45	55
-10005	26	36	46	56
-\.
-invalid command \.
 -- non-existent column in column list: should fail
 COPY x (xyz) from stdin;
-ERROR:  syntax error at or near "10001"
-LINE 1: 10001 22 32 42 52
-        ^
+ERROR:  column "xyz" of relation "x" does not exist
 -- too many columns in column list: should fail
 COPY x (a, b, c, d, e, d, c) from stdin;
 ERROR:  column "d" specified more than once
 -- missing data: should fail
 COPY x from stdin;
-ERROR:  Don't suppport COPY FROM table with INSERT triggers
-HINT:  You may need drop the INSERT trigger first.
-\.
-invalid command \.
+ERROR:  missing data for column "b"
+CONTEXT:  COPY x, line 1: ""
 COPY x from stdin;
-ERROR:  Don't suppport COPY FROM table with INSERT triggers
-HINT:  You may need drop the INSERT trigger first.
-2000	230	23	23
-\.
-invalid command \.
+ERROR:  missing data for column "e"
+CONTEXT:  COPY x, line 1: "2000	230	23	23"
 COPY x from stdin;
-ERROR:  syntax error at or near "2000"
-LINE 1: 2000 230 23 23
-        ^
-2001	231	\N	\N
-invalid command \N
-\.
-invalid command \.
+ERROR:  missing data for column "e"
+CONTEXT:  COPY x, line 1: "2001	231	\N	\N"
 -- extra data: should fail
 COPY x from stdin;
-ERROR:  syntax error at or near "2001"
-LINE 1: 2001 231 
-        ^
-2002	232	40	50	60	70	80
-\.
-invalid command \.
+ERROR:  extra data after last expected column
+CONTEXT:  COPY x, line 1: "2002	232	40	50	60	70	80"
 -- various COPY options: delimiters, oids, NULL string, encoding
 COPY x (b, c, d, e) from stdin with oids delimiter ',' null 'x';
-ERROR:  syntax error at or near "2002"
-LINE 1: 2002 232 40 50 60 70 80
-        ^
+ERROR:  table "x" does not have OIDs
 500000,x,45,80,90
 500001,x,\x,\\x,\\\x
 invalid command \x,
@@ -121,31 +71,33 @@ LINE 1: c;
 \.
 invalid command \.
 COPY x from stdin WITH DELIMITER AS ':' NULL AS E'\\X' ENCODING 'sql_ascii';
-ERROR:  Don't suppport COPY FROM table with INSERT triggers
-HINT:  You may need drop the INSERT trigger first.
-4000:\X:C:\X:\X
-invalid command \X:C:
-4001:1:empty::
-4002:2:null:\X:\X
-invalid command \X:
-4003:3:Backslash:\\:\\
-invalid command \
-4004:4:BackslashX:\\X:\\X
-invalid command \
-4005:5:N:\N:\N
-invalid command \N:
-4006:6:BackslashN:\\N:\\N
-invalid command \
-4007:7:XX:\XX:\XX
-invalid command \XX:
-4008:8:Delimiter:\::\:
-\.
-invalid command \.
 -- check results of copy in
 SELECT * FROM x ORDER BY a, b;
-ERROR:  syntax error at or near "4000"
-LINE 1: 4000:
-        ^
+   a   | b  |     c      |   d    |          e           
+-------+----+------------+--------+----------------------
+  4000 |    | C          |        | before trigger fired
+  4001 |  1 | empty      |        | before trigger fired
+  4002 |  2 | null       |        | before trigger fired
+  4003 |  3 | Backslash  | \      | before trigger fired
+  4004 |  4 | BackslashX | \X     | before trigger fired
+  4005 |  5 | N          | N      | before trigger fired
+  4006 |  6 | BackslashN | \N     | before trigger fired
+  4007 |  7 | XX         | XX     | before trigger fired
+  4008 |  8 | Delimiter  | :      | before trigger fired
+  9999 |    | \N         | NN     | before trigger fired
+ 10000 | 21 | 31         | 41     | before trigger fired
+ 10001 | 22 | 32         | 42     | before trigger fired
+ 10002 | 23 | 33         | 43     | before trigger fired
+ 10003 | 24 | 34         | 44     | before trigger fired
+ 10004 | 25 | 35         | 45     | before trigger fired
+ 10005 | 26 | 36         | 46     | before trigger fired
+       |  1 | stuff      | test_1 | after trigger fired
+       |  2 | stuff      | test_2 | after trigger fired
+       |  3 | stuff      | test_3 | after trigger fired
+       |  4 | stuff      | test_4 | after trigger fired
+       |  5 | stuff      | test_5 | after trigger fired
+(21 rows)
+
 -- COPY w/ oids on a table w/o oids should fail
 CREATE TABLE no_oids (
 	a	int,
@@ -160,8 +112,70 @@ COPY no_oids TO stdout WITH OIDS;
 ERROR:  table "no_oids" does not have OIDs
 -- check copy out
 COPY (select * from x order by 1,2,3,4,5) TO stdout;
-COPY (select c,e from x order by 1,2) TO stdout;
+4000	\N	C	\N	before trigger fired
+4001	1	empty	\N	before trigger fired
+4002	2	null	\N	before trigger fired
+4003	3	Backslash	\\	before trigger fired
+4004	4	BackslashX	\\X	before trigger fired
+4005	5	N	N	before trigger fired
+4006	6	BackslashN	\\N	before trigger fired
+4007	7	XX	XX	before trigger fired
+4008	8	Delimiter	:	before trigger fired
+9999	\N	\\N	NN	before trigger fired
+10000	21	31	41	before trigger fired
+10001	22	32	42	before trigger fired
+10002	23	33	43	before trigger fired
+10003	24	34	44	before trigger fired
+10004	25	35	45	before trigger fired
+10005	26	36	46	before trigger fired
+\N	1	stuff	test_1	after trigger fired
+\N	2	stuff	test_2	after trigger fired
+\N	3	stuff	test_3	after trigger fired
+\N	4	stuff	test_4	after trigger fired
+\N	5	stuff	test_5	after trigger fired
+COPY (select c,e from x where c != 'N' order by 1,2) TO stdout;
+31	before trigger fired
+32	before trigger fired
+33	before trigger fired
+34	before trigger fired
+35	before trigger fired
+36	before trigger fired
+Backslash	before trigger fired
+BackslashN	before trigger fired
+BackslashX	before trigger fired
+C	before trigger fired
+Delimiter	before trigger fired
+empty	before trigger fired
+\\N	before trigger fired
+null	before trigger fired
+stuff	after trigger fired
+stuff	after trigger fired
+stuff	after trigger fired
+stuff	after trigger fired
+stuff	after trigger fired
+XX	before trigger fired
 COPY (select b,e from x order by 1,2) TO stdout WITH NULL 'I''m null';
+1	after trigger fired
+1	before trigger fired
+2	after trigger fired
+2	before trigger fired
+3	after trigger fired
+3	before trigger fired
+4	after trigger fired
+4	before trigger fired
+5	after trigger fired
+5	before trigger fired
+6	before trigger fired
+7	before trigger fired
+8	before trigger fired
+21	before trigger fired
+22	before trigger fired
+23	before trigger fired
+24	before trigger fired
+25	before trigger fired
+26	before trigger fired
+I'm null	before trigger fired
+I'm null	before trigger fired
 CREATE TEMP TABLE y (
 	col1 text,
 	col2 text
