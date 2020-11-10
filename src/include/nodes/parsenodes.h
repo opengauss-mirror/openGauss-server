@@ -245,6 +245,11 @@ typedef struct Query {
                                      * Please refer to subquery_planner.
                                      */
     uint64 uniqueSQLId;             /* used by unique sql id */
+
+    Oid* fixed_paramTypes; /* For plpy CTAS query. CTAS is a recursive call.CREATE query is the first rewrited.
+                            * thd 2nd rewrited query is INSERT SELECT.whithout this attribute, DB will have
+                            * an error that has no idea about $x when INSERT SELECT query is analyzed. */
+    int fixed_numParams;
 } Query;
 
 /****************************************************************************

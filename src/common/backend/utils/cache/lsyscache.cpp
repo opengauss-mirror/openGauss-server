@@ -4627,7 +4627,15 @@ Oid get_func_oid(const char* funcname, Oid funcnamespace, Expr* expr)
         if (expr != NULL && IsA(expr, FuncExpr) && procform->pronargs != list_length(((FuncExpr*)expr)->args)) {
             continue;
         }
-        if (expr != NULL && IsA(expr, FuncExpr) && procform->prorettype != ((FuncExpr*)expr)->funcresulttype) {
+
+        /* If the return type is polymorphic, continue
+         * For example: CREATE FUNCTION array_abs(x anyarray) RETURN anyarray ...
+         * And we have SQL: select array_abs({1,-2,3,-4});
+         * Obviously, the output type(procform->prorettype) is INT, not anyarray
+         * So we don't check the return type.
+         */
+        if (expr != NULL && IsA(expr, FuncExpr) && !IsPolymorphicType(procform->prorettype) &&
+            procform->prorettype != ((FuncExpr*)expr)->funcresulttype) {
             continue;
         }
         /*
@@ -4638,7 +4646,7 @@ Oid get_func_oid(const char* funcname, Oid funcnamespace, Expr* expr)
             bool matched = true;
 
             for (j = 0; j < nargs; j++) {
-                if (argtypes[j] != procform->proargtypes.values[j]) {
+                if (!IsPolymorphicType(procform->proargtypes.values[j]) && argtypes[j] != procform->proargtypes.values[j]) {
                     matched = false;
                     break;
                 }

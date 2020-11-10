@@ -61,7 +61,7 @@ typedef struct QueryDesc {
 /* in pquery.c */
 extern QueryDesc* CreateQueryDesc(PlannedStmt* plannedstmt, const char* sourceText, Snapshot snapshot,
     Snapshot crosscheck_snapshot, DestReceiver* dest, ParamListInfo params, int instrument_options,
-    JitExec::JitContext* mot_jit_context = nullptr);
+    JitExec::JitContext* mot_jit_context = NULL);
 
 extern QueryDesc* CreateUtilityQueryDesc(
     Node* utilitystmt, const char* sourceText, Snapshot snapshot, DestReceiver* dest, ParamListInfo params);

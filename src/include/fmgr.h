@@ -107,8 +107,11 @@ typedef struct FmgrInfo {
     GenericFunRuntime* genericRuntime;
 } FmgrInfo;
 
-/* number of prealloced arguments to a function. */
-#define FUNC_PREALLOCED_ARGS 10
+/*
+ * number of prealloced arguments to a function.
+ * In deepsql (SVM and elastic_net), we cannot explicitly set all elements to false.
+ */
+#define FUNC_PREALLOCED_ARGS 20
 
 typedef struct UDFInfoType {
     UDFArgsFuncType* UDFArgsHandlerPtr; /* UDF send/recv argument function */

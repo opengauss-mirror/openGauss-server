@@ -3608,7 +3608,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
         case T_AlterDomainStmt:
 #ifdef ENABLE_MULTIPLE_NODES
             ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("domain is not yet supported.")));
-#endif /* PGXC */
+#endif /* ENABLE_MULTIPLE_NODES */
             {
                 AlterDomainStmt* stmt = (AlterDomainStmt*)parse_tree;
 
@@ -3824,12 +3824,12 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
                     DefineAggregate(stmt->defnames, stmt->args, stmt->oldstyle, stmt->definition);
                     break;
                 case OBJECT_OPERATOR:
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
                     if (!u_sess->attr.attr_common.IsInplaceUpgrade && !u_sess->exec_cxt.extension_is_valid)
                         ereport(ERROR,
                             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                                 errmsg("user defined operator is not yet supported.")));
-#endif /* PGXC */
+#endif /* ENABLE_MULTIPLE_NODES */
                     AssertEreport(stmt->args == NIL, MOD_EXECUTOR, "stmt args is NULL");
                     DefineOperator(stmt->defnames, stmt->definition);
                     break;
@@ -4941,7 +4941,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             break;
 
         case T_CreatePLangStmt:
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
             if (!IsInitdb)
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("new language is not yet supported.")));
 #endif /* PGXC */
@@ -4959,7 +4959,7 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
 #ifdef ENABLE_MULTIPLE_NODES
             if (!IsInitdb && !u_sess->attr.attr_common.IsInplaceUpgrade)
                 ereport(ERROR, (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("domain is not yet supported.")));
-#endif /* PGXC */
+#endif /* ENABLE_MULTIPLE_NODES */
             DefineDomain((CreateDomainStmt*)parse_tree);
 #ifdef ENABLE_MULTIPLE_NODES
             if (IS_PGXC_COORDINATOR)
@@ -5816,11 +5816,11 @@ void standard_ProcessUtility(Node* parse_tree, const char* query_string, ParamLi
             break;
 
         case T_CreateOpClassStmt:
-#ifdef PGXC
+#ifdef ENABLE_MULTIPLE_NODES
             if (!u_sess->attr.attr_common.IsInplaceUpgrade && !u_sess->exec_cxt.extension_is_valid)
                 ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("user defined operator is not yet supported.")));
-#endif /* PGXC */
+#endif /* ENABLE_MULTIPLE_NODES */
             DefineOpClass((CreateOpClassStmt*)parse_tree);
 #ifdef PGXC
             if (IS_PGXC_COORDINATOR)
@@ -8598,12 +8598,14 @@ void CheckObjectInBlackList(ObjectType obj_type, const char* query_string)
             tag = "AGGREGATE";
             break;
 #endif
+#ifdef ENABLE_MULTIPLE_NODES
         case OBJECT_OPERATOR:
             tag = "OPERATOR";
             break;
         case OBJECT_OPCLASS:
             tag = "OPERATOR CLASS";
             break;
+#endif
         case OBJECT_OPFAMILY:
             tag = "OPERATOR FAMILY";
             break;
