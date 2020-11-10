@@ -1967,6 +1967,7 @@ class UserPlatform():
         #     EulerOS         "2.0", "2.3" 64bit
         #     SuSE11          sp1/2/3/4 64bit
         #     SuSE12          sp0/1/2/3 64bit
+        #     Kylin           "10" 64bit
         distName, version, idNum = dist()
         if distName.lower() not in SUPPORT_WHOLE_PLATFORM_LIST:
             raise Exception(ErrorCode.GAUSS_519["GAUSS_51900"] +
