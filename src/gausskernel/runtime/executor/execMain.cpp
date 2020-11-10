@@ -2029,7 +2029,7 @@ static void ExecutePlan(EState *estate, PlanState *planstate, bool use_parallel_
             slot = NULL;
         }
         /******************************* MOT LLVM *************************************/
-        else if (!IS_PGXC_COORDINATOR && JitExec::IsMotCodegenEnabled() && mot_jit_context) {
+        else if (mot_jit_context && !IS_PGXC_COORDINATOR && JitExec::IsMotCodegenEnabled()) {
             int scan_ended = 0;
             if (!mot_finished_execution) {
                 // previous iteration has not signaled end of scan
