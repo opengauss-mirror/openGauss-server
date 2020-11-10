@@ -1862,7 +1862,8 @@ static void add_paths_to_append_rel(PlannerInfo *root, RelOptInfo *rel, List *li
             RelOptInfo* childrel = (RelOptInfo*)lfirst(lcr);
             Path* cheapest_total = NULL;
 
-            cheapest_total = get_cheapest_path_for_pathkeys(childrel->pathlist, NIL, required_outer, TOTAL_COST);
+            cheapest_total = get_cheapest_path_for_pathkeys(childrel->pathlist, NIL,
+                required_outer, TOTAL_COST, false);
 
             AssertEreport(cheapest_total != NULL, MOD_OPT, "");
 
@@ -1938,8 +1939,8 @@ static void generate_mergeappend_paths(PlannerInfo* root, RelOptInfo* rel,
             Path *cheapest_startup, *cheapest_total;
 
             /* Locate the right paths, if they are available. */
-            cheapest_startup = get_cheapest_path_for_pathkeys(childrel->pathlist, pathkeys, NULL, STARTUP_COST);
-            cheapest_total = get_cheapest_path_for_pathkeys(childrel->pathlist, pathkeys, NULL, TOTAL_COST);
+            cheapest_startup = get_cheapest_path_for_pathkeys(childrel->pathlist, pathkeys, NULL, STARTUP_COST, false);
+            cheapest_total = get_cheapest_path_for_pathkeys(childrel->pathlist, pathkeys, NULL, TOTAL_COST, false);
 
             /*
              * If we can't find any paths with the right order just use the

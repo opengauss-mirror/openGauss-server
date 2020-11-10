@@ -322,8 +322,10 @@ bool pathkeys_contained_in(List* keys1, List* keys2)
  * 'pathkeys' represents a required ordering (already canonicalized!)
  * 'required_outer' denotes allowable outer relations for parameterized paths
  * 'cost_criterion' is STARTUP_COST or TOTAL_COST
+ * 'require_parallel_safe' causes us to consider only parallel-safe paths
  */
-Path* get_cheapest_path_for_pathkeys(List* paths, List* pathkeys, Relids required_outer, CostSelector cost_criterion)
+Path* get_cheapest_path_for_pathkeys(List* paths, List* pathkeys, Relids required_outer,
+    CostSelector cost_criterion, bool require_parallel_safe)
 {
     Path* matched_path = NULL;
     ListCell* l = NULL;
@@ -337,6 +339,10 @@ Path* get_cheapest_path_for_pathkeys(List* paths, List* pathkeys, Relids require
          */
         if (matched_path != NULL && compare_path_costs(matched_path, path, cost_criterion) <= 0)
             continue;
+
+        if (require_parallel_safe && !path->parallel_safe) {
+            continue;
+        }
 
         if (pathkeys_contained_in(pathkeys, path->pathkeys) && bms_is_subset(PATH_REQ_OUTER(path), required_outer))
             matched_path = path;
