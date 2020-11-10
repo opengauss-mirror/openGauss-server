@@ -629,7 +629,7 @@ bool RecoveryManager::ApplyLogSegmentFromData(char* data, size_t len, uint64_t r
         // check LogSegment Op validity
         OperationCode opCode = segment->m_controlBlock.m_opCode;
         if (opCode >= OperationCode::INVALID_OPERATION_CODE) {
-            MOT_LOG_ERROR("ApplyLogSegmentFromData - encountered a bad op code");
+            MOT_LOG_ERROR("ApplyLogSegmentFromData - encountered a bad opCode %u", opCode);
             FreeRedoSegment(segment);
             return false;
         }
@@ -638,6 +638,11 @@ bool RecoveryManager::ApplyLogSegmentFromData(char* data, size_t len, uint64_t r
         uint64_t inId = segment->m_controlBlock.m_internalTransactionId;
         uint64_t exId = segment->m_controlBlock.m_externalTransactionId;
         RecoveryOpState recoveryState = IsCommitOp(opCode) ? RecoveryOpState::COMMIT : RecoveryOpState::ABORT;
+
+        MOT_LOG_DEBUG("ApplyLogSegmentFromData: opCode %u, externalTransactionId %lu, internalTransactionId %lu",
+            opCode,
+            exId,
+            inId);
 
         // insert the segment (if not abort)
         if (!IsAbortOp(opCode) && !InsertLogSegment(segment)) {
@@ -660,6 +665,12 @@ bool RecoveryManager::ApplyLogSegmentFromData(char* data, size_t len, uint64_t r
                 MOT_LOG_ERROR("ApplyLogSegmentFromData - operateOnRecoveredTransaction failed (abort)");
                 return false;
             }
+        } else {
+            MOT_LOG_DEBUG("ApplyLogSegmentFromData: Added to map, opCode %u, externalTransactionId %lu, "
+                          "internalTransactionId %lu",
+                opCode,
+                exId,
+                inId);
         }
         curData += iterator.GetRedoTransactionLength();
     }
@@ -675,22 +686,30 @@ bool RecoveryManager::InsertLogSegment(LogSegment* segment)
         // this is a new transaction. Not found in the map.
         transactionLogEntries = new (std::nothrow) MOT::RecoveryManager::RedoTransactionSegments(transactionId);
         if (transactionLogEntries == nullptr) {
+            MOT_LOG_ERROR("InsertLogSegment: could not allocate memory for new transaction log entries");
             return false;
         }
         if (!transactionLogEntries->Append(segment)) {
             MOT_LOG_ERROR("InsertLogSegment: could not append log segment, error re-allocating log segments array");
+            delete transactionLogEntries;
             return false;
         }
         m_inProcessTransactionMap[transactionId] = transactionLogEntries;
+        MOT_LOG_DEBUG("InsertLogSegment: New transaction, externalTransactionId %lu, internalTransactionId %lu",
+            segment->m_controlBlock.m_externalTransactionId,
+            segment->m_controlBlock.m_internalTransactionId);
     } else {
         transactionLogEntries = it->second;
         if (!transactionLogEntries->Append(segment)) {
             MOT_LOG_ERROR("InsertLogSegment: could not append log segment, error re-allocating log segments array");
             return false;
         }
+        MOT_LOG_DEBUG("InsertLogSegment: Appended log segment, externalTransactionId %lu, internalTransactionId %lu",
+            segment->m_controlBlock.m_externalTransactionId,
+            segment->m_controlBlock.m_internalTransactionId);
     }
 
-    if (segment->m_controlBlock.m_externalTransactionId != INVALID_TRANSACTIOIN_ID) {
+    if (segment->m_controlBlock.m_externalTransactionId != INVALID_TRANSACTION_ID) {
         m_transactionIdToInternalId[segment->m_controlBlock.m_externalTransactionId] =
             segment->m_controlBlock.m_internalTransactionId;
     }
@@ -703,7 +722,14 @@ bool RecoveryManager::CommitRecoveredTransaction(uint64_t externalTransactionId)
     if (it != m_transactionIdToInternalId.end()) {
         uint64_t internalTransactionId = it->second;
         m_transactionIdToInternalId.erase(it);
+        MOT_LOG_DEBUG(
+            "CommitRecoveredTransaction: Transaction found, externalTransactionId %lu, internalTransactionId %lu",
+            externalTransactionId,
+            internalTransactionId);
         return OperateOnRecoveredTransaction(internalTransactionId, externalTransactionId, RecoveryOpState::COMMIT);
+    } else {
+        MOT_LOG_DEBUG(
+            "CommitRecoveredTransaction: Transaction not found, externalTransactionId %lu", externalTransactionId);
     }
     return true;
 }
@@ -715,7 +741,11 @@ bool RecoveryManager::OperateOnRecoveredTransaction(
     std::lock_guard<std::mutex> lock(m_inProcessTxLock);
     map<uint64_t, RedoTransactionSegments*>::iterator it = m_inProcessTransactionMap.find(internalTransactionId);
     if (it != m_inProcessTransactionMap.end()) {
-        MOT_LOG_DEBUG("operateOnRecoveredTransaction: %lu", internalTransactionId);
+        MOT_LOG_DEBUG("OperateOnRecoveredTransaction: Transaction found, externalTransactionId %lu, "
+                      "internalTransactionId %lu, state %u",
+            externalTransactionId,
+            internalTransactionId,
+            rState);
         RedoTransactionSegments* segments = it->second;
         m_inProcessTransactionMap.erase(it);
         if (rState != RecoveryOpState::ABORT) {
@@ -732,9 +762,15 @@ bool RecoveryManager::OperateOnRecoveredTransaction(
             }
         }
         delete segments;
+    } else {
+        MOT_LOG_DEBUG("OperateOnRecoveredTransaction: Transaction not found, externalTransactionId %lu, "
+                      "internalTransactionId %lu, state %u",
+            externalTransactionId,
+            internalTransactionId,
+            rState);
     }
 
-    if (rState == RecoveryOpState::ABORT && externalTransactionId != INVALID_TRANSACTIOIN_ID) {
+    if (rState == RecoveryOpState::ABORT && externalTransactionId != INVALID_TRANSACTION_ID) {
         m_transactionIdToInternalId.erase(externalTransactionId);
     }
 
@@ -850,8 +886,10 @@ RecoveryManager::SurrogateState::SurrogateState()
     m_insertsArray = new (std::nothrow) uint64_t[maxConnections];
     if (m_insertsArray != nullptr) {
         m_maxConnections = maxConnections;
-        errno_t erc =
-            memset_s(m_insertsArray, m_maxConnections * sizeof(uint64_t), 0, m_maxConnections * sizeof(uint64_t));
+        errno_t erc = memset_s(m_insertsArray,
+            m_maxConnections * sizeof(uint64_t),
+            static_cast<int>(SurrogateKeyGenerator::INITIAL_KEY),
+            m_maxConnections * sizeof(uint64_t));
         securec_check(erc, "\0", "\0");
     }
 }
@@ -866,7 +904,7 @@ RecoveryManager::SurrogateState::~SurrogateState()
 void RecoveryManager::SurrogateState::ExtractInfoFromKey(uint64_t key, uint64_t& pid, uint64_t& insertions)
 {
     pid = key >> SurrogateKeyGenerator::KEY_BITS;
-    insertions = key & 0x0000FFFFFFFFFFFFULL;
+    insertions = key & SurrogateKeyGenerator::KEY_MASK;
     insertions++;
 }
 
@@ -1033,10 +1071,10 @@ uint64_t RecoveryManager::PerformInProcessTx(uint64_t id, bool isCommit)
     map<uint64_t, uint64_t>::iterator it = m_transactionIdToInternalId.find(id);
     if (it == m_transactionIdToInternalId.end()) {
         MOT_LOG_ERROR("performInProcessTx: could not find tx %lu", id);
-        return 0;  // invalidTransactionId
+        return INVALID_TRANSACTION_ID;
     } else {
         bool status = OperateOnRecoveredTransaction(
-            it->second, INVALID_TRANSACTIOIN_ID, isCommit ? RecoveryOpState::TPC_COMMIT : RecoveryOpState::TPC_ABORT);
+            it->second, INVALID_TRANSACTION_ID, isCommit ? RecoveryOpState::TPC_COMMIT : RecoveryOpState::TPC_ABORT);
         return status ? it->second : 0;
     }
 }
@@ -1305,7 +1343,7 @@ bool RecoveryManager::IsMotTransactionId(LogSegment* segment)
 {
     MOT_ASSERT(segment);
     if (segment != nullptr) {
-        return segment->m_controlBlock.m_externalTransactionId == INVALID_TRANSACTIOIN_ID;
+        return segment->m_controlBlock.m_externalTransactionId == INVALID_TRANSACTION_ID;
     }
     return false;
 }

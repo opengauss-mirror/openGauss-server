@@ -139,7 +139,7 @@ static void DestroySession(MOT::SessionContext* sessionContext)
     MOT::GetSessionManager()->DestroySessionContext(sessionContext);
 }
 
-// OA: Global map of PG session identification (required for session statistics)
+// Global map of PG session identification (required for session statistics)
 // This approach is safer than saving information in the session context
 static pthread_spinlock_t sessionDetailsLock;
 typedef std::map<MOT::SessionId, pair<::ThreadId, pg_time_t>> SessionDetailsMap;
@@ -752,7 +752,7 @@ void report_pg_error(MOT::RC rc, MOT::TxnManager* txn, void* arg1, void* arg2, v
         }
         case MOT::RC_PANIC: {
             char* msg = (char*)arg1;
-            ereport(FATAL,
+            ereport(PANIC,
                 (errmodule(MOD_MOT), errcode(err->m_pgErr), errmsg("%s", err->m_msg), errdetail(err->m_detail, msg)));
             break;
         }
@@ -1114,78 +1114,105 @@ void MOTAdaptor::DestroyTxn(int status, Datum ptr)
     MOTOnThreadShutdown();
 }
 
-MOT::RC MOTAdaptor::Commit(::TransactionId tid)
+MOT::RC MOTAdaptor::ValidateCommit()
 {
     EnsureSafeThreadAccessInline();
     MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     if (!IS_PGXC_COORDINATOR) {
-        return txn->Commit(tid);
+        return txn->ValidateCommit();
     } else {
-        return txn->LiteCommit(tid);
-    }
-}
-
-MOT::RC MOTAdaptor::EndTransaction(::TransactionId tid)
-{
-    EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
-    if (!IS_PGXC_COORDINATOR) {
-        return txn->EndTransaction();
-    } else {
-        // currently no call to end_transaction on coordinator
+        // Nothing to do in coordinator
         return MOT::RC_OK;
     }
 }
 
-MOT::RC MOTAdaptor::Rollback(::TransactionId tid)
+void MOTAdaptor::RecordCommit(uint64_t csn)
+{
+    EnsureSafeThreadAccessInline();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
+    txn->SetCommitSequenceNumber(csn);
+    if (!IS_PGXC_COORDINATOR) {
+        txn->RecordCommit();
+    } else {
+        txn->LiteCommit();
+    }
+}
+
+MOT::RC MOTAdaptor::Commit(uint64_t csn)
+{
+    EnsureSafeThreadAccessInline();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
+    txn->SetCommitSequenceNumber(csn);
+    if (!IS_PGXC_COORDINATOR) {
+        return txn->Commit();
+    } else {
+        txn->LiteCommit();
+        return MOT::RC_OK;
+    }
+}
+
+void MOTAdaptor::EndTransaction()
+{
+    EnsureSafeThreadAccessInline();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
+    // Nothing to do in coordinator
+    if (!IS_PGXC_COORDINATOR) {
+        txn->EndTransaction();
+    }
+}
+
+void MOTAdaptor::Rollback()
 {
     EnsureSafeThreadAccessInline();
     MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     if (!IS_PGXC_COORDINATOR) {
-        return txn->Rollback(tid);
+        txn->Rollback();
     } else {
-        return txn->LiteRollback(tid);
+        txn->LiteRollback();
     }
 }
 
-MOT::RC MOTAdaptor::Prepare(::TransactionId tid)
+MOT::RC MOTAdaptor::Prepare()
 {
     EnsureSafeThreadAccessInline();
     MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     if (!IS_PGXC_COORDINATOR) {
-        return txn->Prepare(tid);
+        return txn->Prepare();
     } else {
-        return txn->LitePrepare(tid);
+        txn->LitePrepare();
+        return MOT::RC_OK;
     }
 }
 
-MOT::RC MOTAdaptor::CommitPrepared(::TransactionId tid)
+void MOTAdaptor::CommitPrepared(uint64_t csn)
+{
+    EnsureSafeThreadAccessInline();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
+    txn->SetCommitSequenceNumber(csn);
+    if (!IS_PGXC_COORDINATOR) {
+        txn->CommitPrepared();
+    } else {
+        txn->LiteCommitPrepared();
+    }
+}
+
+void MOTAdaptor::RollbackPrepared()
 {
     EnsureSafeThreadAccessInline();
     MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
     if (!IS_PGXC_COORDINATOR) {
-        return txn->CommitPrepared(tid);
+        txn->RollbackPrepared();
     } else {
-        return txn->LiteCommitPrepared(tid);
+        txn->LiteRollbackPrepared();
     }
 }
 
-MOT::RC MOTAdaptor::RollbackPrepared(::TransactionId tid)
+MOT::RC MOTAdaptor::FailedCommitPrepared(uint64_t csn)
 {
     EnsureSafeThreadAccessInline();
     MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
-    if (!IS_PGXC_COORDINATOR) {
-        return txn->RollbackPrepared(tid);
-    } else {
-        return txn->LiteRollbackPrepared(tid);
-    }
-}
-
-MOT::RC MOTAdaptor::FailedCommitPrepared(::TransactionId tid)
-{
-    EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
-    return txn->FailedCommitPrepared(tid);
+    txn->SetCommitSequenceNumber(csn);
+    return txn->FailedCommitPrepared();
 }
 
 MOT::RC MOTAdaptor::InsertRow(MOTFdwStateSt* fdwState, TupleTableSlot* slot)
@@ -2520,7 +2547,7 @@ void MOTAdaptor::DatumToMOTKey(
         case VARCHAROID:
         case CLOBOID:
         case BPCHAROID: {
-            if (expr != nullptr) {  // OA: LLVM passes nullptr for expr parameter
+            if (expr != nullptr) {  // LLVM passes nullptr for expr parameter
                 bool noValue = false;
                 switch (expr->resultType) {
                     case BYTEAOID:
@@ -2570,7 +2597,7 @@ void MOTAdaptor::DatumToMOTKey(
             break;
         }
         case FLOAT4OID: {
-            if (expr != nullptr) {  // OA: LLVM passes nullptr for expr parameter
+            if (expr != nullptr) {  // LLVM passes nullptr for expr parameter
                 if (expr->resultType == FLOAT8OID) {
                     MOT::DoubleConvT dc;
                     MOT::FloatConvT fc;

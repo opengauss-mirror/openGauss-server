@@ -133,9 +133,6 @@ enum TxnState : uint32_t {
 
     /** @var  End Transaction */
     TXN_END_TRANSACTION = 4,
-
-    /** @var  NG asked Envelope to rollback the transaction */
-    TXN_REQUEST_FOR_ROLLBACK = 5
 };
 
 enum TxnCommitStatus : uint32_t {
@@ -235,11 +232,11 @@ enum AccessType : uint8_t {
 
 };
 
-#define BITMAP_BYTE_IX(x) (x >> 3)
+#define BITMAP_BYTE_IX(x) ((x) >> 3)
 #define BITMAP_GETLEN(x) (BITMAP_BYTE_IX(x) + 1)
-#define BITMAP_SET(b, x) (b[BITMAP_BYTE_IX(x)] |= (1 << (x & 0x07)))
-#define BITMAP_CLEAR(b, x) (b[BITMAP_BYTE_IX(x)] &= ~(1 << (x & 0x07)))
-#define BITMAP_GET(b, x) (b[BITMAP_BYTE_IX(x)] & (1 << (x & 0x07)))
+#define BITMAP_SET(b, x) (b[BITMAP_BYTE_IX(x)] |= (1 << ((x) & 0x07)))
+#define BITMAP_CLEAR(b, x) (b[BITMAP_BYTE_IX(x)] &= ~(1 << ((x) & 0x07)))
+#define BITMAP_GET(b, x) (b[BITMAP_BYTE_IX(x)] & (1 << ((x) & 0x07)))
 
 /************************************************/
 // constants
@@ -248,10 +245,10 @@ enum AccessType : uint8_t {
 #define MAX_NUM_THREADS (2048U)
 
 #ifndef UINT64_MAX
-#define UINT64_MAX 18446744073709551615UL
+#define UINT64_MAX (18446744073709551615UL)
 #endif  // UINT64_MAX
 
-#define INVALID_TRANSACTIOIN_ID 0
+#define INVALID_TRANSACTION_ID ((TransactionId)0)  // Equal to InvalidTransactionId in the envelope.
 
 // masstree cleanup
 #define MASSTREE_OBJECT_COUNT_PER_CLEANUP 8000  // max # of objects to free per rcu_quiesce() call
@@ -261,9 +258,9 @@ enum AccessType : uint8_t {
 /* Assumed size of a cache line. */
 #define CACHE_LINE_SIZE 64
 #define CL_SIZE CACHE_LINE_SIZE
-#define SENTINEL_SIZE(x) x->GetSentinelSizeFromPool()
-#define KEY_SIZE_FROM_POOL(x) x->getKeyPoolSize()
-#define ROW_SIZE_FROM_POOL(t) t->GetRowSizeFromPool()
+#define SENTINEL_SIZE(x) ((x)->GetSentinelSizeFromPool())
+#define KEY_SIZE_FROM_POOL(x) ((x)->getKeyPoolSize())
+#define ROW_SIZE_FROM_POOL(t) ((t)->GetRowSizeFromPool())
 #define ONE_MB 1048576
 
 // prefetch instruction

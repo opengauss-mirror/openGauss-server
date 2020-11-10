@@ -89,9 +89,11 @@ public:
      * release the locks associated with all the write access items.
      * @param txMan The committing transaction.
      */
-    bool WriteChanges(TxnManager* txMan);
+    void WriteChanges(TxnManager* txMan);
+
     /** @brief remove all deleted keys from the global indices   */
     void CleanRowsFromIndexes(TxnManager* txMan);
+
     /** @brief Rollack insert-set due to an abort   */
     void RollbackInserts(TxnManager* txMan);
 
@@ -117,18 +119,6 @@ public:
      */
     void CleanUp();
 
-    /**
-     * @brief access write set for cloning
-     */
-    uint32_t GetWriteSetSize() const
-    {
-        return m_writeSetSize;
-    }
-
-    uint32_t GetInsertSetSize() const
-    {
-        return m_insertSetSize;
-    }
     /**
      * @brief Generate an estimation to decide whether to sleep or spin
      * @return result true = high contention
@@ -159,18 +149,21 @@ private:
      * false positive reports).
      */
     bool QuickVersionCheck(const Access* access);
+
     /** @brief Validate Header for insert   */
     bool QuickHeaderValidation(const Access* access);
 
     void ReleaseHeaderLocks(TxnManager* txMan, uint32_t numOfLocks);
+
     /** release all the locked rows    */
     void ReleaseRowsLocks(TxnManager* txMan, uint32_t numOfLocks);
+
     /** @var validate the read set   */
     bool ValidateReadSet(TxnManager* txMan);
+
     /** @brief validate the write set   */
     bool ValidateWriteSet(TxnManager* txMan);
 
-    // Configuration of OCC behavior
     /** @var transaction counter   */
     uint32_t m_txnCounter;
 

@@ -108,6 +108,7 @@ bool CheckpointWorkerPool::Write(Buffer* buffer, Row* row, int fd)
     entryHeader.m_dataLen = row->GetTupleSize();
     entryHeader.m_csn = row->GetCommitSequenceNumber();
     entryHeader.m_rowId = row->GetRowId();
+    MOT_ASSERT((entryHeader.m_csn != CSNManager::INVALID_CSN) && (entryHeader.m_rowId != Row::INVALID_ROW_ID));
     if (!buffer->Append(&entryHeader, sizeof(CheckpointUtils::EntryHeader))) {
         MOT_LOG_ERROR("CheckpointWorkerPool::Write Failed to write entry to buffer");
         return false;
@@ -160,6 +161,8 @@ int CheckpointWorkerPool::Checkpoint(Buffer* buffer, Sentinel* sentinel, int fd,
     bool statusBit = sentinel->GetStableStatus();
     bool deleted = !sentinel->IsCommited(); /* this currently indicates if the row is deleted or not */
 
+    MOT_ASSERT(sentinel->GetStablePreAllocStatus() == false);
+
     do {
         if (statusBit == !m_na) { /* has stable version */
             if (stableRow == nullptr) {
@@ -200,6 +203,11 @@ int CheckpointWorkerPool::Checkpoint(Buffer* buffer, Sentinel* sentinel, int fd,
             }
         }
     } while (0);
+
+    if (isDeleted) {
+        CheckpointUtils::DestroyStableRow(stableRow);
+        sentinel->SetStable(nullptr);
+    }
 
     if (mainRow != nullptr)
         sentinel->Release();

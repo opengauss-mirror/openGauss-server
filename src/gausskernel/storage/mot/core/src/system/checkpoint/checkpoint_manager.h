@@ -77,35 +77,37 @@ public:
     bool Abort();
 
     /**
-     * @brief Sets transaction begin checkpoint state.
+     * @brief Sets transaction commit begin checkpoint state.
      * @param txn Transaction's TxnManger pointer.
      */
-    void BeginTransaction(TxnManager* txn);
+    void BeginCommit(TxnManager* txn);
 
     /**
-     * @brief Sets transaction abort checkpoint state.
+     * @brief Sets transaction commit completed checkpoint state.
      * @param txn Transaction's TxnManger pointer.
      */
-    void AbortTransaction(TxnManager* txn);
+    void EndCommit(TxnManager* txn);
 
     /**
-     * @brief sets transaction commit checkpoint state.
+     * @brief Pre-allocates stable row according to the checkpoint state.
+     *        This is done at the end of occ validation phase to prevent
+     *        failures during actual commit.
      * @param txn Transaction's TxnManger pointer.
+     * @return Boolean value denoting success or failure.
      */
-    void CommitTransaction(TxnManager* txn, int writeSetSize);
+    bool PreAllocStableRow(TxnManager* txnMan, Row* origRow, AccessType type);
 
     /**
-     * @brief Sets transaction completed checkpoint state.
+     * @brief Cleans up and frees all the pre-allocated stable rows.
      * @param txn Transaction's TxnManger pointer.
      */
-    void TransactionCompleted(TxnManager* txn);
+    void FreePreAllocStableRows(TxnManager* txn);
 
     /**
      * @brief Sets stable row according to the checkpoint state.
      * @param txn Transaction's TxnManger pointer.
-     * @return Boolean value denoting success or failure.
      */
-    bool ApplyWrite(TxnManager* txnMan, Row* origRow, AccessType type);
+    void ApplyWrite(TxnManager* txnMan, Row* origRow, AccessType type);
 
     /**
      * @brief Checkpoint task completion callback

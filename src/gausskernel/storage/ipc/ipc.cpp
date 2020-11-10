@@ -65,7 +65,8 @@ extern void AtProcExit_Files(int code, Datum arg);
 extern void audit_processlogout(int code, Datum arg);
 extern void CancelAutoAnalyze();
 
-static void MOTCleanupSession(int code, Datum arg) {
+static void MOTCleanupSession(int code, Datum arg)
+{
     MOTOnSessionClose();
 }
 

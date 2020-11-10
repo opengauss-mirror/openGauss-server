@@ -51,7 +51,6 @@ public:
         return m_surrogateArray[connectionId];
     }
 
-    /**  */
     /**
      * @brief Sets the surrogate key counter for a given connection (save counter during session closure for
      * continuation in a new session with the same connection identifier).
@@ -70,7 +69,7 @@ public:
     inline void ClearSurrogateArray()
     {
         for (uint32_t i = 0; i < m_surrogateArray.size(); ++i) {
-            m_surrogateArray[i].Set(0);
+            m_surrogateArray[i].Set(SurrogateKeyGenerator::INITIAL_KEY);
         }
     }
 

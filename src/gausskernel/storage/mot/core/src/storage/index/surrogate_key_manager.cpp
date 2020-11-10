@@ -32,7 +32,7 @@ namespace MOT {
 bool SurrogateKeyManager::Initialize(uint16_t maxConnectionCount)
 {
     for (uint64_t i = 0; i < maxConnectionCount; i++) {
-        m_surrogateArray.push_back(SurrogateKeyGenerator(0));
+        m_surrogateArray.push_back(SurrogateKeyGenerator());
     }
     return true;
 }

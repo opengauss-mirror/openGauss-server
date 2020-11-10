@@ -99,9 +99,11 @@ uint32_t RecoveryManager::RecoverLogOperationCreateTable(
     size_t bufSize = 0;
     Extract(data, bufSize);
     Table* table = nullptr;
+
+    MOT_LOG_DEBUG("RecoverLogOperationCreateTable: state %u", state);
+
     switch (state) {
         case COMMIT:
-            MOT_LOG_DEBUG("RecoverLogOperationCreateTable: COMMIT");
             CreateTable((char*)data, status, table, TRANSACTIONAL);
             break;
 
@@ -126,7 +128,6 @@ uint32_t RecoveryManager::RecoverLogOperationCreateTable(
 
         case TPC_COMMIT:
         case TPC_ABORT:
-            MOT_LOG_INFO("RecoverLogOperationCreateTable: %s", (state == TPC_COMMIT) ? "TPC_COMMIT" : "TPC_ABORT");
             Table::DeserializeNameAndIds((const char*)data, tableId, extId, tableName, longName);
             it = GetRecoveryManager()->m_preCommitedTables.find(tableId);
             if (it != GetRecoveryManager()->m_preCommitedTables.end()) {
@@ -452,10 +453,7 @@ uint32_t RecoveryManager::RecoverLogOperationCommit(uint8_t* data, uint64_t csn,
 uint32_t RecoveryManager::RecoverLogOperationRollback(uint8_t* data, uint64_t csn, uint32_t tid, RC& status)
 {
     // OperationCode + CSN + transaction_type + commit_counter + transaction_id
-    status = MOT::GetRecoveryManager()->RollbackTransaction();
-    if (status != RC_OK) {
-        MOT_LOG_ERROR("Failed to rollback row recovery from log: %s (error code: %d)", RcToString(status), (int)status);
-    }
+    MOT::GetRecoveryManager()->RollbackTransaction();
     return sizeof(EndSegmentBlock);
 }
 
@@ -731,7 +729,6 @@ void RecoveryManager::CreateTable(char* data, RC& status, Table*& table, CreateT
             table->GetTableId(),
             method);
         return;
-
     } while (0);
 
     MOT_LOG_ERROR("RecoveryManager::CreateTable: failed to recover table");
@@ -1064,7 +1061,7 @@ void RecoveryManager::RecoverTwoPhaseCommit(Table* table, OperationCode opCode, 
             MOT_LOG_DEBUG("recoverTwoPhaseCommit: - remove row [%lu]", transactionId);
             if (!table->RemoveRow(row, tid)) {
                 if (MOT_IS_OOM()) {
-                    // OA: report error if remove row failed due to OOM (what about other errors?)
+                    // report error if remove row failed due to OOM (what about other errors?)
                     MOT_REPORT_ERROR(
                         MOT_ERROR_OOM, "Recovery Manager 2PC Commit", "failed to remove row due to lack of memory");
                     status = RC_MEMORY_ALLOCATION_ERROR;
@@ -1107,7 +1104,7 @@ void RecoveryManager::RecoverTwoPhaseAbort(
             MOT_LOG_DEBUG("recoverTwoPhaseAbort - insert row [%lu]", transactionId);
             if (!table->RemoveRow(row, tid)) {
                 if (MOT_IS_OOM()) {
-                    // OA: report error if remove row failed due to OOM (what about other errors?)
+                    // report error if remove row failed due to OOM (what about other errors?)
                     MOT_REPORT_ERROR(
                         MOT_ERROR_OOM, "Recovery Manager 2PC Abort", "failed to remove row due to lack of memory");
                     status = RC_MEMORY_ALLOCATION_ERROR;
@@ -1128,62 +1125,57 @@ void RecoveryManager::RecoverTwoPhaseAbort(
 
 bool RecoveryManager::BeginTransaction(uint64_t replayLsn /* = 0 */)
 {
-    bool result = false;
     SessionContext* sessionContext = MOT_GET_CURRENT_SESSION_CONTEXT();
     if (sessionContext == nullptr) {
         MOT_REPORT_ERROR(
             MOT_ERROR_INVALID_STATE, "Recover DB", "Cannot start recovery transaction: no session context");
-    } else {
-        TxnManager* txn = sessionContext->GetTxnManager();
-        txn->StartTransaction(INVALID_TRANSACTIOIN_ID, READ_COMMITED);
-        txn->SetReplayLsn(replayLsn);
-        result = true;
+        return false;
     }
-    return result;
+
+    MOT_LOG_DEBUG("Start recovery Transaction, replayLsn %lu", replayLsn);
+
+    TxnManager* txn = sessionContext->GetTxnManager();
+    txn->StartTransaction(INVALID_TRANSACTION_ID, READ_COMMITED);
+    txn->SetReplayLsn(replayLsn);
+    return true;
 }
 
 RC RecoveryManager::CommitTransaction(uint64_t csn)
 {
-    RC result = RC_ERROR;
     SessionContext* sessionContext = MOT_GET_CURRENT_SESSION_CONTEXT();
     if (sessionContext == nullptr) {
         MOT_REPORT_ERROR(
             MOT_ERROR_INVALID_STATE, "Recover DB", "Cannot commit recovery transaction: no session context");
+        return RC_ERROR;
+    }
+
+    MOT_LOG_DEBUG("Commit recovery transaction, csn %lu", csn);
+
+    TxnManager* txn = sessionContext->GetTxnManager();
+    txn->SetCommitSequenceNumber(csn);
+    RC result = txn->Commit();
+    if (result != RC_OK) {
+        MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
+            "Recover DB",
+            "Failed to commit recovery transaction: %s (error code: %d)",
+            RcToString(result),
+            (int)result);
+        txn->Rollback();
     } else {
-        TxnManager* txn = sessionContext->GetTxnManager();
-        result = txn->Commit(INVALID_TRANSACTIOIN_ID, csn);
-        if (result != RC_OK) {
-            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
-                "Recover DB",
-                "Failed to commit recovery transaction: %s (error code: %d)",
-                RcToString(result),
-                (int)result);
-            txn->Rollback();
-        } else {
-            txn->EndTransaction();
-        }
+        txn->EndTransaction();
     }
     return result;
 }
 
-RC RecoveryManager::RollbackTransaction()
+void RecoveryManager::RollbackTransaction()
 {
-    RC result = RC_ERROR;
     SessionContext* sessionContext = MOT_GET_CURRENT_SESSION_CONTEXT();
     if (sessionContext == nullptr) {
         MOT_REPORT_ERROR(
             MOT_ERROR_INVALID_STATE, "Recover DB", "Cannot rollback recovery transaction: no session context");
-    } else {
-        TxnManager* txn = sessionContext->GetTxnManager();
-        result = txn->Rollback();
-        if (result != RC_OK) {
-            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
-                "Recover DB",
-                "Failed to rollback recovery transaction: %s (error code: %d)",
-                RcToString(result),
-                (int)result);
-        }
+        return;
     }
-    return result;
+    TxnManager* txn = sessionContext->GetTxnManager();
+    txn->Rollback();
 }
 }  // namespace MOT

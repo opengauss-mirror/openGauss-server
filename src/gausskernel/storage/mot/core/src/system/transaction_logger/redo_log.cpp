@@ -428,7 +428,9 @@ void RedoLog::ResetBuffer()
         if (m_redoBuffer == nullptr) {
             m_redoBuffer = m_redoLogHandler->CreateBuffer();
         }
-        m_redoBuffer->Reset();
+        if (likely(m_redoBuffer != nullptr)) {
+            m_redoBuffer->Reset();
+        }
     }
 }
 

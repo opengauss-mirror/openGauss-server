@@ -37,18 +37,18 @@
 #define XACT_SERIALIZABLE 3
 
 /*
- *	start- and end-of-transaction callbacks for dynamically loaded modules
+ * start- and end-of-transaction callbacks for dynamically loaded modules
  */
 typedef enum {
-    XACT_EVENT_START,   /* For MOT, callback will notify us about new transaction */
+    XACT_EVENT_START,               // For MOT, callback will notify us about new transaction.
     XACT_EVENT_COMMIT,
     XACT_EVENT_END_TRANSACTION,
-    XACT_EVENT_COMMIT_START,
+    XACT_EVENT_RECORD_COMMIT,       // For MOT, to write redo and apply changes (after setCommitCsn).
     XACT_EVENT_ABORT,
     XACT_EVENT_PREPARE,
     XACT_EVENT_COMMIT_PREPARED,
     XACT_EVENT_ROLLBACK_PREPARED,
-    XACT_EVENT_PREROLLBACK_CLEANUP
+    XACT_EVENT_PREROLLBACK_CLEANUP  // For MOT, to cleanup some internal resources.
 } XactEvent;
 
 typedef void (*XactCallback)(XactEvent event, void* arg);

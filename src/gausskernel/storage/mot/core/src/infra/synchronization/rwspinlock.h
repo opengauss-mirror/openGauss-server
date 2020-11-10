@@ -115,7 +115,7 @@ static __LOCK_INLINE void spinlock_unlock(spinlock_t* lock)
  */
 static __LOCK_INLINE int spinlock_trylock(spinlock_t* lock)
 {
-    // OA: conform to pthread_mutex_trylock semantics
+    // conform to pthread_mutex_trylock semantics
     // try to lock - put MEBUSY in lock, if previous value was zero then we are the owners
     if (!xchg_32(lock, MEBUSY))
         return 0;

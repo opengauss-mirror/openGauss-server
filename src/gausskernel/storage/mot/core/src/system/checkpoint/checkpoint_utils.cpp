@@ -32,7 +32,7 @@ DECLARE_LOGGER(CheckpointUtils, Checkpoint);
 
 namespace CheckpointUtils {
 
-extern bool FileExists(std::string fileName)
+bool FileExists(std::string fileName)
 {
     struct stat buf;
     if (stat(fileName.c_str(), &buf) == -1 && errno == ENOENT) {
@@ -43,7 +43,7 @@ extern bool FileExists(std::string fileName)
     return true;
 }
 
-extern bool OpenFileWrite(std::string fileName, FILE*& pFile)
+bool OpenFileWrite(std::string fileName, FILE*& pFile)
 {
     pFile = fopen(fileName.c_str(), "wb");
     if (pFile == nullptr) {
@@ -53,7 +53,7 @@ extern bool OpenFileWrite(std::string fileName, FILE*& pFile)
     return true;
 }
 
-extern bool OpenFileRead(std::string fileName, FILE*& pFile)
+bool OpenFileRead(std::string fileName, FILE*& pFile)
 {
     pFile = fopen(fileName.c_str(), "rb");
     if (pFile == nullptr) {
@@ -63,7 +63,7 @@ extern bool OpenFileRead(std::string fileName, FILE*& pFile)
     return true;
 }
 
-extern bool OpenFileWrite(std::string fileName, int& fd)
+bool OpenFileWrite(std::string fileName, int& fd)
 {
     fd = open(fileName.c_str(), O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR); /* 0600 */
     if (fd == -1) {
@@ -72,7 +72,7 @@ extern bool OpenFileWrite(std::string fileName, int& fd)
     return (fd != -1);
 }
 
-extern bool OpenFileRead(std::string fileName, int& fd)
+bool OpenFileRead(std::string fileName, int& fd)
 {
     fd = open(fileName.c_str(), O_RDONLY);
     if (fd == -1) {
@@ -81,7 +81,7 @@ extern bool OpenFileRead(std::string fileName, int& fd)
     return (fd != -1);
 }
 
-extern int CloseFile(int fd)
+int CloseFile(int fd)
 {
     int rc = close(fd);
     if (rc != 0) {
@@ -90,7 +90,7 @@ extern int CloseFile(int fd)
     return rc;
 }
 
-extern size_t WriteFile(int fd, char* data, size_t len)
+size_t WriteFile(int fd, char* data, size_t len)
 {
     ssize_t wrote = write(fd, (const void*)data, len);
     if (wrote == -1) {
@@ -101,7 +101,7 @@ extern size_t WriteFile(int fd, char* data, size_t len)
     return (size_t)wrote;
 }
 
-extern size_t ReadFile(int fd, char* data, size_t len)
+size_t ReadFile(int fd, char* data, size_t len)
 {
     ssize_t bytesRead = read(fd, (void*)data, len);
     if (bytesRead == -1) {
@@ -112,7 +112,7 @@ extern size_t ReadFile(int fd, char* data, size_t len)
     return (size_t)bytesRead;
 }
 
-extern int FlushFile(int fd)
+int FlushFile(int fd)
 {
     int rc = fdatasync(fd);
     if (rc == -1) {
@@ -121,7 +121,7 @@ extern int FlushFile(int fd)
     return rc;
 }
 
-extern bool SeekFile(int fd, uint64_t offset)
+bool SeekFile(int fd, uint64_t offset)
 {
     int rc = lseek(fd, offset, SEEK_SET);
     if (rc == -1) {
@@ -130,7 +130,7 @@ extern bool SeekFile(int fd, uint64_t offset)
     return (rc != -1);
 }
 
-extern bool GetWorkingDir(std::string& dir)
+bool GetWorkingDir(std::string& dir)
 {
     dir.clear();
     char cwd[maxPath] = {0};
@@ -146,7 +146,7 @@ extern bool GetWorkingDir(std::string& dir)
     return true;
 }
 
-extern void Hexdump(const char* msg, char* b, uint32_t buflen)
+void Hexdump(const char* msg, char* b, uint32_t buflen)
 {
     unsigned char* buf = (unsigned char*)b;
     const size_t bufSize = 256;

@@ -29,6 +29,7 @@
 #include "mot_error.h"
 #include "funcapi.h"
 #include "access/reloptions.h"
+#include "access/transam.h"
 #include "postgres.h"
 
 #include "catalog/pg_foreign_table.h"
@@ -337,7 +338,7 @@ void MOTProcessRecoveredTransaction(uint64_t txid, bool isCommit)
         elog(LOG, "MOTProcessRecoveredTransaction: %lu - %s", txid, isCommit ? "commit" : "abort");
         MOT::TxnManager* mgr = GetSafeTxn(__FUNCTION__);
         uint64_t inTxId = MOT::MOTEngine::GetInstance()->PerformInProcessTx(txid, isCommit);
-        if (inTxId == InvalidTransactionId) {
+        if (inTxId == INVALID_TRANSACTION_ID) {
             ereport(ERROR,
                 (errcode(ERRCODE_INVALID_TRANSACTION_STATE),
                     errmsg("Memory engine: failed to perform commit prepared.")));
@@ -474,7 +475,7 @@ static bool IsValidOption(const char* option, Oid context)
  * Check if there is any memory management module error.
  * If there is any, abort the whole transaction.
  */
-static void MemoryEreportRrror()
+static void MemoryEreportError()
 {
     int result = MOT::GetLastError();
     if (result == MOT_ERROR_INVALID_MEMORY_SIZE) {
@@ -1601,11 +1602,11 @@ static void MOTEndForeignModify(EState* estate, ResultRelInfo* resultRelInfo)
 static void MOTXactCallback(XactEvent event, void* arg)
 {
     int rc = MOT::RC_OK;
-    MOT::TxnManager* mgr = nullptr;
+    MOT::TxnManager* txn = nullptr;
 
     PG_TRY();
     {
-        mgr = GetSafeTxn(__FUNCTION__);
+        txn = GetSafeTxn(__FUNCTION__);
     }
     PG_CATCH();
     {
@@ -1623,19 +1624,22 @@ static void MOTXactCallback(XactEvent event, void* arg)
     PG_END_TRY();
 
     ::TransactionId tid = GetCurrentTransactionIdIfAny();
-    MOT::TxnState txnState = mgr->GetTxnState();
+    if (TransactionIdIsValid(tid)) {
+        txn->SetTransactionId(tid);
+    }
 
-    elog(DEBUG2, "xact_callback event %u", event);
-    elog(DEBUG2, "transaction state %u", txnState);
+    MOT::TxnState txnState = txn->GetTxnState();
+
+    elog(DEBUG2, "xact_callback event %u, transaction state %u, tid %lu", event, txnState, tid);
 
     if (event == XACT_EVENT_START) {
-        elog(DEBUG2, "XACT_EVENT_START tid %lu", tid);
+        elog(DEBUG2, "XACT_EVENT_START, tid %lu", tid);
         if (txnState == MOT::TxnState::TXN_START) {
-            // LIRAN DEBUG !!! Double start
-            MOTAdaptor::Rollback(tid);
+            // Double start!!!
+            MOTAdaptor::Rollback();
         }
         if (txnState != MOT::TxnState::TXN_PREPARE) {
-            mgr->StartTransaction(tid, u_sess->utils_cxt.XactIsoLevel);
+            txn->StartTransaction(tid, u_sess->utils_cxt.XactIsoLevel);
         }
     } else if (event == XACT_EVENT_COMMIT) {
         if (txnState == MOT::TxnState::TXN_END_TRANSACTION) {
@@ -1648,89 +1652,96 @@ static void MOTXactCallback(XactEvent event, void* arg)
             return;
         }
 
-        elog(DEBUG2, "XACT_EVENT_COMMIT, commit, tid %lu", tid);
         if (txnState == MOT::TxnState::TXN_PREPARE) {
-            // in case of commit prepared, any error in the commit phase
-            // should be treated as fatal. Transaction cannot be rolled
-            // back as other node may already commit
-            PG_TRY();
-            {
-                rc = MOTAdaptor::CommitPrepared(tid);
-            }
-            PG_CATCH();
-            {
-                elog(FATAL, "Error during MOT commit prepared, could not write to WAL. Aborting transaction");
-                return;
-            }
-            PG_END_TRY();
-        } else {
-            rc = MOTAdaptor::Commit(tid);
-        }
-
-        if (rc == MOT::RC_PANIC) {
-            report_pg_error(MOT::RC_PANIC, mgr, (char*)"Checkpoint Memory Allocation Failure (commit)");
+            // Transaction is in prepare state, it's 2pc transaction. Nothing to do in XACT_EVENT_COMMIT.
+            // Actual CommitPrepared will be done when XACT_EVENT_RECORD_COMMIT is called by the envelope.
+            elog(DEBUG2,
+                "XACT_EVENT_COMMIT, transaction is in prepare state, awaiting XACT_EVENT_RECORD_COMMIT, tid %lu",
+                tid);
             return;
         }
 
+        elog(DEBUG2, "XACT_EVENT_COMMIT, tid %lu", tid);
+
+        rc = MOTAdaptor::ValidateCommit();
         if (rc != MOT::RC_OK) {
             elog(DEBUG2, "commit failed");
             elog(DEBUG2, "Abort parent transaction from MOT commit, tid %lu", tid);
-            MemoryEreportRrror();
+            MemoryEreportError();
             abortParentTransactionParamsNoDetail(ERRCODE_T_R_SERIALIZATION_FAILURE,
                 "Commit: could not serialize access due to concurrent update(%d)",
                 txnState);
         }
-        mgr->SetTxnState(MOT::TxnState::TXN_COMMIT);
+        txn->SetTxnState(MOT::TxnState::TXN_COMMIT);
+    } else if (event == XACT_EVENT_RECORD_COMMIT) {
+        if (txnState == MOT::TxnState::TXN_END_TRANSACTION) {
+            elog(DEBUG2, "XACT_EVENT_COMMIT, transaction already in end state, skipping, tid %lu", tid);
+            return;
+        }
+
+        MOT_ASSERT(txnState == MOT::TxnState::TXN_COMMIT || txnState == MOT::TxnState::TXN_PREPARE);
+        elog(DEBUG2, "XACT_EVENT_RECORD_COMMIT, tid %lu", tid);
+
+        // Need to get the envelope CSN for cross transaction support.
+        uint64_t csn = MOT::GetCSNManager().GetNextCSN();
+        if (txnState == MOT::TxnState::TXN_PREPARE) {
+            MOTAdaptor::CommitPrepared(csn);
+        } else {
+            MOTAdaptor::RecordCommit(csn);
+        }
     } else if (event == XACT_EVENT_END_TRANSACTION) {
         if (txnState == MOT::TxnState::TXN_END_TRANSACTION) {
             elog(DEBUG2, "XACT_EVENT_END_TRANSACTION, transaction already in end state, skipping, tid %lu", tid);
             return;
         }
-        elog(DEBUG2, "XACT_EVENT_END_TRANSACTION, id %lu", tid);
-        rc = MOTAdaptor::EndTransaction(tid);
-        if (rc != MOT::RC_OK) {
-            elog(DEBUG2, "end_transaction( failed");
-            elog(DEBUG2, "Abort parent transaction from MOT end_transaction, tid %lu", tid);
-            MemoryEreportRrror();
-            abortParentTransactionParamsNoDetail(ERRCODE_T_R_SERIALIZATION_FAILURE,
-                "End_transaction(: could not serialize access due to concurrent update(%u)",
-                txnState);
-        }
-        mgr->SetTxnState(MOT::TxnState::TXN_END_TRANSACTION);
+        elog(DEBUG2, "XACT_EVENT_END_TRANSACTION, tid %lu", tid);
+        MOTAdaptor::EndTransaction();
+        txn->SetTxnState(MOT::TxnState::TXN_END_TRANSACTION);
     } else if (event == XACT_EVENT_PREPARE) {
-        elog(DEBUG2, "XACT_EVENT_PREPARE, id %lu", tid);
-        rc = MOTAdaptor::Prepare(tid);
+        elog(DEBUG2, "XACT_EVENT_PREPARE, tid %lu", tid);
+        rc = MOTAdaptor::Prepare();
         if (rc != MOT::RC_OK) {
-            elog(DEBUG2, "commit failed");
-            elog(DEBUG2, "Abort parent transaction from MOT commit, tid %lu", tid);
-            MemoryEreportRrror();
+            elog(DEBUG2, "prepare failed");
+            elog(DEBUG2, "Abort parent transaction from MOT prepare, tid %lu", tid);
+            MemoryEreportError();
             abortParentTransactionParamsNoDetail(ERRCODE_T_R_SERIALIZATION_FAILURE,
                 "Prepare: could not serialize access due to concurrent update(%u)",
                 txnState);
         }
-        mgr->SetTxnState(MOT::TxnState::TXN_PREPARE);
+        txn->SetTxnState(MOT::TxnState::TXN_PREPARE);
     } else if (event == XACT_EVENT_ABORT) {
         if (txnState == MOT::TxnState::TXN_PREPARE) {
-            elog(DEBUG2, "XACT_EVENT_ABORT in prepare tid %lu", tid);
-            if (MOTAdaptor::FailedCommitPrepared(tid) == MOT::RC_PANIC)
+            elog(DEBUG2, "XACT_EVENT_ABORT in prepare, tid %lu", tid);
+            // Need to get the envelope CSN for cross transaction support.
+            // Envelope is using a special CSN (COMMITSEQNO_ABORTED) for this case.
+            // Need to consider this and adapt to this when we support 2pc.
+            if (MOTAdaptor::FailedCommitPrepared(MOT::CSNManager::INVALID_CSN) != MOT::RC_OK) {
+                // This is the case where ABORT is done for a prepared transaction in one of the DN, but CN may still
+                // commit this transaction. So we need to save the prepared transaction for further instructions from
+                // CN or gs_clean. If we failed to save it, it's a panic situation.
                 report_pg_error(
-                    MOT::RC_PANIC, mgr, (char*)"Checkpoint Memory Allocation Failure (failedCommitPrepared)");
+                    MOT::RC_PANIC, txn, (char*)"Failed to save prepared transaction data (FailedCommitPrepared)");
+            }
             return;
         } else {
-            elog(DEBUG2, "XACT_EVENT_ABORT tid %lu", tid);
-            MOTAdaptor::Rollback(tid);
+            elog(DEBUG2, "XACT_EVENT_ABORT, tid %lu", tid);
+            MOTAdaptor::Rollback();
         }
 
-        mgr->SetTxnState(MOT::TxnState::TXN_ROLLBACK);
+        txn->SetTxnState(MOT::TxnState::TXN_ROLLBACK);
     } else if (event == XACT_EVENT_COMMIT_PREPARED) {
         if (txnState == MOT::TxnState::TXN_PREPARE) {
-            elog(DEBUG2, "XACT_EVENT_COMMIT_PREPARED tid %lu", tid);
-            rc = MOTAdaptor::CommitPrepared(tid);
+            elog(DEBUG2, "XACT_EVENT_COMMIT_PREPARED, tid %lu", tid);
+            // Need to get the envelope CSN for cross transaction support.
+            uint64_t csn = MOT::GetCSNManager().GetNextCSN();
+            MOTAdaptor::CommitPrepared(csn);
         } else if (txnState == MOT::TxnState::TXN_START) {
-            elog(DEBUG2, "XACT_EVENT_COMMIT_PREPARED tid %lu", tid);
-            rc = MOTAdaptor::Commit(tid);
+            elog(DEBUG2, "XACT_EVENT_COMMIT_PREPARED, tid %lu", tid);
+            // Need to get the envelope CSN for cross transaction support.
+            uint64_t csn = MOT::GetCSNManager().GetNextCSN();
+            rc = MOTAdaptor::Commit(csn);
         } else if (txnState != MOT::TxnState::TXN_ROLLBACK && txnState != MOT::TxnState::TXN_COMMIT) {
-            elog(DEBUG2, "XACT_EVENT_COMMIT_PREPARED, commit, tid %lu", tid);
+            elog(DEBUG2, "XACT_EVENT_COMMIT_PREPARED, tid %lu", tid);
             abortParentTransactionParamsNoDetail(
                 ERRCODE_T_R_SERIALIZATION_FAILURE, "Commit Prepared: commit prepared without prepare (%u)", txnState);
         } else
@@ -1738,21 +1749,21 @@ static void MOTXactCallback(XactEvent event, void* arg)
         if (rc != MOT::RC_OK) {
             elog(DEBUG2, "commit prepared failed");
             elog(DEBUG2, "Abort parent transaction from MOT commit prepared, tid %lu", tid);
-            MemoryEreportRrror();
+            MemoryEreportError();
             abortParentTransactionParamsNoDetail(ERRCODE_T_R_SERIALIZATION_FAILURE,
                 "Commit: could not serialize access due to concurrent update(%u)",
                 txnState);
         }
-        mgr->SetTxnState(MOT::TxnState::TXN_COMMIT);
+        txn->SetTxnState(MOT::TxnState::TXN_COMMIT);
     } else if (event == XACT_EVENT_ROLLBACK_PREPARED) {
-        elog(DEBUG2, "XACT_EVENT_ROLLBACK_PREPARED tid %lu", tid);
+        elog(DEBUG2, "XACT_EVENT_ROLLBACK_PREPARED, tid %lu", tid);
         if (txnState != MOT::TxnState::TXN_PREPARE) {
             elog(DEBUG2, "Rollback prepared and txn is not in prepare state, tid %lu", tid);
         }
-        MOTAdaptor::RollbackPrepared(tid);
-        mgr->SetTxnState(MOT::TxnState::TXN_ROLLBACK);
+        MOTAdaptor::RollbackPrepared();
+        txn->SetTxnState(MOT::TxnState::TXN_ROLLBACK);
     } else if (event == XACT_EVENT_PREROLLBACK_CLEANUP) {
-        CleanQueryStatesOnError(mgr);
+        CleanQueryStatesOnError(txn);
     }
 }
 
@@ -1815,7 +1826,7 @@ static void MOTCheckpointCallback(CheckpointEvent checkpointEvent, uint64_t lsn,
 
     if (!status) {
         // we treat errors fatally.
-        ereport(FATAL,
+        ereport(PANIC,
             (MOTXlateCheckpointErr(engine->GetCheckpointErrCode()), errmsg("%s", engine->GetCheckpointErrStr())));
     }
 }

@@ -64,7 +64,7 @@ public:
         S_STATUS_MASK = ~S_STATUS_BITS
     };
 
-    enum StableRowFlags : uint64_t { STABLE_BIT = 1UL << 63 };
+    enum StableRowFlags : uint64_t { STABLE_BIT = 1UL << 63, PRE_ALLOC_BIT = 1UL << 62 };
 
     inline bool IsCommited() const
     {
@@ -307,6 +307,20 @@ public:
     {
         return reinterpret_cast<Row*>((uint64_t)(m_stable & S_OBJ_ADDRESS_MASK));
     };
+
+    inline bool GetStablePreAllocStatus() const
+    {
+        return (m_stable & PRE_ALLOC_BIT) == PRE_ALLOC_BIT;
+    }
+
+    inline void SetStablePreAllocStatus(bool val)
+    {
+        if (val == true) {
+            m_stable |= PRE_ALLOC_BIT;
+        } else {
+            m_stable &= ~PRE_ALLOC_BIT;
+        }
+    }
 
     void SetLockOwner(uint64_t tid)
     {

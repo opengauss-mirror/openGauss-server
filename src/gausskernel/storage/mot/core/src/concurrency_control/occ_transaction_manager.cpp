@@ -302,13 +302,34 @@ RC OccTransactionManager::ValidateOcc(TxnManager* txMan)
         goto final;
     }
 
+    if (GetGlobalConfiguration().m_enableCheckpoint) {
+        GetCheckpointManager()->BeginCommit(txMan);
+
+        for (const auto& raPair : orderedSet) {
+            const Access* access = raPair.second;
+            if (access->m_type == RD) {
+                continue;
+            }
+            if (access->m_params.IsPrimarySentinel()) {
+                if (!GetCheckpointManager()->PreAllocStableRow(txMan, access->GetRowFromHeader(), access->m_type)) {
+                    GetCheckpointManager()->FreePreAllocStableRows(txMan);
+                    GetCheckpointManager()->EndCommit(txMan);
+                    rc = RC_MEMORY_ALLOCATION_ERROR;
+                    goto final;
+                }
+            }
+        }
+    }
+
 final:
-    if (__builtin_expect(rc == RC_ABORT, 0)) {
-        ReleaseHeaderLocks(txMan, numSentinelLock);
-        m_abortsCounter++;
-    } else {
+    if (likely(rc == RC_OK)) {
         MOT_ASSERT(numSentinelLock == m_writeSetSize);
         m_rowsLocked = true;
+    } else {
+        ReleaseHeaderLocks(txMan, numSentinelLock);
+        if (likely(rc == RC_ABORT)) {
+            m_abortsCounter++;
+        }
     }
 
     return rc;
@@ -319,15 +340,32 @@ void OccTransactionManager::RollbackInserts(TxnManager* txMan)
     return txMan->UndoInserts();
 }
 
-bool OccTransactionManager::WriteChanges(TxnManager* txMan)
+void OccTransactionManager::WriteChanges(TxnManager* txMan)
 {
     if (m_writeSetSize == 0 && m_insertSetSize == 0) {
-        return true;
+        return;
     }
+
     LockRows(txMan, m_rowsSetSize);
     MOTConfiguration& cfg = GetGlobalConfiguration();
 
     TxnOrderedSet_t& orderedSet = txMan->m_accessMgr->GetOrderedRowSet();
+
+    // Stable rows for checkpoint needs to be created (copied from original row) before modifying the global rows.
+    if (cfg.m_enableCheckpoint) {
+        for (const auto& raPair : orderedSet) {
+            const Access* access = raPair.second;
+            if (access->m_type == RD) {
+                continue;
+            }
+            if (access->m_params.IsPrimarySentinel()) {
+                // Pass the actual global row (access->GetRowFromHeader()), so that the stable row will have the
+                // same CSN, rowid, etc as the original row before the modifications are applied.
+                GetCheckpointManager()->ApplyWrite(txMan, access->GetRowFromHeader(), access->m_type);
+            }
+        }
+    }
+
     // Update CSN with all relevant information on global rows
     // For deletes invalidate sentinels - rows still locked!
     for (const auto& raPair : orderedSet) {
@@ -386,20 +424,6 @@ bool OccTransactionManager::WriteChanges(TxnManager* txMan)
         }
     }
 
-    if (cfg.m_enableCheckpoint) {
-        for (const auto& raPair : orderedSet) {
-            const Access* access = raPair.second;
-            if (access->m_type == RD) {
-                continue;
-            }
-            if (access->m_params.IsPrimarySentinel()) {
-                if (!GetCheckpointManager()->ApplyWrite(txMan, access->GetTxnRow(), access->m_type)) {
-                    return false;
-                }
-            }
-        }
-    }
-
     // Treat Inserts
     if (m_insertSetSize > 0) {
         for (const auto& raPair : orderedSet) {
@@ -412,12 +436,6 @@ bool OccTransactionManager::WriteChanges(TxnManager* txMan)
     }
 
     CleanRowsFromIndexes(txMan);
-
-    if (cfg.m_enableCheckpoint) {
-        GetCheckpointManager()->CommitTransaction(txMan, m_rowsSetSize);
-    }
-
-    return true;
 }
 
 void OccTransactionManager::CleanRowsFromIndexes(TxnManager* txMan)

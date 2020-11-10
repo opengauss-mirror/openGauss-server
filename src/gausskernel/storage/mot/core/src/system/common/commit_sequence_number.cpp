@@ -31,7 +31,7 @@
 namespace MOT {
 DECLARE_LOGGER(CSNManager, System);
 
-CSNManager::CSNManager() : m_csn(MOT_INITIAL_CSN)
+CSNManager::CSNManager() : m_csn(INITIAL_CSN)
 {}
 
 CSNManager::~CSNManager()
@@ -51,6 +51,7 @@ RC CSNManager::SetCSN(uint64_t value)
 uint64_t CSNManager::GetNextCSN()
 {
     if (MOTEngine::GetInstance() && MOTEngine::GetInstance()->IsRecovering()) {
+        // Read queries on standby
         MOT_LOG_DEBUG("CSN increment is not supported during recovery");
         return 0;
     } else {
