@@ -80,5 +80,6 @@ test: duplicate_column_index
 test: initdb
 # test explain gather
 test: explain_gather
-test: password_length
+test: gs_guc_show_error
 test: line_operator
+test: synchronous_commit_test
