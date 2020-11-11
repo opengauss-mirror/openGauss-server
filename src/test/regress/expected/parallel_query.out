@@ -1,5 +1,6 @@
 create table parallel_t1(a int);
 insert into parallel_t1 values(generate_series(1,100000));
+analyze parallel_t1;
 --normal plan for seq scan
 explain (costs off) select count(*) from parallel_t1;
           QUERY PLAN           
@@ -158,7 +159,6 @@ select count(*) from parallel_t1 where a <> 5000;
 (1 row)
 
 --clean up
-drop table parallel_t1;
 reset force_parallel_mode;
 reset parallel_setup_cost;
 reset parallel_tuple_cost;
@@ -169,6 +169,34 @@ reset parallel_leader_participation;
 create table parallel_t2(a int, b int);
 insert into parallel_t2 values(generate_series(1,100000), generate_series(1,100000));
 create index t2_idx on parallel_t2 using btree(a);
+analyze parallel_t2;
+--normal plan for merge join
+set enable_hashjoin to off;
+set enable_nestloop to off;
+set enable_indexscan to off;
+explain (costs off) select count(*) from parallel_t1,parallel_t2 where parallel_t1.a=parallel_t2.a;
+                     QUERY PLAN                      
+-----------------------------------------------------
+ Aggregate
+   ->  Merge Join
+         Merge Cond: (parallel_t1.a = parallel_t2.a)
+         ->  Sort
+               Sort Key: parallel_t1.a
+               ->  Seq Scan on parallel_t1
+         ->  Sort
+               Sort Key: parallel_t2.a
+               ->  Seq Scan on parallel_t2
+(9 rows)
+
+select count(*) from parallel_t1,parallel_t2 where parallel_t1.a=parallel_t2.a;
+ count  
+--------
+ 100000
+(1 row)
+
+reset enable_hashjoin;
+reset enable_nestloop;
+reset enable_indexscan;
 --set index scan parameter
 set enable_seqscan to off;
 set enable_bitmapscan to off;
@@ -246,7 +274,7 @@ select count(b) from parallel_t2 where a < 5000;
 alter table parallel_t2 set (parallel_workers = 1);
 --parallel plan for index scan
 explain (costs off) select count(b) from parallel_t2 where a > 5000;
-                         QUERY PLAN
+                         QUERY PLAN                          
 -------------------------------------------------------------
  Aggregate
    ->  Gather
@@ -256,7 +284,7 @@ explain (costs off) select count(b) from parallel_t2 where a > 5000;
 (5 rows)
 
 explain (costs off) select count(b) from parallel_t2 where a < 5000;
-                         QUERY PLAN
+                         QUERY PLAN                          
 -------------------------------------------------------------
  Aggregate
    ->  Gather
@@ -266,18 +294,50 @@ explain (costs off) select count(b) from parallel_t2 where a < 5000;
 (5 rows)
 
 select count(b) from parallel_t2 where a > 5000;
- count
+ count 
 -------
  95000
 (1 row)
 
 select count(b) from parallel_t2 where a < 5000;
- count
+ count 
 -------
   4999
 (1 row)
 
+--parallel plan for merge join
+reset enable_seqscan;
+reset enable_bitmapscan;
+set enable_hashjoin to off;
+set enable_nestloop to off;
+set enable_indexscan to off;
+explain (costs off) select count(*) from parallel_t1,parallel_t2 where parallel_t1.a=parallel_t2.a;
+                        QUERY PLAN                         
+-----------------------------------------------------------
+ Aggregate
+   ->  Gather
+         Number of Workers: 2
+         ->  Merge Join
+               Merge Cond: (parallel_t1.a = parallel_t2.a)
+               ->  Sort
+                     Sort Key: parallel_t1.a
+                     ->  Parallel Seq Scan on parallel_t1
+               ->  Sort
+                     Sort Key: parallel_t2.a
+                     ->  Seq Scan on parallel_t2
+(11 rows)
+
+select count(*) from parallel_t1,parallel_t2 where parallel_t1.a=parallel_t2.a;
+ count  
+--------
+ 100000
+(1 row)
+
+reset enable_hashjoin;
+reset enable_nestloop;
+reset enable_indexscan;
 --clean up
+drop table parallel_t1;
 drop table parallel_t2;
 reset enable_seqscan;
 reset enable_bitmapscan;

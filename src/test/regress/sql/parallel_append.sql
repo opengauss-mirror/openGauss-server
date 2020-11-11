@@ -49,6 +49,13 @@ select * from (select * from a union all select * from b) as ta, c where ta.a1 =
 select * from d left outer join (select * from a union all select * from b) as t on d.d1=t.a1;
 select d.d1, sum(d.d2), sum(t.a2) from (select * from a union all select * from b) t, d where t.a1=d1 group by d.d1 order by 1,2;
 
+-- set parallel_workers of table a to 0, subplan of seqscan on a should not be paralleled
+alter table a set (parallel_workers=0);
+explain (costs off) select * from d left outer join (select * from a union all select * from b) as t on d.d1=t.a1 order by 1,2,3,4,5,6;
+explain (costs off) select d.d1, sum(d.d2), sum(t.a2) from (select * from a union all select * from b) t, d where t.a1=d1 group by d.d1 order by 1,2;
+select * from d left outer join (select * from a union all select * from b) as t on d.d1=t.a1 order by 1,2,3,4,5,6;
+select d.d1, sum(d.d2), sum(t.a2) from (select * from a union all select * from b) t, d where t.a1=d1 group by d.d1 order by 1,2;
+alter table a reset (parallel_workers);
 
 ---------------------------------------
 -- 2. except && except all

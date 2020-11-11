@@ -134,7 +134,7 @@ extern List* canonicalize_pathkeys(PlannerInfo* root, List* pathkeys);
 extern PathKeysComparison compare_pathkeys(List* keys1, List* keys2);
 extern bool pathkeys_contained_in(List* keys1, List* keys2);
 extern Path* get_cheapest_path_for_pathkeys(
-    List* paths, List* pathkeys, Relids required_outer, CostSelector cost_criterion);
+    List* paths, List* pathkeys, Relids required_outer, CostSelector cost_criterion, bool require_parallel_safe);
 extern Path* get_cheapest_fractional_path_for_pathkeys(
     List* paths, List* pathkeys, Relids required_outer, double fraction);
 extern List* build_index_pathkeys(PlannerInfo* root, IndexOptInfo* index, ScanDirection scandir);

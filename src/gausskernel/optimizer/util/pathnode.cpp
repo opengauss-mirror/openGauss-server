@@ -3816,7 +3816,8 @@ MergePath* create_mergejoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinTyp
     pathnode->jpath.path.parallel_aware = false;
     pathnode->jpath.path.parallel_safe =
         joinrel->consider_parallel && outer_path->parallel_safe && inner_path->parallel_safe;
-    pathnode->jpath.path.parallel_workers = 0;
+    /* This is a foolish way to estimate parallel_workers, but for now... */
+    pathnode->jpath.path.parallel_workers = outer_path->parallel_workers;
     pathnode->jpath.path.pathkeys = pathkeys;
     pathnode->jpath.jointype = jointype;
     pathnode->jpath.outerjoinpath = outer_path;

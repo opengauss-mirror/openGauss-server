@@ -1,5 +1,6 @@
 create table parallel_t1(a int);
 insert into parallel_t1 values(generate_series(1,100000));
+analyze parallel_t1;
 --normal plan for seq scan
 explain (costs off) select count(*) from parallel_t1;
 explain (costs off) select count(*) from parallel_t1 where a = 5000;
@@ -33,7 +34,6 @@ select count(*) from parallel_t1 where a < 5000;
 select count(*) from parallel_t1 where a <> 5000;
 
 --clean up
-drop table parallel_t1;
 reset force_parallel_mode;
 reset parallel_setup_cost;
 reset parallel_tuple_cost;
@@ -45,6 +45,17 @@ reset parallel_leader_participation;
 create table parallel_t2(a int, b int);
 insert into parallel_t2 values(generate_series(1,100000), generate_series(1,100000));
 create index t2_idx on parallel_t2 using btree(a);
+analyze parallel_t2;
+
+--normal plan for merge join
+set enable_hashjoin to off;
+set enable_nestloop to off;
+set enable_indexscan to off;
+explain (costs off) select count(*) from parallel_t1,parallel_t2 where parallel_t1.a=parallel_t2.a;
+select count(*) from parallel_t1,parallel_t2 where parallel_t1.a=parallel_t2.a;
+reset enable_hashjoin;
+reset enable_nestloop;
+reset enable_indexscan;
 
 --set index scan parameter
 set enable_seqscan to off;
@@ -80,7 +91,20 @@ explain (costs off) select count(b) from parallel_t2 where a < 5000;
 select count(b) from parallel_t2 where a > 5000;
 select count(b) from parallel_t2 where a < 5000;
 
+--parallel plan for merge join
+reset enable_seqscan;
+reset enable_bitmapscan;
+set enable_hashjoin to off;
+set enable_nestloop to off;
+set enable_indexscan to off;
+explain (costs off) select count(*) from parallel_t1,parallel_t2 where parallel_t1.a=parallel_t2.a;
+select count(*) from parallel_t1,parallel_t2 where parallel_t1.a=parallel_t2.a;
+reset enable_hashjoin;
+reset enable_nestloop;
+reset enable_indexscan;
+
 --clean up
+drop table parallel_t1;
 drop table parallel_t2;
 reset enable_seqscan;
 reset enable_bitmapscan;

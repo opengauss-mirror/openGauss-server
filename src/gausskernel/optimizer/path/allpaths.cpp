@@ -68,7 +68,6 @@ static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry
 static void create_plain_partial_paths(PlannerInfo* root, RelOptInfo* rel);
 static void set_tablesample_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte);
 static void set_plain_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte);
-static void have_gather_plan_node(Plan* plan, void* context, const char* query_string);
 static void set_rel_consider_parallel(PlannerInfo *root, RelOptInfo *rel, RangeTblEntry *rte);
 static void set_foreign_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte);
 static void set_foreign_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry* rte);
@@ -281,16 +280,6 @@ static void set_base_rel_sizes(PlannerInfo* root)
             set_rel_consider_parallel(root, rel, root->simple_rte_array[rti]);
 
         set_rel_size(root, rel, (Index)rti, root->simple_rte_array[rti]);
-
-        /* we have not merge the commit that change plan generation,
-         * so we temporarily use this function to avoid gather-nesting problem. */
-        if (root->simple_rte_array[rti]->rtekind == RTE_SUBQUERY && rel->subplan != NULL) {
-            bool have_gather = false;
-            have_gather_plan_node(rel->subplan, (void*)&have_gather, NULL);
-            if (have_gather)
-                rel->consider_parallel = false;
-        }
-
         /* Try inlist2join optimization */
         inlist2join_qrw_optimization(root, rti);
     }
@@ -1003,20 +992,6 @@ static void set_plain_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, RangeTblE
 }
 
 /*
- * we have not merge the commit that change plan generation,
- * so we temporarily use this function to avoid gather-nesting problem.
- */
-static void have_gather_plan_node(Plan* plan, void* context, const char* query_string)
-{
-    if (IsA(plan, Gather)) {
-        bool* result = (bool*)context;
-        *result = true;
-    } else {
-        PlanTreeWalker(plan, have_gather_plan_node, context, query_string);
-    }
-}
-
-/*
  * If this relation could possibly be scanned from within a worker, then set
  * its consider_parallel flag.
  */
@@ -1036,9 +1011,10 @@ static void set_rel_consider_parallel(PlannerInfo *root, RelOptInfo *rel, RangeT
 
     /* Assorted checks based on rtekind. */
     switch (rte->rtekind) {
-        case RTE_RELATION:
+        case RTE_RELATION: {
             /*
-             * Currently, parallel workers can't access the leader's temporary
+             * Don't support parallel query in next cases:
+             * 1. Currently, parallel workers can't access the leader's temporary
              * tables.  We could possibly relax this if the wrote all of its
              * local buffers at the start of the query and made no changes
              * thereafter (maybe we could allow hint bit changes), and if we
@@ -1046,14 +1022,14 @@ static void set_rel_consider_parallel(PlannerInfo *root, RelOptInfo *rel, RangeT
              * temporary buffers could be expensive, though, and we don't have
              * the rest of the necessary infrastructure right now anyway.  So
              * for now, bail out if we see a temporary table.
-             *
-             * Don't support parallel query for foreign table.
+             * 2. Global temp table.
+             * 3. Foreign table.
+             * 4. partitioned table.
+             * 5. non row-oriented table.
              */
-            if (get_rel_persistence(rte->relid) == RELPERSISTENCE_TEMP || rte->relkind == RELKIND_FOREIGN_TABLE) {
-                return;
-            }
-            /* Don't support parallel for partitioned table. */
-            if (rte->ispartrel) {
+            char persistence = get_rel_persistence(rte->relid);
+            if (persistence == RELPERSISTENCE_TEMP || persistence == RELPERSISTENCE_GLOBAL_TEMP ||
+                rte->relkind == RELKIND_FOREIGN_TABLE || rte->ispartrel || rel->orientation != REL_ROW_ORIENTED) {
                 return;
             }
 
@@ -1072,7 +1048,7 @@ static void set_rel_consider_parallel(PlannerInfo *root, RelOptInfo *rel, RangeT
                 return;
             }
             break;
-
+        }
         case RTE_SUBQUERY:
             /*
              * Subplans currently aren't passed to workers.  Even if they
@@ -1082,14 +1058,6 @@ static void set_rel_consider_parallel(PlannerInfo *root, RelOptInfo *rel, RangeT
              * involves any parallel-restricted operations.  It would be
              * nice to relax this restriction some day, but it's going to
              * take a fair amount of work.
-             *
-             * we have not merge the commit that change plan generation,
-             * so the problem mentioned above have not been solved very well.
-             * but if rte->kind is RTE_SUBQUERY, it means rel will have subplan
-             * so we temporarily use function have_gather_plan_node to find out
-             * if there is a Gather plan node in rel->subplan, if yes, do not
-             * consider parallel about this rel to avoid gather-nesting problem.
-             * see have_gather_plan_node, and it is not a good idea.
              */
             break;
 
@@ -1862,7 +1830,8 @@ static void add_paths_to_append_rel(PlannerInfo *root, RelOptInfo *rel, List *li
             RelOptInfo* childrel = (RelOptInfo*)lfirst(lcr);
             Path* cheapest_total = NULL;
 
-            cheapest_total = get_cheapest_path_for_pathkeys(childrel->pathlist, NIL, required_outer, TOTAL_COST);
+            cheapest_total = get_cheapest_path_for_pathkeys(childrel->pathlist, NIL,
+                required_outer, TOTAL_COST, false);
 
             AssertEreport(cheapest_total != NULL, MOD_OPT, "");
 
@@ -1938,8 +1907,8 @@ static void generate_mergeappend_paths(PlannerInfo* root, RelOptInfo* rel,
             Path *cheapest_startup, *cheapest_total;
 
             /* Locate the right paths, if they are available. */
-            cheapest_startup = get_cheapest_path_for_pathkeys(childrel->pathlist, pathkeys, NULL, STARTUP_COST);
-            cheapest_total = get_cheapest_path_for_pathkeys(childrel->pathlist, pathkeys, NULL, TOTAL_COST);
+            cheapest_startup = get_cheapest_path_for_pathkeys(childrel->pathlist, pathkeys, NULL, STARTUP_COST, false);
+            cheapest_total = get_cheapest_path_for_pathkeys(childrel->pathlist, pathkeys, NULL, TOTAL_COST, false);
 
             /*
              * If we can't find any paths with the right order just use the
