@@ -160,12 +160,21 @@ public:
     RC StartTransaction(uint64_t transactionId, int isolationLevel);
 
     /**
-     * @brief Commits the transaction (performs OCC validation).
+     * @brief Performs pre-commit validation (OCC validation).
      * @return Result code denoting success or failure.
      */
+    RC ValidateCommit();
+
+    /**
+     * @brief Performs the actual commit (write redo and apply changes).
+     */
+    void RecordCommit();
+
+    /**
+     * @brief Convenience interface which does both ValidateCommit and RecordCommit.
+     */
     RC Commit();
-    RC Commit(uint64_t transcationId, uint64_t csn = MOT_INVALID_CSN);
-    RC LiteCommit(uint64_t transcationId);
+    void LiteCommit();
 
     /**
      * @brief End transaction, release locks and perform cleanups.
@@ -173,71 +182,48 @@ public:
      * commit and is not necessary to be called manually. It propagates the
      * changes to the redo log and prepares this object to execute another
      * transaction.
-     * @return Result code denoting success or failure.
      */
-    RC EndTransaction();
+    void EndTransaction();
 
     /**
      * @brief Commits the prepared transaction in 2PC (performs OCC last validation phase).
      * @return Result code denoting success or failure.
      */
-    RC CommitPrepared();
-    RC CommitPrepared(TransactionId transactionId);
-    RC LiteCommitPrepared(TransactionId transactionId);
+    void CommitPrepared();
+    void LiteCommitPrepared();
 
     /**
      * @brief Prepare the transaction in 2PC (performs OCC first validation phase).
      * @return Result code denoting success or failure.
      */
-    inline RC Prepare()
-    {
-        // Run only first validation phase
-        return Prepare(INVALID_TRANSACTIOIN_ID);
-    }
-    RC Prepare(TransactionId transactionId);
-    RC LitePrepare(TransactionId transactionId);
+    RC Prepare();
+    void LitePrepare();
 
     /**
      * @brief Rolls back the transaction. No changes are propagated to the logs.
-     * @return Return code denoting the execution result.
      */
-    inline RC Rollback()
+    inline void Rollback()
     {
-        return Rollback(INVALID_TRANSACTIOIN_ID);
+        RollbackInternal(false);
     }
 
-    inline RC Rollback(TransactionId transactionId)
-    {
-        if (transactionId != INVALID_TRANSACTIOIN_ID)
-            m_transactionId = transactionId;
-        return RollbackInternal(false);
-    }
-
-    RC LiteRollback(TransactionId transactionId);
+    void LiteRollback();
 
     /**
      * @brief Rollback the prepared transaction in 2PC.
-     * @return Result code denoting success or failure.
      */
-    inline RC RollbackPrepared()
+    inline void RollbackPrepared()
     {
-        return RollbackPrepared(INVALID_TRANSACTIOIN_ID);
+        RollbackInternal(true);
     }
 
-    inline RC RollbackPrepared(TransactionId transactionId)
-    {
-        if (transactionId != INVALID_TRANSACTIOIN_ID)
-            m_transactionId = transactionId;
-        return RollbackInternal(true);
-    }
-
-    RC LiteRollbackPrepared(TransactionId transactionId);
+    void LiteRollbackPrepared();
 
     /**
-     * @brief Handle CommitPrepared failure - keep the rows locked until gsclean releases them.
+     * @brief Handle CommitPrepared failure - keep the rows locked until gs_clean releases them.
      * @return Result code denoting success or failure.
      */
-    RC FailedCommitPrepared(uint64_t transcationId);
+    RC FailedCommitPrepared();
 
     /**
      * @brief Rolls back the transaction. No changes are propagated to the logs.
@@ -494,10 +480,11 @@ private:
     inline void RedoCleanup();
 
     /**
-     * @brief Internal commit (used by commit and commitPrepared)
+     * @brief Internal commit
      */
-    RC CommitInternal(uint64_t csn);
-    RC RollbackInternal(bool isPrepared);
+    void CommitInternal();
+
+    void RollbackInternal(bool isPrepared);
 
     // Disable class level new operator
     /** @cond EXCLUDE_DOC */

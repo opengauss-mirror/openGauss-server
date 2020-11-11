@@ -74,7 +74,6 @@ Key* TxnManager::GetTxnKey(MOT::Index* index)
 
 RC TxnManager::InsertRow(Row* row)
 {
-
     GcSessionStart();
     RC result = m_accessMgr->GetInsertMgr()->ExecuteOptimisticInsert(row);
     if (result == RC_OK) {
@@ -167,50 +166,47 @@ RC TxnManager::StartTransaction(uint64_t transactionId, int isolationLevel)
     return RC_OK;
 }
 
-RC TxnManager::LiteRollback(TransactionId transactionId)
+void TxnManager::LiteRollback()
 {
     if (m_txnDdlAccess->Size() > 0) {
-        if (transactionId != INVALID_TRANSACTIOIN_ID)
-            m_transactionId = transactionId;
-
         RollbackDDLs();
         Cleanup();
     }
     MOT::DbSessionStatisticsProvider::GetInstance().AddRollbackTxn();
-    return RC::RC_ABORT;
 }
 
-RC TxnManager::LiteRollbackPrepared(TransactionId transactionId)
+void TxnManager::LiteRollbackPrepared()
 {
     if (m_txnDdlAccess->Size() > 0) {
-        if (transactionId != INVALID_TRANSACTIOIN_ID)
-            m_transactionId = transactionId;
-
         m_redoLog.RollbackPrepared();
         RollbackDDLs();
         Cleanup();
     }
     MOT::DbSessionStatisticsProvider::GetInstance().AddRollbackPreparedTxn();
-    return RC::RC_ABORT;
 }
 
-RC TxnManager::RollbackInternal(bool isPrepared)
+void TxnManager::RollbackInternal(bool isPrepared)
 {
     if (isPrepared) {
+        if (GetGlobalConfiguration().m_enableCheckpoint) {
+            GetCheckpointManager()->FreePreAllocStableRows(this);
+        }
+
         m_occManager.ReleaseHeaders(this);
         m_redoLog.RollbackPrepared();
     } else {
         m_occManager.ReleaseLocks(this);
     }
+
     // We have to undo changes to secondary indexes and ddls
     m_occManager.RollbackInserts(this);
     RollbackDDLs();
     Cleanup();
-    if (isPrepared)
+    if (isPrepared) {
         MOT::DbSessionStatisticsProvider::GetInstance().AddRollbackPreparedTxn();
-    else
+    } else {
         MOT::DbSessionStatisticsProvider::GetInstance().AddRollbackTxn();
-    return RC::RC_ABORT;
+    }
 }
 
 void TxnManager::CleanTxn()
@@ -218,135 +214,110 @@ void TxnManager::CleanTxn()
     Cleanup();
 }
 
-RC TxnManager::Prepare(TransactionId transactionId)
+RC TxnManager::Prepare()
 {
-    if (transactionId != INVALID_TRANSACTIOIN_ID)
-        m_transactionId = transactionId;
     // Run only first validation phase
     RC rc = m_occManager.ValidateOcc(this);
-    if (rc == RC_OK)
+    if (rc == RC_OK) {
         m_redoLog.Prepare();
+    }
     return rc;
 }
 
-RC TxnManager::LitePrepare(TransactionId transactionId)
+void TxnManager::LitePrepare()
 {
-    if (m_txnDdlAccess->Size() == 0)
-        return RC_OK;
-
-    if (transactionId != INVALID_TRANSACTIOIN_ID)
-        m_transactionId = transactionId;
+    if (m_txnDdlAccess->Size() == 0) {
+        return;
+    }
 
     m_redoLog.Prepare();
-    return RC_OK;
 }
 
-RC TxnManager::CommitInternal(uint64_t csn)
+void TxnManager::CommitInternal()
 {
-    if (csn == MOT_INVALID_CSN) {
+    if (m_csn == CSNManager::INVALID_CSN) {
         SetCommitSequenceNumber(GetCSNManager().GetNextCSN());
-    } else {
-        SetCommitSequenceNumber(csn);  // for recovery
     }
-    // Record the start write phase for this transaction
-    if (GetGlobalConfiguration().m_enableCheckpoint) {
-        GetCheckpointManager()->BeginTransaction(this);
-    }
+
     // first write to redo log, then write changes
     m_redoLog.Commit();
-    if (!m_occManager.WriteChanges(this))
-        return RC_PANIC;
+    m_occManager.WriteChanges(this);
+
     if (GetGlobalConfiguration().m_enableCheckpoint) {
-        GetCheckpointManager()->TransactionCompleted(this);
+        GetCheckpointManager()->EndCommit(this);
     }
+
     if (!GetGlobalConfiguration().m_enableRedoLog ||
         GetGlobalConfiguration().m_redoLogHandlerType == RedoLogHandlerType::ASYNC_REDO_LOG_HANDLER) {
         m_occManager.ReleaseLocks(this);
     }
-    return RC_OK;
+}
+
+RC TxnManager::ValidateCommit()
+{
+    return m_occManager.ValidateOcc(this);
+}
+
+void TxnManager::RecordCommit()
+{
+    CommitInternal();
+    MOT::DbSessionStatisticsProvider::GetInstance().AddCommitTxn();
 }
 
 RC TxnManager::Commit()
 {
-    return Commit(INVALID_TRANSACTIOIN_ID);
-}
-
-RC TxnManager::Commit(uint64_t transcationId, uint64_t csn /* = MOT_INVALID_CSN */)
-{
     // Validate concurrency control
-    if (transcationId != INVALID_TRANSACTIOIN_ID)
-        m_transactionId = transcationId;
-    RC rc = m_occManager.ValidateOcc(this);
+    RC rc = ValidateCommit();
     if (rc == RC_OK) {
-        rc = CommitInternal(csn);
-        MOT::DbSessionStatisticsProvider::GetInstance().AddCommitTxn();
+        RecordCommit();
     }
     return rc;
 }
 
-RC TxnManager::LiteCommit(uint64_t transcationId)
+void TxnManager::LiteCommit()
 {
     if (m_txnDdlAccess->Size() > 0) {
-        if (transcationId != INVALID_TRANSACTIOIN_ID)
-            m_transactionId = transcationId;
-
-        SetCommitSequenceNumber(GetCSNManager().GetNextCSN());
-
-        // first write to redo log, then write changes
+        // write to redo log
         m_redoLog.Commit();
         CleanDDLChanges();
         Cleanup();
     }
     MOT::DbSessionStatisticsProvider::GetInstance().AddCommitTxn();
-    return RC_OK;
 }
 
-RC TxnManager::CommitPrepared()
+void TxnManager::CommitPrepared()
 {
-    return CommitPrepared(INVALID_TRANSACTIOIN_ID);
-}
-
-RC TxnManager::CommitPrepared(uint64_t transactionId)
-{
-    if (transactionId != INVALID_TRANSACTIOIN_ID)
-        m_transactionId = transactionId;
-
-    SetCommitSequenceNumber(GetCSNManager().GetNextCSN());
-    // Record the start write phase for this transaction
-    if (GetGlobalConfiguration().m_enableCheckpoint) {
-        GetCheckpointManager()->BeginTransaction(this);
+    if (m_csn == CSNManager::INVALID_CSN) {
+        SetCommitSequenceNumber(GetCSNManager().GetNextCSN());
     }
+
     // first write to redo log, then write changes
     m_redoLog.CommitPrepared();
+    m_occManager.WriteChanges(this);
 
-    // Run second validation phase
-    if (!m_occManager.WriteChanges(this))
-        return RC_PANIC;
-    GetCheckpointManager()->TransactionCompleted(this);
+    if (GetGlobalConfiguration().m_enableCheckpoint) {
+        GetCheckpointManager()->EndCommit(this);
+    }
+
     if (!GetGlobalConfiguration().m_enableRedoLog ||
         GetGlobalConfiguration().m_redoLogHandlerType == RedoLogHandlerType::ASYNC_REDO_LOG_HANDLER) {
         m_occManager.ReleaseLocks(this);
     }
     MOT::DbSessionStatisticsProvider::GetInstance().AddCommitPreparedTxn();
-    return RC_OK;
 }
 
-RC TxnManager::LiteCommitPrepared(uint64_t transactionId)
+void TxnManager::LiteCommitPrepared()
 {
     if (m_txnDdlAccess->Size() > 0) {
-        if (transactionId != INVALID_TRANSACTIOIN_ID)
-            m_transactionId = transactionId;
-
         // first write to redo log, then write changes
         m_redoLog.CommitPrepared();
         CleanDDLChanges();
         Cleanup();
     }
     MOT::DbSessionStatisticsProvider::GetInstance().AddCommitPreparedTxn();
-    return RC_OK;
 }
 
-RC TxnManager::EndTransaction()
+void TxnManager::EndTransaction()
 {
     if (GetGlobalConfiguration().m_enableRedoLog &&
         GetGlobalConfiguration().m_redoLogHandlerType != RedoLogHandlerType::ASYNC_REDO_LOG_HANDLER &&
@@ -355,7 +326,6 @@ RC TxnManager::EndTransaction()
     }
     CleanDDLChanges();
     Cleanup();
-    return RC::RC_OK;
 }
 
 void TxnManager::RedoWriteAction(bool isCommit)
@@ -367,30 +337,28 @@ void TxnManager::RedoWriteAction(bool isCommit)
         m_redoLog.Rollback();
 }
 
-RC TxnManager::FailedCommitPrepared(uint64_t transcationId)
+RC TxnManager::FailedCommitPrepared()
 {
-    if (m_isLightSession && m_txnDdlAccess->Size() == 0)
+    if (m_isLightSession && m_txnDdlAccess->Size() == 0) {
         return RC_OK;
-    uint64_t used_tid = m_transactionId;
-    if (transcationId != INVALID_TRANSACTIOIN_ID)
-        used_tid = transcationId;
+    }
 
-    SetCommitSequenceNumber(GetCSNManager().GetNextCSN());
-
-    if (GetGlobalConfiguration().m_enableCheckpoint)
-        GetCheckpointManager()->BeginTransaction(this);
+    if (m_csn == CSNManager::INVALID_CSN) {
+        SetCommitSequenceNumber(GetCSNManager().GetNextCSN());
+    }
 
     if (m_isLightSession == false) {
         // Row already Locked!
-        if (!m_occManager.WriteChanges(this))
-            return RC_PANIC;
+        m_occManager.WriteChanges(this);
     }
 
-    if (GetGlobalConfiguration().m_enableCheckpoint)
-        GetCheckpointManager()->TransactionCompleted(this);
+    if (GetGlobalConfiguration().m_enableCheckpoint) {
+        GetCheckpointManager()->EndCommit(this);
+    }
 
-    if (SavePreparedData() != RC_OK)
-        return RC_ERROR;
+    if (SavePreparedData() != RC_OK) {
+        return RC_PANIC;
+    }
 
     Cleanup();
     return RC_OK;
@@ -403,7 +371,7 @@ void TxnManager::Cleanup()
     }
     m_txnDdlAccess->Reset();
     m_checkpointPhase = CheckpointPhase::NONE;
-    m_csn = 0;
+    m_csn = CSNManager::INVALID_CSN;
     m_occManager.CleanUp();
     m_err = RC_OK;
     m_errIx = nullptr;
@@ -426,14 +394,16 @@ void TxnManager::UndoInserts()
         Access* ac = ra_pair.second;
         if (ac->m_type != AccessType::INS) {
             continue;
-        } else {
-            rollbackCounter++;
-            RollbackInsert(ac);
-            m_accessMgr->IncreaseTableStat(ac->GetTxnRow()->GetTable());
         }
+
+        rollbackCounter++;
+        RollbackInsert(ac);
+        m_accessMgr->IncreaseTableStat(ac->GetTxnRow()->GetTable());
     }
 
-    uint32_t counter = rollbackCounter;
+    if (rollbackCounter == 0) {
+        return;
+    }
 
     // Release local rows!
     for (const auto& ra_pair : OrderedSet) {
@@ -446,9 +416,9 @@ void TxnManager::UndoInserts()
                 ac->GetTxnRow()->GetTable()->DestroyRow(ac->GetTxnRow());
             }
             rollbackCounter--;
-        }
-        if (!rollbackCounter) {
-            break;
+            if (rollbackCounter == 0) {
+                break;
+            }
         }
     }
 }
@@ -693,10 +663,10 @@ TxnManager::TxnManager(SessionContext* session_context)
       m_gcSession(nullptr),
       m_checkpointPhase(CheckpointPhase::NONE),
       m_checkpointNABit(false),
-      m_csn(0),
-      m_transactionId(INVALID_TRANSACTIOIN_ID),
+      m_csn(CSNManager::INVALID_CSN),
+      m_transactionId(INVALID_TRANSACTION_ID),
       m_replayLsn(0),
-      m_surrogateGen(0),
+      m_surrogateGen(),
       m_flushDone(false),
       m_internalTransactionId(((uint64_t)m_sessionContext->GetSessionId()) << SESSION_ID_BITS),
       m_internalStmtCount(0),
@@ -713,7 +683,7 @@ TxnManager::TxnManager(SessionContext* session_context)
 TxnManager::~TxnManager()
 {
     if (GetGlobalConfiguration().m_enableCheckpoint) {
-        GetCheckpointManager()->AbortTransaction(this);
+        GetCheckpointManager()->EndCommit(this);
     }
 
     if (m_state == MOT::TxnState::TXN_PREPARE) {
@@ -1298,7 +1268,7 @@ RC TxnManager::SavePreparedData()
         return RC_ERROR;
     }
 
-    if (m_transactionId != INVALID_TRANSACTIOIN_ID) {
+    if (m_transactionId != INVALID_TRANSACTION_ID) {
         MOT_LOG_DEBUG("mapping ext txid %lu to %lu", m_transactionId, m_internalTransactionId);
         MOT::GetRecoveryManager()->UpdateTxIdMap(m_internalTransactionId, m_transactionId);
     }

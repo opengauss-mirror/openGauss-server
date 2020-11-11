@@ -222,7 +222,7 @@ RC Table::DeleteIndex(MOT::Index* index)
 
 bool Table::AddSecondaryIndex(const string& indexName, MOT::Index* index, TxnManager* txn, uint32_t tid)
 {
-    // OA: Should we check for duplicate indices with same name?
+    // Should we check for duplicate indices with same name?
     // first create secondary index data
     bool createdIndexData =
         (txn != nullptr) ? CreateSecondaryIndexData(index, txn) : CreateSecondaryIndexDataNonTransactional(index, tid);
@@ -584,16 +584,6 @@ Row* Table::RemoveKeyFromIndex(Row* row, Sentinel* sentinel, uint64_t tid, GcMan
         if (likely(gc != nullptr)) {
             if (ix->GetIndexOrder() == IndexOrder::INDEX_ORDER_PRIMARY) {
                 OutputRow = currSentinel->GetData();
-                if (currSentinel->GetStable()) {
-#ifdef MOT_DEBUG
-                    if (gc->GetGcType() != GcManager::GC_CHECKPOINT) {
-                        MOT_LOG_ERROR("ERROR!!!! Txn Delete with a stable ROW Type = %c\n", gc->GetGcTypeStr());
-                        MOT_ASSERT(false);
-                    }
-#endif
-                    gc->GcRecordObject(
-                        ix->GetIndexId(), currSentinel->GetStable(), nullptr, Row::RowDtor, ROW_SIZE_FROM_POOL(this));
-                }
                 gc->GcRecordObject(ix->GetIndexId(), currSentinel, nullptr, Index::SentinelDtor, SENTINEL_SIZE(ix));
                 gc->GcRecordObject(ix->GetIndexId(), OutputRow, nullptr, Row::RowDtor, ROW_SIZE_FROM_POOL(this));
             } else {
@@ -1107,7 +1097,7 @@ void Table::Deserialize(const char* in)
     }
 
     uint32_t saveFieldCount = m_fieldCnt;
-    // OA: use interleaved allocation for table columns
+    // use interleaved allocation for table columns
     if (!Init(m_tableName.c_str(), m_longTableName.c_str(), m_fieldCnt, m_tableExId)) {
         MOT_LOG_ERROR("Table::Deserialize - failed to init table");
         return;

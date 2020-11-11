@@ -167,7 +167,7 @@ private:
         return (m_csnWord & CSN_BITS);
     }
 
-    /** Set th CSN of the row   */
+    /** Set the CSN of the row */
     void SetCSN(uint64_t csn)
     {
         m_csnWord = (m_csnWord & STATUS_BITS) | (csn & CSN_BITS);

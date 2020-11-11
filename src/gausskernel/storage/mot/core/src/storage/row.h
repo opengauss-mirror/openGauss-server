@@ -36,7 +36,6 @@
 #include "row_header.h"
 #include "object_pool.h"
 
-#define MAXNUMANODES 8
 // forward declaration
 namespace MOT {
 class OccTransactionManager;
@@ -158,6 +157,20 @@ public:
     {
         CopyData(src->GetData(), src->GetTupleSize());
         m_table = src->m_table;
+    }
+
+    /**
+     * @brief Deep copies the row data (including CSN, rowid, etc) from another Row object.
+     * @param src The source row from which to copy the data.
+     */
+    inline void DeepCopy(const Row* src)
+    {
+        CopyData(src->GetData(), src->GetTupleSize());
+        SetCommitSequenceNumber(src->GetCommitSequenceNumber());
+        m_table = src->m_table;
+        m_surrogateKey = src->m_surrogateKey;
+        m_rowId = src->m_rowId;
+        m_keyType = src->m_keyType;
     }
 
     /**
@@ -502,6 +515,8 @@ public:
         }
         return size;
     }
+
+    static constexpr uint64_t INVALID_ROW_ID = 0;
 
 private:
     /**

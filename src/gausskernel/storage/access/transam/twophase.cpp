@@ -2055,20 +2055,14 @@ void FinishPreparedTransaction(const char* gid, bool isCommit)
     /* compute latestXid among all children */
     latestXid = TransactionIdLatest(xid, hdr->nsubxacts, children);
 
-    if (u_sess->attr.attr_common.xc_maintenance_mode) {
-        /*
-         * Check if this transaction is a MOT engine one.
-         * Do it only in maintenance mode since gs_clean will only be called
-         * in this state.
-         */
-        MOTProcessRecoveredTransaction(xid, isCommit);
-    }
-
     if (!IsParallelWorker()) {
-        if (isCommit) {
-            CallXactCallbacks(XACT_EVENT_COMMIT_PREPARED);
-        } else {
-            CallXactCallbacks(XACT_EVENT_ROLLBACK_PREPARED);
+        if (u_sess->attr.attr_common.xc_maintenance_mode) {
+            /*
+             * Check if this transaction is a MOT engine one.
+             * Do it only in maintenance mode since gs_clean will only be called
+             * in this state.
+             */
+            MOTProcessRecoveredTransaction(xid, isCommit);
         }
     }
 
@@ -2089,6 +2083,11 @@ void FinishPreparedTransaction(const char* gid, bool isCommit)
             XLogInsert(RM_STANDBY_ID, XLOG_STANDBY_CSN_COMMITTING);
         }
         setCommitCsn(getNextCSN());
+
+        if (!IsParallelWorker()) {
+            CallXactCallbacks(XACT_EVENT_COMMIT_PREPARED);
+        }
+
         pgxact->needToSyncXid = true;
         RecordTransactionCommitPrepared(xid,
             hdr->nsubxacts,
@@ -2107,6 +2106,10 @@ void FinishPreparedTransaction(const char* gid, bool isCommit)
             CallXactCallbacks(XACT_EVENT_END_TRANSACTION);
         }
     } else {
+        if (!IsParallelWorker()) {
+            CallXactCallbacks(XACT_EVENT_ROLLBACK_PREPARED);
+        }
+
         RecordTransactionAbortPrepared(xid,
             hdr->nsubxacts,
             children,

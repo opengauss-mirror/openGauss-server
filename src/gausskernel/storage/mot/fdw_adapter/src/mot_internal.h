@@ -52,18 +52,15 @@ using std::string;
 #define MOT_UPDATE_INDEXED_FIELD_NOT_SUPPORTED "Update indexed field \"%s\" in table \"%s\" is not supported"
 
 #define NULL_DETAIL ((char*)nullptr)
-#define abortParentTransaction(msg, detail)                                                                          \
-    ereport(ERROR,                                                                                                   \
-        (errmodule(MOD_MOT), errcode(ERRCODE_FDW_ERROR), errmsg(msg), (detail != nullptr ? errdetail(detail) : 0))); \
-    u_sess->mot_cxt.txn_manager->SetTxnState(MOT::TxnState::TXN_REQUEST_FOR_ROLLBACK);
+#define abortParentTransaction(msg, detail) \
+    ereport(ERROR,                          \
+        (errmodule(MOD_MOT), errcode(ERRCODE_FDW_ERROR), errmsg(msg), (detail != nullptr ? errdetail(detail) : 0)));
 
-#define abortParentTransactionParams(error, msg, msg_p, detail, detail_p)                                  \
-    ereport(ERROR, (errmodule(MOD_MOT), errcode(error), errmsg(msg, msg_p), errdetail(detail, detail_p))); \
-    u_sess->mot_cxt.txn_manager->SetTxnState(MOT::TxnState::TXN_REQUEST_FOR_ROLLBACK);
+#define abortParentTransactionParams(error, msg, msg_p, detail, detail_p) \
+    ereport(ERROR, (errmodule(MOD_MOT), errcode(error), errmsg(msg, msg_p), errdetail(detail, detail_p)));
 
-#define abortParentTransactionParamsNoDetail(error, msg, ...)                       \
-    ereport(ERROR, (errmodule(MOD_MOT), errcode(error), errmsg(msg, __VA_ARGS__))); \
-    u_sess->mot_cxt.txn_manager->SetTxnState(MOT::TxnState::TXN_REQUEST_FOR_ROLLBACK);
+#define abortParentTransactionParamsNoDetail(error, msg, ...) \
+    ereport(ERROR, (errmodule(MOD_MOT), errcode(error), errmsg(msg, __VA_ARGS__)));
 
 #define isMemoryLimitReached()                                                                                         \
     {                                                                                                                  \
@@ -316,6 +313,7 @@ public:
                 break;
         }
     }
+
     static MOT::TxnManager* InitTxnManager(
         const char* callerSrc, MOT::ConnectionId connection_id = INVALID_CONNECTION_ID);
     static void DestroyTxn(int status, Datum ptr);
@@ -330,13 +328,15 @@ public:
     static uint64_t GetTableIndexSize(uint64_t tabId, uint64_t ixId);
     static MotMemoryDetail* GetMemSize(uint32_t* nodeCount, bool isGlobal);
     static MotSessionMemoryDetail* GetSessionMemSize(uint32_t* sessionCount);
-    static MOT::RC Commit(TransactionId tid);
-    static MOT::RC EndTransaction(TransactionId tid);
-    static MOT::RC Rollback(TransactionId tid);
-    static MOT::RC Prepare(TransactionId tid);
-    static MOT::RC CommitPrepared(TransactionId tid);
-    static MOT::RC RollbackPrepared(TransactionId tid);
-    static MOT::RC FailedCommitPrepared(TransactionId tid);
+    static MOT::RC ValidateCommit();
+    static void RecordCommit(uint64_t csn);
+    static MOT::RC Commit(uint64_t csn);  // Does both ValidateCommit and RecordCommit
+    static void EndTransaction();
+    static void Rollback();
+    static MOT::RC Prepare();
+    static void CommitPrepared(uint64_t csn);
+    static void RollbackPrepared();
+    static MOT::RC FailedCommitPrepared(uint64_t csn);
     static MOT::RC InsertRow(MOTFdwStateSt* fdwState, TupleTableSlot* slot);
     static MOT::RC UpdateRow(MOTFdwStateSt* fdwState, TupleTableSlot* slot, MOT::Row* currRow);
     static MOT::RC DeleteRow(MOTFdwStateSt* fdwState, TupleTableSlot* slot);

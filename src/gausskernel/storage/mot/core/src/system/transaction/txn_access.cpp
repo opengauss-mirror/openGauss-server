@@ -291,9 +291,9 @@ Access* TxnAccess::GetNewRowAccess(const Row* row, AccessType type, RC& rc)
         }
         ac = GetAccessPtr(m_rowCnt);
     }
+
     ac->ResetUsedParameters();
-    // LIRAN_RO if local_row is nullptr and type != RD allocate row
-    // If row type = RD use ROW-0
+
     if (type != INS) {
         if (ac->m_localRow == nullptr) {
             Row* new_row = m_dummyTable.CreateNewRow(row->GetTable(), ac);

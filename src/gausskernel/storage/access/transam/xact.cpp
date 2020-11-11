@@ -1482,6 +1482,22 @@ static TransactionId RecordTransactionCommit(void)
         Assert(nchildren == 0);
 
         /*
+         * For MOT, XACT_EVENT_COMMIT will just do the OCC validation.
+         * Actual commit (write redo and apply changes) will be done during XACT_EVENT_RECORD_COMMIT event.
+         * This should be done after setCommitCsn for the transaction.
+         * Note: Currently, MOT only transactions don't use CSN, so we are not calling setCommitCsn here.
+         */
+        CallXactCallbacks(XACT_EVENT_RECORD_COMMIT);
+
+        /*
+         * For MOT, XLOG entries will be written in the above callback for XACT_EVENT_RECORD_COMMIT.
+         * So, we should re-check and update wrote_xlog accordingly.
+         */
+        if (t_thrd.xlog_cxt.XactLastRecEnd != 0) {
+            wrote_xlog = true;
+        }
+
+        /*
          * If we didn't create XLOG entries, we're done here; otherwise we
          * should flush those entries the same as a commit record.	(An
          * example of a possible record that wouldn't cause an XID to be
@@ -1533,6 +1549,13 @@ static TransactionId RecordTransactionCommit(void)
         }
         setCommitCsn(getNextCSN());
 #endif
+
+        /*
+         * For MOT, XACT_EVENT_COMMIT will just do the OCC validation.
+         * Actual commit (write redo and apply changes) will be done during XACT_EVENT_RECORD_COMMIT event.
+         * This should be done after setCommitCsn for the transaction.
+         */
+        CallXactCallbacks(XACT_EVENT_RECORD_COMMIT);
 
         /*
          * Mark ourselves as within our "commit critical section".	This
@@ -2788,13 +2811,11 @@ static void CommitTransaction(bool stpCommit)
      */
     if (!is_parallel_worker) {
         /*
-         * For MOT, CallXactCallbacks should be called be called before RecordTransactionCommit.
-         *
-         * Commit MOT Engine - do this as late as possible to allow
-         * atomic cross transaction between PG tables and MOT tables
-         * in the future.
+         * For MOT, XACT_EVENT_COMMIT will just do the validation.
+         * Actual commit (write redo and apply changes) will be done during XACT_EVENT_RECORD_COMMIT event.
          */
         CallXactCallbacks(XACT_EVENT_COMMIT);
+
         latestXid = RecordTransactionCommit();
     } else {
         /*
@@ -2895,17 +2916,17 @@ static void CommitTransaction(bool stpCommit)
 
     TRACE_POSTGRESQL_TRANSACTION_COMMIT(t_thrd.proc->lxid);
 
-    if (!is_parallel_worker) {
-        /* Release MOT locks */
-        CallXactCallbacks(XACT_EVENT_END_TRANSACTION);
-    }
-
     /*
      * Let others know about no transaction in progress by me. Note that this
      * must be done _before_ releasing locks we hold and _after_
      * RecordTransactionCommit.
      */
     ProcArrayEndTransaction(t_thrd.proc, latestXid);
+
+    if (!is_parallel_worker) {
+        /* Release MOT locks */
+        CallXactCallbacks(XACT_EVENT_END_TRANSACTION);
+    }
 
     /*
      * This is all post-commit cleanup.  Note that if an error is raised here,

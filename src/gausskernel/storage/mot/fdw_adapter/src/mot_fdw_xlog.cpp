@@ -32,6 +32,7 @@
 #include "mot_fdw_xlog.h"
 #include "mot_engine.h"
 #include "recovery_manager.h"
+#include "miscadmin.h"
 
 extern int MOTXlateRecoveryErr(int err);
 
@@ -88,9 +89,11 @@ uint64_t XLOGLogger::AddToLog(MOT::RedoLogBuffer** redoLogBufferArray, uint32_t 
 
 uint64_t XLOGLogger::AddToLog(uint8_t* data, uint32_t size)
 {
+    START_CRIT_SECTION();
     XLogBeginInsert();
     XLogRegisterData((char*)data, size);
     XLogInsert(RM_MOT_ID, MOT_REDO_DATA);
+    END_CRIT_SECTION();
     return size;
 }
 

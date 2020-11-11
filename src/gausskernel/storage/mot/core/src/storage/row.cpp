@@ -31,7 +31,7 @@
 namespace MOT {
 IMPLEMENT_CLASS_LOGGER(Row, Storage);
 
-Row::Row(Table* hostTable) : m_rowHeader(), m_table(hostTable), m_rowId(0), m_keyType(KeyType::EMPTY_KEY)
+Row::Row(Table* hostTable) : m_rowHeader(), m_table(hostTable), m_rowId(INVALID_ROW_ID), m_keyType(KeyType::EMPTY_KEY)
 {}
 
 Row::Row(const Row& src)
@@ -71,7 +71,7 @@ Row* Row::CreateCopy()
 {
     Row* row = m_table->CreateNewRow();
     if (row) {
-        row->Copy(this);
+        row->DeepCopy(this);
     } else {
         MOT_REPORT_ERROR(MOT_ERROR_OOM, "N/A", "Failed to create row copy");
     }

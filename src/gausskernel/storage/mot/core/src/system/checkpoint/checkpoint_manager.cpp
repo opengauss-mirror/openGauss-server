@@ -227,7 +227,7 @@ bool CheckpointManager::Abort()
     return true;
 }
 
-void CheckpointManager::BeginTransaction(TxnManager* txn)
+void CheckpointManager::BeginCommit(TxnManager* txn)
 {
     // This deviates from the CALC algorithm. We don't want transactions
     // to begin in the RESOLVE phase. Transactions for which the commit
@@ -249,39 +249,28 @@ void CheckpointManager::BeginTransaction(TxnManager* txn)
     m_lock.RdUnlock();
 }
 
-void CheckpointManager::AbortTransaction(TxnManager* txn)
-{
-    TransactionCompleted(txn);
-}
-
-void CheckpointManager::CommitTransaction(TxnManager* txn, int writeSetSize)
+void CheckpointManager::FreePreAllocStableRows(TxnManager* txn)
 {
     TxnOrderedSet_t& orderedSet = txn->m_accessMgr->GetOrderedRowSet();
-    if (txn->m_checkpointPhase == PREPARE) {
-        // This deviates from CALC original algorithm...
-        // All transactions started in PREPARE phase should be part of the
-        // checkpoint regardless of their completion phase. This is needed
-        // because redo point is taken later in the capture phase.
-        const Access* access = nullptr;
-        for (const auto& ra_pair : orderedSet) {
-            access = ra_pair.second;
-            if (access->m_type == RD) {
-                continue;
-            }
-            if (access->m_params.IsPrimarySentinel()) {
-                MOT_ASSERT(access->GetRowFromHeader()->GetPrimarySentinel());
-                CheckpointUtils::DestroyStableRow(access->GetRowFromHeader()->GetStable());
-                access->GetRowFromHeader()->GetPrimarySentinel()->SetStable(nullptr);
-                writeSetSize--;
-            }
-            if (!writeSetSize) {
-                break;
+    const Access* access = nullptr;
+    for (const auto& ra_pair : orderedSet) {
+        access = ra_pair.second;
+        if (access->m_type == RD || access->m_type == INS) {
+            continue;
+        }
+        if (access->m_params.IsPrimarySentinel()) {
+            Sentinel* s = access->GetRowFromHeader()->GetPrimarySentinel();
+            MOT_ASSERT(s != nullptr);
+            if (s->GetStablePreAllocStatus()) {
+                CheckpointUtils::DestroyStableRow(s->GetStable());
+                s->SetStable(nullptr);
+                s->SetStablePreAllocStatus(false);
             }
         }
     }
 }
 
-void CheckpointManager::TransactionCompleted(TxnManager* txn)
+void CheckpointManager::EndCommit(TxnManager* txn)
 {
     if (txn->m_checkpointPhase == CheckpointPhase::NONE) {
         return;
@@ -387,43 +376,53 @@ const char* CheckpointManager::PhaseToString(CheckpointPhase phase)
     return "UNKNOWN";
 }
 
-bool CheckpointManager::ApplyWrite(TxnManager* txnMan, Row* origRow, AccessType type)
+bool CheckpointManager::PreAllocStableRow(TxnManager* txnMan, Row* origRow, AccessType type)
 {
     CheckpointPhase startPhase = txnMan->m_checkpointPhase;
     MOT_ASSERT(startPhase != RESOLVE);
     Sentinel* s = origRow->GetPrimarySentinel();
-    MOT_ASSERT(s);
-    if (s == nullptr) {
-        MOT_LOG_ERROR("No sentinel on row!");
-        return false;
+    MOT_ASSERT(s != nullptr);
+
+    bool statusBit = s->GetStableStatus();
+    if (startPhase == CAPTURE && type != INS && statusBit == !m_availableBit) {
+        MOT_ASSERT(s->GetStablePreAllocStatus() == false);
+        if (!CheckpointUtils::CreateStableRow(origRow)) {
+            MOT_LOG_ERROR("Failed to create stable row");
+            return false;
+        }
+        s->SetStablePreAllocStatus(true);
     }
+
+    return true;
+}
+
+void CheckpointManager::ApplyWrite(TxnManager* txnMan, Row* origRow, AccessType type)
+{
+    CheckpointPhase startPhase = txnMan->m_checkpointPhase;
+    MOT_ASSERT(startPhase != RESOLVE);
+    Sentinel* s = origRow->GetPrimarySentinel();
+    MOT_ASSERT(s != nullptr);
 
     bool statusBit = s->GetStableStatus();
     switch (startPhase) {
         case REST:
-            if (type == INS) {
-                s->SetStableStatus(!m_availableBit);
-            }
-            break;
         case PREPARE:
             if (type == INS) {
                 s->SetStableStatus(!m_availableBit);
-            } else if (statusBit == !m_availableBit) {
-                if (!CheckpointUtils::SetStableRow(origRow)) {
-                    return false;
-                }
             }
             break;
         case RESOLVE:
+            MOT_LOG_ERROR("No transactions are allowed to start commit in ckpt RESOVE phase");
+            MOT_ASSERT(false);
+            break;
         case CAPTURE:
             if (type == INS) {
                 s->SetStableStatus(m_availableBit);
             } else {
                 if (statusBit == !m_availableBit) {
-                    if (!CheckpointUtils::SetStableRow(origRow)) {
-                        return false;
-                    }
+                    MOT_ASSERT((s->GetStable() != nullptr) && (s->GetStablePreAllocStatus() == true));
                     s->SetStableStatus(m_availableBit);
+                    s->SetStablePreAllocStatus(false);
                 }
             }
             break;
@@ -434,9 +433,8 @@ bool CheckpointManager::ApplyWrite(TxnManager* txnMan, Row* origRow, AccessType 
             break;
         default:
             MOT_LOG_ERROR("Unknown transaction start phase: %s", CheckpointManager::PhaseToString(startPhase));
+            MOT_ASSERT(false);
     }
-
-    return true;
 }
 
 void CheckpointManager::FillTasksQueue()

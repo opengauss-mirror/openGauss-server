@@ -43,7 +43,7 @@ namespace CheckpointUtils {
  * @param fileName The file name to check
  * @return Boolean value denoting success or failure.
  */
-extern bool FileExists(std::string fileName);
+bool FileExists(std::string fileName);
 
 /**
  * @brief A wrapper function that opens a file for writing.
@@ -51,7 +51,7 @@ extern bool FileExists(std::string fileName);
  * @param pFile The returned FILE* pointer
  * @return Boolean value denoting success or failure.
  */
-extern bool OpenFileWrite(std::string fileName, FILE*& pFile);
+bool OpenFileWrite(std::string fileName, FILE*& pFile);
 
 /**
  * @brief A wrapper function that opens a file for reading.
@@ -59,7 +59,7 @@ extern bool OpenFileWrite(std::string fileName, FILE*& pFile);
  * @param pFile The returned FILE* pointer
  * @return Boolean value denoting success or failure.
  */
-extern bool OpenFileRead(std::string fileName, FILE*& pFile);
+bool OpenFileRead(std::string fileName, FILE*& pFile);
 
 /**
  * @brief A wrapper function that opens a file for writing.
@@ -67,7 +67,7 @@ extern bool OpenFileRead(std::string fileName, FILE*& pFile);
  * @param fd The returned file descriptor
  * @return Boolean value denoting success or failure.
  */
-extern bool OpenFileWrite(std::string fileName, int& fd);
+bool OpenFileWrite(std::string fileName, int& fd);
 
 /**
  * @brief A wrapper function that opens a file for reading.
@@ -75,14 +75,14 @@ extern bool OpenFileWrite(std::string fileName, int& fd);
  * @param fd The returned file descriptor
  * @return Boolean value denoting success or failure.
  */
-extern bool OpenFileRead(std::string fileName, int& fd);
+bool OpenFileRead(std::string fileName, int& fd);
 
 /**
  * @brief a wrapper function that closes a file fd.
  * @param fd The file descriptor to close
  * @return Int value that equals to 0 on success.
  */
-extern int CloseFile(int fd);
+int CloseFile(int fd);
 
 /**
  * @brief A wrapper function that writes to a file fd.
@@ -91,7 +91,7 @@ extern int CloseFile(int fd);
  * @param len The number of bytes to write
  * @return size_t value equals to the bytes that were written.
  */
-extern size_t WriteFile(int fd, char* data, size_t len);
+size_t WriteFile(int fd, char* data, size_t len);
 
 /**
  * @brief A wrapper function that reads from a file fd.
@@ -100,14 +100,14 @@ extern size_t WriteFile(int fd, char* data, size_t len);
  * @param len The number of bytes to read
  * @return size_t The number of bytes that were read.
  */
-extern size_t ReadFile(int fd, char* data, size_t len);
+size_t ReadFile(int fd, char* data, size_t len);
 
 /**
  * @brief A wrapper function that flushes a file fd.
  * @param fd The file descriptor to flush.
  * @return Int value which is equals to -1 on failure.
  */
-extern int FlushFile(int fd);
+int FlushFile(int fd);
 
 /**
  * @brief A wrapper function that seesk within a file fd.
@@ -115,7 +115,7 @@ extern int FlushFile(int fd);
  * @param offset The offset in the file to seek to.
  * @return Boolean value denoting success or failure.
  */
-extern bool SeekFile(int fd, uint64_t offset);
+bool SeekFile(int fd, uint64_t offset);
 
 /**
  * @brief Frees a row's stable version row.
@@ -133,23 +133,24 @@ inline void DestroyStableRow(Row* row)
  * @param origRow The original row which its stable version data needs to be created.
  * @return Boolean value denoting success or failure.
  */
-inline bool SetStableRow(Row* origRow)
+inline bool CreateStableRow(Row* origRow)
 {
     Row* tmpRow = nullptr;
     Sentinel* s = origRow->GetPrimarySentinel();
     MOT_ASSERT(s);
-    if (s == nullptr)
+    if (s == nullptr) {
         return false;
+    }
 
     if (!s->GetStable()) {
         tmpRow = origRow->CreateCopy();
-        if (tmpRow != nullptr) {
-            s->SetStable(tmpRow);
-        } else
+        if (tmpRow == nullptr) {
             return false;
+        }
+        s->SetStable(tmpRow);
     } else {
         tmpRow = s->GetStable();
-        tmpRow->Copy(origRow);
+        tmpRow->DeepCopy(origRow);
     }
     return true;
 }
@@ -180,7 +181,7 @@ static const size_t maxPath = 1024;
  * @param dir The returned directory string.
  * @return Boolean value denoting success or failure.
  */
-extern bool GetWorkingDir(std::string& dir);
+bool GetWorkingDir(std::string& dir);
 
 /**
  * @brief Creates the checkpoint directory name according to
@@ -346,7 +347,7 @@ struct TpcEntryHeader {
  * @param b The buffer to print.
  * @param bufLen the buffer length
  */
-extern void Hexdump(const char* msg, char* b, uint32_t bufLen);
+void Hexdump(const char* msg, char* b, uint32_t bufLen);
 }  // namespace CheckpointUtils
 }  // namespace MOT
 

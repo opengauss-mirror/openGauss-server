@@ -28,10 +28,6 @@
 #include <atomic>
 #include "global.h"
 
-#define MOT_INVALID_CSN ((uint64_t)-1)
-#define MOT_RECOVERED_TABLE_CSN ((uint64_t)0)
-#define MOT_INITIAL_CSN ((uint64_t)1)
-
 namespace MOT {
 /**
  * @class CSNManager
@@ -59,6 +55,9 @@ public:
     {
         return m_csn;
     }
+
+    static constexpr uint64_t INVALID_CSN = 0;  // Equal to InvalidCommitSeqNo in the envelope.
+    static constexpr uint64_t INITIAL_CSN = 3;  // Equal to COMMITSEQNO_FIRST_NORMAL in the envelope.
 
 private:
     /** @brief atomic uint64_t holds the current csn value */

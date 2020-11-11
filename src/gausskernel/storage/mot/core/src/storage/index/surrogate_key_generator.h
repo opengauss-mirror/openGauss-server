@@ -34,16 +34,20 @@ namespace MOT {
  */
 class SurrogateKeyGenerator {
 public:
-    explicit SurrogateKeyGenerator(uint64_t counter = 0) : m_surrogateCounter(counter){};
+    explicit SurrogateKeyGenerator(uint64_t counter = INITIAL_KEY) : m_surrogateCounter(counter)
+    {}
 
     SurrogateKeyGenerator(const SurrogateKeyGenerator& orig)
     {
         m_surrogateCounter = orig.GetCurrentCount();
     }
 
-    ~SurrogateKeyGenerator(){};
+    ~SurrogateKeyGenerator()
+    {}
 
+    static constexpr uint64_t INITIAL_KEY = 1;
     static constexpr uint32_t KEY_BITS = 48;
+    static constexpr uint64_t KEY_MASK = (1UL << KEY_BITS) - 1;
 
     inline void Set(uint64_t counter)
     {
@@ -58,7 +62,7 @@ public:
     uint64_t GetSurrogateKey(uint64_t connectionId)
     {
         uint64_t key = connectionId;
-        key = (key << KEY_BITS) | (m_surrogateCounter++ & 0xFFFFFFFFFFFFULL);
+        key = (key << KEY_BITS) | (m_surrogateCounter++ & KEY_MASK);
         return key;
     }
 
@@ -69,7 +73,7 @@ public:
 
 private:
     /** @var local counter   */
-    uint64_t m_surrogateCounter = 0;
+    uint64_t m_surrogateCounter = INITIAL_KEY;
 };
 }  // namespace MOT
 #endif /* SURROGATE_KEY_GENERATOR_H */

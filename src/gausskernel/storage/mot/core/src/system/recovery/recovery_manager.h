@@ -1022,7 +1022,7 @@ private:
     RC CommitTransaction(uint64_t csn);
 
     /** @brief Rolls back the current recovery transaction. */
-    RC RollbackTransaction();
+    void RollbackTransaction();
 
     /**
      * @brief a helper to extract a type from a buffer
