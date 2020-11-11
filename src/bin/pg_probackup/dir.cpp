@@ -1715,7 +1715,6 @@ make_external_directory_list(const char *colon_separated_dirs, bool remap)
 		p = strtok(NULL, EXTERNAL_DIRECTORY_DELIMITER);
 	}
 	pfree(tmp);
-	parray_qsort(list, pgCompareString);
 	return list;
 }
 
