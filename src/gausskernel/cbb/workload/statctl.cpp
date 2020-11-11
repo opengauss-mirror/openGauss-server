@@ -3593,7 +3593,7 @@ void WLMInitTransaction(bool* backinit)
 
     char* username = NULL;
 
-    if (strcmp(t_thrd.proc_cxt.MyProgName, "WLMmonitor")) {
+    if (strcmp(t_thrd.proc_cxt.MyProgName, "WlmMonitor")) {
         username = g_instance.wlm_cxt->stat_manager.mon_user;
     } else {
         username = g_instance.wlm_cxt->stat_manager.user;
