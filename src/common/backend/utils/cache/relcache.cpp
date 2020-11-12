@@ -4651,7 +4651,7 @@ static void check_constraint_fetch(Relation relation)
         Form_pg_constraint conform = (Form_pg_constraint)GETSTRUCT(htup);
 
         /* We want check constraints only */
-        if (conform->contype != CONSTRAINT_CHECK)
+        if (conform->contype != CONSTRAINT_CHECK || !conform->conisenable)
             continue;
 
         if (found >= ncheck)

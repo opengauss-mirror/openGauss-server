@@ -395,7 +395,7 @@ static void checkFkeyPermissions(Relation rel, int16* attnums, int natts);
 static CoercionPathType findFkeyCast(Oid targetTypeId, Oid sourceTypeId, Oid* funcid);
 static void validateCheckConstraint(Relation rel, HeapTuple constrtup);
 static void validateCheckConstraintForBucket(Relation rel, Partition part, HeapTuple constrtup);
-static void validateForeignKeyConstraint(char* conname, Relation rel, Relation pkrel, Oid pkindOid, Oid constraintOid);
+static void validateForeignKeyConstraint(char* conname, Relation rel, Relation pkrel, Oid pkindOid, Oid constraintOid, HeapTuple constuple);
 static void createForeignKeyTriggers(
     Relation rel, Oid refRelOid, Constraint* fkconstraint, Oid constraintOid, Oid indexOid);
 static void ATController(Relation rel, List* cmds, bool recurse, LOCKMODE lockmode);
@@ -476,6 +476,7 @@ static void ATAddCheckConstraint(List** wqueue, AlteredTableInfo* tab, Relation 
 static void ATAddForeignKeyConstraint(AlteredTableInfo* tab, Relation rel, Constraint* fkconstraint, LOCKMODE lockmode);
 static void ATExecDropConstraint(Relation rel, const char* constrName, DropBehavior behavior, bool recurse,
     bool recursing, bool missing_ok, LOCKMODE lockmode);
+static void ATExecEnableDisableConstraint(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterTableCmd* cmd, LOCKMODE lockmode, bool isenable);
 static void ATPrepAlterColumnType(List** wqueue, AlteredTableInfo* tab, Relation rel, bool recurse, bool recursing,
     AlterTableCmd* cmd, LOCKMODE lockmode);
 static bool ATColumnChangeRequiresRewrite(Node* expr, AttrNumber varattno);
@@ -5669,6 +5670,8 @@ LOCKMODE AlterTableGetLockLevel(List* cmds)
             case AT_AlterColumnGenericOptions:
             case AT_EnableRowMoveMent:
             case AT_DisableRowMoveMent:
+            case AT_EnableConstraint:
+            case AT_DisableConstraint:
                 cmd_lockmode = AccessExclusiveLock;
                 break;
 
@@ -6195,6 +6198,8 @@ static void ATPrepCmd(List** wqueue, Relation rel, AlterTableCmd* cmd, bool recu
         case AT_DropInherit: /* NO INHERIT */
         case AT_AddOf:       /* OF */
         case AT_DropOf:      /* NOT OF */
+        case AT_EnableConstraint:
+        case AT_DisableConstraint:
             ATSimplePermissions(rel, ATT_TABLE);
             /* These commands never recurse */
             /* No command-specific prep needed */
@@ -6583,7 +6588,12 @@ static void ATExecCmd(List** wqueue, AlteredTableInfo* tab, Relation rel, AlterT
         case AT_SplitPartition:
             ATExecSplitPartition(rel, cmd);
             break;
-
+        case AT_EnableConstraint:
+            ATExecEnableDisableConstraint(wqueue, tab, rel, cmd, lockmode, true);
+            break;
+        case AT_DisableConstraint:
+            ATExecEnableDisableConstraint(wqueue, tab, rel, cmd, lockmode, false);
+            break;
 #ifdef PGXC
         case AT_DistributeBy:
             AtExecDistributeBy(rel, (DistributeBy*)cmd->def);
@@ -6823,7 +6833,7 @@ static void ATRewriteTables(List** wqueue, LOCKMODE lockmode)
 
                 refrel = heap_open(con->refrelid, RowShareLock);
 
-                validateForeignKeyConstraint(fkconstraint->conname, rel, refrel, con->refindid, con->conid);
+                validateForeignKeyConstraint(fkconstraint->conname, rel, refrel, con->refindid, con->conid, NULL);
 
                 /*
                  * No need to mark the constraint row as validated, we did
@@ -9689,7 +9699,7 @@ static void ATExecValidateConstraint(Relation rel, char* constrName, bool recurs
              */
             refrel = heap_open(con->confrelid, RowShareLock);
 
-            validateForeignKeyConstraint(constrName, rel, refrel, con->conindid, conid);
+            validateForeignKeyConstraint(constrName, rel, refrel, con->conindid, conid, NULL);
             heap_close(refrel, NoLock);
 
             /*
@@ -10170,7 +10180,7 @@ static void validateCheckConstraintForBucket(Relation rel, Partition part, HeapT
  *
  * Caller must have opened and locked both relations appropriately.
  */
-static void validateForeignKeyConstraint(char* conname, Relation rel, Relation pkrel, Oid pkindOid, Oid constraintOid)
+static void validateForeignKeyConstraint(char* conname, Relation rel, Relation pkrel, Oid pkindOid, Oid constraintOid, HeapTuple constuple)
 {
     HeapScanDesc scan;
     HeapTuple tuple;
@@ -10193,6 +10203,7 @@ static void validateForeignKeyConstraint(char* conname, Relation rel, Relation p
     trig.tgconstraint = constraintOid;
     trig.tgdeferrable = FALSE;
     trig.tginitdeferred = FALSE;
+    trig.tuple = constuple;
     /* we needn't fill in tgargs or tgqual */
     /*
      * See if we can do it with a single LEFT JOIN query.  A FALSE result
@@ -10618,6 +10629,198 @@ static void ATExecDropConstraint(Relation rel, const char* constrName, DropBehav
     }
 
     heap_close(conrel, RowExclusiveLock);
+}
+
+static void 
+enable_disable_constraint_check(List** wqueue, AlteredTableInfo* tab,
+    Relation rel, HeapTuple tuple, bool isenable)
+{
+    Relation pgrel = NULL;
+    HeapTuple relTup = NULL;
+    Form_pg_class classForm = NULL;
+    Form_pg_constraint con = (Form_pg_constraint)GETSTRUCT(tuple);
+
+    pgrel = heap_open(RelationRelationId, RowExclusiveLock);
+    relTup = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(con->conrelid));
+    if (!HeapTupleIsValid(relTup))
+        ereport(ERROR,
+            (errcode(ERRCODE_CACHE_LOOKUP_FAILED),
+                errmsg("cache lookup failed for relation %u", con->conrelid)));
+    classForm = (Form_pg_class)GETSTRUCT(relTup);
+
+    if (isenable)
+    {
+        classForm->relchecks++;
+    }
+    else
+    {
+        if (classForm->relchecks == 0) /* should not happen */
+            ereport(ERROR,
+                (errcode(ERRCODE_OBJECT_NOT_IN_PREREQUISITE_STATE),
+                    errmsg("relation \"%s\" has relchecks = 0", RelationGetRelationName(rel))));
+
+        classForm->relchecks--;
+    }
+
+    simple_heap_update(pgrel, &relTup->t_self, relTup);
+    CatalogUpdateIndexes(pgrel, relTup);
+    CacheInvalidateRelcache(pgrel);
+    heap_freetuple_ext(relTup);
+    heap_close(pgrel, RowExclusiveLock);
+
+    if (isenable)
+    {
+        validateCheckConstraint(rel, tuple);
+    }
+
+    return;
+}
+
+/**
+ * make primary enable/disable
+ */
+static void 
+enable_disable_constraint_primary(Form_pg_constraint con, bool isenable)
+{
+    Relation irel;
+    Oid indOid = InvalidOid;
+
+    char persistence;
+
+    if (!con)
+    {
+        return;
+    }
+
+    indOid = con->conindid;//index oid of constraint, max one index
+    /*
+    * Obtain the current persistence of the existing index.  We already hold
+    * lock on the index.
+    */
+    irel = index_open(indOid, NoLock);
+
+    if (isenable)//enable
+    {
+        //recreate index 
+        AdaptMem mem_info;
+
+        //Oid heapPartOid = InvalidOid;
+        //TODO, ALTER TABLE ENABLE/DISABLE CONSTRAINT
+//         if (partition_name != NULL)
+//             indPartOid = partitionNameGetPartitionOid(indOid,
+//                 partition_name,
+//                 PART_OBJ_TYPE_INDEX_PARTITION,
+//                 AccessExclusiveLock,  // lock on index partition
+//                 false,
+//                 false,
+//                 PartitionNameCallbackForIndexPartition,
+//                 (void*)&heapPartOid,
+//                 ShareLock);  // lock on heap partition
+        persistence = irel->rd_rel->relpersistence;
+
+        //the index must be not used 
+        index_close(irel, NoLock);
+        //recreate index
+        reindex_index(indOid, InvalidOid, false, &mem_info, false, persistence);
+    }
+    else// disable
+    {
+        //set index unuseable
+        ATExecUnusableIndex(irel);
+        index_close(irel, NoLock);
+    }
+
+    return;
+}
+
+static void 
+enable_disable_constraint_foreign(Relation rel, HeapTuple tuple, bool isenable)
+{
+    Form_pg_constraint con = (Form_pg_constraint)GETSTRUCT(tuple);
+    Relation refrel;
+    Oid constraintid = get_relation_constraint_oid(con->conrelid, NameStr(con->conname), false);
+
+    if (isenable)
+    {
+        refrel = heap_open(con->confrelid, NoLock);
+
+        validateForeignKeyConstraint(NameStr(con->conname), rel, refrel, con->conindid, constraintid, tuple);
+
+        heap_close(refrel, NoLock);
+    }
+}
+
+/*
+ * ALTER TABLE ENABLE/DISABLE CONSTRAINT
+ */
+static void ATExecEnableDisableConstraint(List** wqueue, AlteredTableInfo* tab,
+    Relation rel, AlterTableCmd* cmd, LOCKMODE lockmode, bool isenable)
+{
+    Relation conrel;
+    HeapTuple tuple, copy_tuple;
+    Form_pg_constraint con;
+    Oid owningRel = RelationGetRelid(rel);
+    char* consname = cmd->name;
+    Oid constraintid = InvalidOid;
+
+    conrel = heap_open(ConstraintRelationId, RowExclusiveLock);
+
+    constraintid = get_relation_constraint_oid(owningRel, consname, false);
+    tuple = SearchSysCache1(CONSTROID, ObjectIdGetDatum(constraintid));
+    if (!HeapTupleIsValid(tuple)) {
+        ereport(ERROR,
+            (errcode(ERRCODE_CACHE_LOOKUP_FAILED), errmsg("cache lookup failed for constraint %u", constraintid)));
+    }
+
+    copy_tuple = heap_copytuple(tuple);
+    con = (Form_pg_constraint)GETSTRUCT(copy_tuple);
+
+    if (con->conisenable != isenable) {
+        con->conisenable = BoolGetDatum(isenable);
+
+        simple_heap_update(conrel, &copy_tuple->t_self, copy_tuple);
+
+        /* update the system catalog indexes */
+        CatalogUpdateIndexes(conrel, copy_tuple);
+
+        /* release system cache */
+        CacheInvalidateRelcache(conrel);
+
+        if (con)//routine check
+        {
+            switch (con->contype)
+            {
+            case CONSTRAINT_TRIGGER:            //! 't'
+            case CONSTRAINT_CHECK:              //! 'c'
+                enable_disable_constraint_check(wqueue, tab, rel, copy_tuple, isenable);
+                break;
+            case CONSTRAINT_PRIMARY:            //! 'p'
+            case CONSTRAINT_UNIQUE:             //! 'u'
+                enable_disable_constraint_primary(con, isenable);
+                break;
+            case CONSTRAINT_FOREIGN:            //! 'f'
+                enable_disable_constraint_foreign(rel, copy_tuple, isenable);
+                break;
+            case CONSTRAINT_EXCLUSION:          //! 'x'
+            case CONSTRAINT_CLUSTER:            //! 's'
+            case CONSTRAINT_INVALID:            //! 'i'
+            default:
+                ereport(WARNING,
+                    (errcode(ERRCODE_UNDEFINED_OBJECT),
+                        errmsg("constraint \"%s\" of relation \"%s\" type %c unknown",
+                            consname,
+                            RelationGetRelationName(rel),
+                            con->contype)));
+                break;
+            }
+        }
+    }
+
+    heap_freetuple_ext(copy_tuple);
+    ReleaseSysCache(tuple);
+    heap_close(conrel, RowExclusiveLock);
+ 
+    return;
 }
 
 /*

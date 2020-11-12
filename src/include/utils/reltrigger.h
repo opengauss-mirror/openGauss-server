@@ -38,6 +38,7 @@ typedef struct Trigger {
     char** tgargs;
     char* tgqual;
     Oid tgowner;
+    HeapTuple tuple;
 } Trigger;
 
 typedef struct TriggerDesc {
