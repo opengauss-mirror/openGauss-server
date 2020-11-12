@@ -334,6 +334,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     IndexInfo* indexInfo = NULL;
     int numberOfAttributes = 0;
     int numberOfKeyAttributes;
+    TransactionId limitXmin;
     VirtualTransactionId* old_lockholders = NULL;
     VirtualTransactionId* old_snapshots = NULL;
     int n_old_snapshots = 0;
@@ -1254,6 +1255,29 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     validate_index(relationId, indexRelationId, snapshot);
 
     /*
+     * Drop the reference snapshot.  We must do this before waiting out other
+     * snapshot holders, else we will deadlock against other processes also
+     * doing CREATE INDEX CONCURRENTLY, which would see our snapshot as one
+     * they must wait for.  But first, save the snapshot's xmin to use as
+     * limitXmin for GetCurrentVirtualXIDs().
+     */
+    limitXmin = snapshot->xmin;
+
+    PopActiveSnapshot();
+    UnregisterSnapshot(snapshot);
+
+    /*
+     * The snapshot subsystem could still contain registered snapshots that
+     * are holding back our process's advertised xmin; in particular, if
+     * default_transaction_isolation = serializable, there is a transaction
+     * snapshot that is still active.  The CatalogSnapshot is likewise a
+     * hazard.  To ensure no deadlocks, we must commit and start yet another
+     * transaction, and do our wait before any snapshot has been taken in it.
+     */
+    CommitTransactionCommand();
+    StartTransactionCommand();
+
+    /*
      * The index is now valid in the sense that it contains all currently
      * interesting tuples.	But since it might not contain tuples deleted just
      * before the reference snap was taken, we have to wait out any
@@ -1286,7 +1310,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
      * doesn't show up in the output, we know we can forget about it.
      */
     old_snapshots =
-        GetCurrentVirtualXIDs(snapshot->xmin, true, false, PROC_IS_AUTOVACUUM | PROC_IN_VACUUM, &n_old_snapshots);
+        GetCurrentVirtualXIDs(limitXmin, true, false, PROC_IS_AUTOVACUUM | PROC_IN_VACUUM, &n_old_snapshots);
 
     for (i = 0; i < n_old_snapshots; i++) {
         if (!VirtualTransactionIdIsValid(old_snapshots[i]))
@@ -1300,7 +1324,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
             int k;
 
             newer_snapshots = GetCurrentVirtualXIDs(
-                snapshot->xmin, true, false, PROC_IS_AUTOVACUUM | PROC_IN_VACUUM, &n_newer_snapshots);
+                limitXmin, true, false, PROC_IS_AUTOVACUUM | PROC_IN_VACUUM, &n_newer_snapshots);
             for (j = i; j < n_old_snapshots; j++) {
                 if (!VirtualTransactionIdIsValid(old_snapshots[j]))
                     continue; /* found uninteresting in previous cycle */
@@ -1332,12 +1356,6 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
      * to replan; so relcache flush on the index itself was sufficient.)
      */
     CacheInvalidateRelcacheByRelid(heaprelid.relId);
-
-    /* we can now do away with our active snapshot */
-    PopActiveSnapshot();
-
-    /* And we can remove the validating snapshot too */
-    UnregisterSnapshot(snapshot);
 
     /*
      * Last thing to do is release the session-level lock on the parent table.
