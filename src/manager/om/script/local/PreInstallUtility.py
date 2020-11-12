@@ -736,8 +736,11 @@ Common options:
         if userstatus == 1:
             userHomePath = "/home/%s" % self.user
             if os.path.exists(userHomePath):
-                homePathUser = g_file.getfileUser(userHomePath)[0]
-                if homePathUser != self.user:
+                try:
+                    homePathUser = g_file.getfileUser(userHomePath)[0]
+                    if homePathUser != self.user:
+                        needChgOwner = True
+                except Exception:
                     needChgOwner = True
 
         # Check if group exists
