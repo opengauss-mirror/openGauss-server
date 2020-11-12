@@ -790,6 +790,8 @@ void incre_ckpt_background_writer_main(void)
 
     dirty_buf_list = g_instance.bgwriter_cxt.bgwriter_procs[thread_id].dirty_buf_list;
 
+    pgstat_report_appname("IncrBgWriter");
+
 	/* Loop forever */
     for (;;) {
         int rc;
