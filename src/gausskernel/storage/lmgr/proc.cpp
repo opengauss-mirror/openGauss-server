@@ -1356,6 +1356,22 @@ int ProcSleep(LOCALLOCK *locallock, LockMethod lockMethodTable, bool allow_con_u
     int i;
 
     /*
+     * When query runs as parallel mode, the leader thread and worker
+     * thread is in one transaction, but these threads use differnt procs.
+     * We need treat these procs as one proc. Same logic in LockCheckConflicts.
+     */
+    if (ParallelWorkerAmI() || ParallelLeaderAmI()) {
+        SHM_QUEUE  *procLocks = &(lock->procLocks);
+        PROCLOCK *otherProcLock = (PROCLOCK *)SHMQueueNext(procLocks, procLocks, offsetof(PROCLOCK, lockLink));
+        while (otherProcLock != NULL) {
+            if (IsInSameParallelQuery(t_thrd.proc, otherProcLock->tag.myProc)) {
+                myHeldLocks |= otherProcLock->holdMask;
+            }
+            otherProcLock = (PROCLOCK *)SHMQueueNext(procLocks, &otherProcLock->lockLink, offsetof(PROCLOCK, lockLink));
+        }
+    }
+
+    /*
      * Determine where to add myself in the wait queue.
      *
      * Normally I should go at the end of the queue.  However, if I already

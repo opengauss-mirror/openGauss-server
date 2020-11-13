@@ -7157,6 +7157,132 @@ Size get_hash_entry_size(int width, int numAggs)
     return alloc_trunk_size(MAXALIGN(width) + MAXALIGN(sizeof(MinimalTupleData))) + hash_agg_entry_size(numAggs);
 }
 
+/*
+ * plan_create_index_workers
+ * 		Use the planner to decide how many parallel worker processes
+ * 		CREATE INDEX should request for use
+ *
+ * tableOid is the table on which the index is to be built.  indexOid is the
+ * OID of an index to be created or reindexed (which must be a btree index).
+ *
+ * Return value is the number of parallel worker processes to request.  It
+ * may be unsafe to proceed if this is 0.  Note that this does not include the
+ * leader participating as a worker (value is always a number of parallel
+ * worker processes).
+ *
+ * Note: caller had better already hold some type of lock on the table and
+ * index.
+ */
+int plan_create_index_workers(Oid tableOid, Oid indexOid)
+{
+    int parallel_workers;
+    RelPageType heap_blocks;
+    double reltuples;
+    double allvisfrac;
+
+    /* Return immediately when parallelism disabled */
+    if (u_sess->attr.attr_sql.max_parallel_maintenance_workers == 0) {
+        return 0;
+    }
+
+    /* Set up largely-dummy planner state */
+    Query *query = makeNode(Query);
+    query->commandType = CMD_SELECT;
+
+    PlannerGlobal *glob = makeNode(PlannerGlobal);
+    PlannerInfo *root = makeNode(PlannerInfo);
+    root->parse = query;
+    root->glob = glob;
+    root->query_level = 1;
+    root->planner_cxt = CurrentMemoryContext;
+    root->wt_param_id = -1;
+
+    /*
+     * Build a minimal RTE.
+     *
+     * Mark the RTE with inh = true.  This is a kludge to prevent
+     * get_relation_info() from fetching index info, which is necessary
+     * because it does not expect that any IndexOptInfo is currently
+     * undergoing REINDEX.
+     */
+    RangeTblEntry *rte = makeNode(RangeTblEntry);
+    rte->rtekind = RTE_RELATION;
+    rte->relid = tableOid;
+    rte->relkind = RELKIND_RELATION; /* Don't be too picky. */
+    rte->inh = true;
+    rte->inFromCl = true;
+    query->rtable = list_make1(rte);
+
+    /* Set up RTE/RelOptInfo arrays */
+    setup_simple_rel_arrays(root);
+
+    /* Build RelOptInfo */
+    RelOptInfo *rel = build_simple_rel(root, 1, RELOPT_BASEREL);
+    /* Rels are assumed already locked by the caller */
+    Relation heap = heap_open(tableOid, NoLock);
+    Relation index = index_open(indexOid, NoLock);
+
+    /*
+     * Determine if it's safe to proceed.
+     *
+     * Currently, parallel workers can't access the leader's temporary tables.
+     * Furthermore, any index predicate or index expressions must be parallel
+     * safe.
+     */
+    if (heap->rd_rel->relpersistence == RELPERSISTENCE_TEMP ||
+        heap->rd_rel->relpersistence == RELPERSISTENCE_GLOBAL_TEMP ||
+        has_parallel_hazard((Node *)RelationGetIndexExpressions(index), false) ||
+        has_parallel_hazard((Node *)RelationGetIndexPredicate(index), false)) {
+        parallel_workers = 0;
+        goto done;
+    }
+
+    /*
+     * If parallel_workers storage parameter is set for the table, accept that
+     * as the number of parallel worker processes to launch (though still cap
+     * at max_parallel_maintenance_workers).  Note that we deliberately do not
+     * consider any other factor when parallel_workers is set. (e.g., memory
+     * use by workers.)
+     */
+    if (rel->rel_parallel_workers != -1) {
+        parallel_workers = Min(rel->rel_parallel_workers, u_sess->attr.attr_sql.max_parallel_maintenance_workers);
+        goto done;
+    }
+
+    /*
+     * Estimate heap relation size ourselves, since rel->pages cannot be
+     * trusted (heap RTE was marked as inheritance parent)
+     */
+    estimate_rel_size(heap, NULL, &heap_blocks, &reltuples, &allvisfrac, NULL);
+
+    /*
+     * Determine number of workers to scan the heap relation using generic
+     * model
+     */
+    parallel_workers =
+        compute_parallel_worker(rel, heap_blocks, -1, u_sess->attr.attr_sql.max_parallel_maintenance_workers);
+
+    /*
+     * Cap workers based on available maintenance_work_mem as needed.
+     *
+     * Note that each tuplesort participant receives an even share of the
+     * total maintenance_work_mem budget.  Aim to leave participants
+     * (including the leader as a participant) with no less than 32MB of
+     * memory.  This leaves cases where maintenance_work_mem is set to 64MB
+     * immediately past the threshold of being capable of launching a single
+     * parallel worker to sort.
+     */
+    while (parallel_workers > 0 && u_sess->attr.attr_memory.maintenance_work_mem / (parallel_workers + 1) < 32768L) {
+        parallel_workers--;
+    }
+
+done:
+    index_close(index, NoLock);
+    heap_close(heap, NoLock);
+    return parallel_workers;
+}
+
+
 #ifdef STREAMPLAN
 
 static bool needs_two_level_groupagg(PlannerInfo* root, Plan* plan, Node* distinct_node, List* distributed_key,

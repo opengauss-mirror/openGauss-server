@@ -196,7 +196,7 @@ Datum gistbuild(PG_FUNCTION_ARGS)
     /*
      * Do the heap scan.
      */
-    reltuples = IndexBuildHeapScan(heap, index, indexInfo, true, gistBuildCallback, (void *)&buildstate);
+    reltuples = IndexBuildHeapScan(heap, index, indexInfo, true, gistBuildCallback, (void *)&buildstate, NULL);
 
     /*
      * If buffering was used, flush out all the tuples that are still in the

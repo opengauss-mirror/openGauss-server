@@ -293,6 +293,7 @@ static bool create_toast_table(Relation rel, Oid toastOid, Oid toastIndexOid, Da
     indexInfo->ii_ReadyForInserts = true;
     indexInfo->ii_Concurrent = false;
     indexInfo->ii_BrokenHotChain = false;
+    indexInfo->ii_ParallelWorkers = 0;
     indexInfo->ii_PgClassAttrId = 0;
 
     collationObjectId[0] = InvalidOid;

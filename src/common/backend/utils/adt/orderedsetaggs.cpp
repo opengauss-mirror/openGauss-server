@@ -86,8 +86,8 @@ static void tuplesort_state_init(
     /* Sort state is needed in whole aggregate lifespan */
     oldcontext = MemoryContextSwitchTo(agg_context);
     /* Initialize tuplesort state */
-    osastate->sortstate =
-        tuplesort_begin_datum(sort_col_type, sort_operator, sort_collation, sort_nulls_first, local_work_mem, false);
+    osastate->sortstate = tuplesort_begin_datum(sort_col_type, sort_operator, sort_collation, sort_nulls_first,
+        local_work_mem, NULL, false);
     (void)MemoryContextSwitchTo(oldcontext);
 }
 

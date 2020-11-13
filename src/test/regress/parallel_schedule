@@ -596,7 +596,7 @@ test: create_procedure create_function pg_compatibility postgres_fdw
 #test: autonomous_transaction
 
 # parallel query
-test: parallel_query parallel_nested_loop parallel_hashjoin parallel_append
+test: parallel_query parallel_nested_loop parallel_hashjoin parallel_append parallel_create_index
 
 # gs_basebackup
 test: gs_basebackup

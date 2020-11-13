@@ -22,14 +22,13 @@
 #include "access/nbtree.h"
 #include "access/relscan.h"
 #include "access/xlog.h"
-#include "catalog/index.h"
 #include "commands/vacuum.h"
 #include "pgstat.h"
+#include "nodes/execnodes.h"
 #include "storage/indexfsm.h"
 #include "storage/ipc.h"
 #include "storage/lmgr.h"
 #include "storage/smgr.h"
-#include "tcop/tcopprot.h"
 #include "utils/aiomem.h"
 #include "utils/memutils.h"
 #include "vecexecutor/vecnodes.h"
@@ -88,116 +87,11 @@ typedef struct BTParallelScanDescData {
 
 typedef struct BTParallelScanDescData *BTParallelScanDesc;
 
-static void btbuildCallback(Relation index, HeapTuple htup, Datum *values, const bool *isnull, bool tupleIsAlive,
-    void *state);
 static void btvacuumscan(IndexVacuumInfo* info, IndexBulkDeleteResult* stats, IndexBulkDeleteCallback callback,
     void* callback_state, BTCycleId cycleid);
 static void btvacuumpage(BTVacState* vstate, BlockNumber blkno, BlockNumber orig_blkno);
 
 static IndexTuple btgetindextuple(IndexScanDesc scan, ScanDirection dir, BlockNumber heapTupleBlkOffset);
-/*
- *	btbuild() -- build a new btree index.
- */
-Datum btbuild(PG_FUNCTION_ARGS)
-{
-    Relation heap = (Relation)PG_GETARG_POINTER(0);
-    Relation index = (Relation)PG_GETARG_POINTER(1);
-    IndexInfo* indexInfo = (IndexInfo*)PG_GETARG_POINTER(2);
-    IndexBuildResult* result = NULL;
-    double reltuples = 0;
-    BTBuildState buildstate;
-
-    buildstate.isUnique = indexInfo->ii_Unique;
-    buildstate.haveDead = false;
-    buildstate.heapRel = heap;
-    buildstate.spool = NULL;
-    buildstate.spool2 = NULL;
-    buildstate.indtuples = 0;
-
-#ifdef BTREE_BUILD_STATS
-    if (u_sess->attr.attr_resource.log_btree_build_stats) {
-        ResetUsage();
-    }
-#endif /* BTREE_BUILD_STATS */
-
-    /* We expect to be called exactly once for any index relation. If that's
-     * not the case, big trouble's what we have. */
-    if (RelationGetNumberOfBlocks(index) != 0) {
-        ereport(ERROR,
-            (errcode(ERRCODE_INDEX_CORRUPTED),
-                errmsg("index \"%s\" already contains data", RelationGetRelationName(index))));
-    }
-
-    // If building a unique index, put dead tuples in a second spool to keep
-    // them out of the uniqueness check.
-    if (indexInfo->ii_Unique) {
-        buildstate.spool2 = _bt_spoolinit(index, false, true, &indexInfo->ii_desc);
-    }
-
-    buildstate.spool = _bt_spoolinit(index, indexInfo->ii_Unique, false, &indexInfo->ii_desc);
-
-    /* do the heap scan */
-    double* allPartTuples = NULL;
-    if (RelationIsGlobalIndex(index)) {
-        allPartTuples = GlobalIndexBuildHeapScan(heap, index, indexInfo, btbuildCallback, (void*)&buildstate);
-    } else {
-        reltuples = IndexBuildHeapScan(heap, index, indexInfo, true, btbuildCallback, (void*)&buildstate);
-    }
-
-    /* okay, all heap tuples are indexed */
-    if (buildstate.spool2 && !buildstate.haveDead) {
-        /* spool2 turns out to be unnecessary */
-        _bt_spooldestroy(buildstate.spool2);
-        buildstate.spool2 = NULL;
-    }
-
-    /*
-     * Finish the build by (1) completing the sort of the spool file, (2)
-     * inserting the sorted tuples into btree pages and (3) building the upper
-     * levels.
-     */
-    _bt_leafbuild(buildstate.spool, buildstate.spool2);
-    _bt_spooldestroy(buildstate.spool);
-    if (buildstate.spool2) {
-        _bt_spooldestroy(buildstate.spool2);
-    }
-
-#ifdef BTREE_BUILD_STATS
-    if (u_sess->attr.attr_resource.log_btree_build_stats) {
-        ShowUsage("BTREE BUILD STATS");
-        ResetUsage();
-    }
-#endif /* BTREE_BUILD_STATS */
-
-    // Return statistics
-    result = (IndexBuildResult*)palloc(sizeof(IndexBuildResult));
-
-    result->heap_tuples = reltuples;
-    result->index_tuples = buildstate.indtuples;
-    result->all_part_tuples = allPartTuples;
-
-    PG_RETURN_POINTER(result);
-}
-
-/*
- * Per-tuple callback from IndexBuildHeapScan
- */
-static void btbuildCallback(
-    Relation index, HeapTuple htup, Datum* values, const bool* isnull, bool tupleIsAlive, void* state)
-{
-    BTBuildState* buildstate = (BTBuildState*)state;
-
-    // insert the index tuple into the appropriate spool file for subsequent processing
-    if (tupleIsAlive || buildstate->spool2 == NULL) {
-        _bt_spool(buildstate->spool, &htup->t_self, values, isnull);
-    } else {
-        /* dead tuples are put into spool2 */
-        buildstate->haveDead = true;
-        _bt_spool(buildstate->spool2, &htup->t_self, values, isnull);
-    }
-
-    buildstate->indtuples += 1;
-}
 
 /*
  *	btbuildempty() -- build an empty btree index in the initialization fork

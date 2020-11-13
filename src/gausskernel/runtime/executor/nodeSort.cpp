@@ -86,8 +86,8 @@ TupleTableSlot* ExecSort(SortState* node)
         tup_desc = ExecGetResultType(outer_node);
 
         tuple_sortstate = tuplesort_begin_heap(tup_desc, plan_node->numCols, plan_node->sortColIdx,
-            plan_node->sortOperators, plan_node->collations, plan_node->nullsFirst, sort_mem, node->randomAccess, max_mem,
-            plan_node->plan.plan_node_id, SET_DOP(plan_node->plan.dop));
+            plan_node->sortOperators, plan_node->collations, plan_node->nullsFirst, sort_mem, NULL,
+            node->randomAccess, max_mem, plan_node->plan.plan_node_id, SET_DOP(plan_node->plan.dop));
 
         if (node->bounded) {
             tuplesort_set_bound(tuple_sortstate, node->bound);

@@ -243,7 +243,7 @@ explain (costs off) select count(b) from parallel_t2 where a > 5000;
 -------------------------------------------------------------
  Aggregate
    ->  Gather
-         Number of Workers: 2
+         Number of Workers: 1
          ->  Parallel Index Scan using t2_idx on parallel_t2
                Index Cond: (a > 5000)
 (5 rows)
@@ -253,7 +253,7 @@ explain (costs off) select count(b) from parallel_t2 where a < 5000;
 -------------------------------------------------------------
  Aggregate
    ->  Gather
-         Number of Workers: 2
+         Number of Workers: 1
          ->  Parallel Index Scan using t2_idx on parallel_t2
                Index Cond: (a < 5000)
 (5 rows)

@@ -668,7 +668,6 @@ typedef struct BTOrderedIndexListElement {
 /*
  * external entry points for btree, in nbtree.c
  */
-extern Datum btbuild(PG_FUNCTION_ARGS);
 extern Datum btbuildempty(PG_FUNCTION_ARGS);
 extern Datum btinsert(PG_FUNCTION_ARGS);
 extern Datum btbeginscan(PG_FUNCTION_ARGS);
@@ -768,9 +767,17 @@ extern IndexTuple _bt_nonkey_truncate(Relation idxrel, IndexTuple olditup);
 /*
  * prototypes for functions in nbtsort.c
  */
-typedef struct BTSpool BTSpool; /* opaque type known only within nbtsort.c */
+extern Datum btbuild(PG_FUNCTION_ARGS);
+extern void _bt_parallel_build_main(void *seg);
 
-/* Working state for btbuild and its callback */
+/*
+ * Working state for btbuild and its callback.
+ *
+ * When parallel CREATE INDEX is used, there is a BTBuildState for each
+ * participant.
+ */
+struct BTLeader;
+struct BTSpool;
 typedef struct {
     bool isUnique;
     bool haveDead;
@@ -784,12 +791,19 @@ typedef struct {
      */
     BTSpool* spool2;
     double indtuples;
+
+    /*
+     * btleader is only present when a parallel index build is performed, and
+     * only in the leader process. (Actually, only the leader has a
+     * BTBuildState.  Workers have their own spool and spool2, though.)
+     */
+    BTLeader *btleader;
 } BTBuildState;
 
-extern BTSpool* _bt_spoolinit(Relation index, bool isunique, bool isdead, void* meminfo);
+extern BTSpool* _bt_spoolinit(Relation heap, Relation index, bool isunique, bool isdead, void* meminfo);
 extern void _bt_spooldestroy(BTSpool* btspool);
 extern void _bt_spool(BTSpool* btspool, ItemPointer self, Datum* values, const bool* isnull);
-extern void _bt_leafbuild(BTSpool* btspool, BTSpool* spool2);
+extern void _bt_leafbuild(BTSpool* btspool, BTSpool* btspool2);
 /* these 4 functions are move here from nbtsearch.cpp(static functions) */
 extern void _bt_buildadd(BTWriteState* wstate, BTPageState* state, IndexTuple itup);
 extern void _bt_uppershutdown(BTWriteState* wstate, BTPageState* state);

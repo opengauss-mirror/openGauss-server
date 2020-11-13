@@ -2431,6 +2431,21 @@ int FileSync(File file, uint32 wait_event_info)
     return returnCode;
 }
 
+off_t FileSize(File file)
+{
+    Assert(FileIsValid(file));
+
+    DO_DB(ereport(LOG, (errmsg("FileSize %d (%s)", file, u_sess->storage_cxt.VfdCache[file].fileName))));
+
+    if (FileIsNotOpen(file)) {
+        if (FileAccess(file) < 0) {
+            return (off_t)-1;
+        }
+    }
+
+    return lseek(u_sess->storage_cxt.VfdCache[file].fd, 0, SEEK_END);
+}
+
 // FileSeek
 // 		parameter *whence* only supports SEEK_END for multithreading backends.
 // 		FilePRead() and FilePWrite() have the offset parameter, so do NOT use FileSeek to

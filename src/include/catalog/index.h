@@ -113,10 +113,10 @@ extern void BuildSpeculativeIndexInfo(Relation index, IndexInfo* ii);
 extern void FormIndexDatum(IndexInfo *indexInfo, TupleTableSlot *slot, EState *estate, Datum *values, bool *isnull);
 extern void index_build(Relation heapRelation, Partition heapPartition, Relation indexRelation,
                         Partition indexPartition, IndexInfo *indexInfo, bool isprimary,
-                         bool isreindex, IndexCreatePartitionType partitionType);
+                        bool isreindex, bool parallel, IndexCreatePartitionType partitionType);
 
 extern double IndexBuildHeapScan(Relation heapRelation, Relation indexRelation, IndexInfo *indexInfo,
-                                 bool allow_sync, IndexBuildCallback callback, void *callback_state);
+                                 bool allow_sync, IndexBuildCallback callback, void *callback_state, HeapScanDesc scan);
 extern double* GlobalIndexBuildHeapScan(Relation heapRelation, Relation indexRelation, IndexInfo* indexInfo,
                                  IndexBuildCallback callback, void* callbackState);
 

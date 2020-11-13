@@ -75,6 +75,7 @@ extern void FileClose(File file);
 extern void FileCloseWithThief(File file);
 extern int FilePrefetch(File file, off_t offset, int amount, uint32 wait_event_info = 0);
 extern int FileSync(File file, uint32 wait_event_info = 0);
+extern off_t FileSize(File file);
 extern off_t FileSeek(File file, off_t offset, int whence);
 extern int FileTruncate(File file, off_t offset, uint32 wait_event_info = 0);
 extern void FileWriteback(File file, off_t offset, off_t nbytes);

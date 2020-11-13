@@ -69,9 +69,10 @@ typedef struct UtilityDesc {
  *		ReadyForInserts		is it valid for inserts?
  *		Concurrent			are we doing a concurrent index build?
  *		BrokenHotChain		did we detect any broken HOT chains?
+ *		ParallelWorkers		# of workers requested (excludes leader)
  *
- * ii_Concurrent and ii_BrokenHotChain are used only during index build;
- * they're conventionally set to false otherwise.
+ * ii_Concurrent, ii_BrokenHotChain, and ii_ParallelWorkers are used only
+ * during index build; they're conventionally zeroed otherwise.
  * ----------------
  */
 typedef struct IndexInfo {
@@ -93,6 +94,7 @@ typedef struct IndexInfo {
     bool ii_ReadyForInserts;
     bool ii_Concurrent;
     bool ii_BrokenHotChain;
+    int ii_ParallelWorkers;
     short ii_PgClassAttrId;
     UtilityDesc ii_desc; /* meminfo for index create */
 } IndexInfo;

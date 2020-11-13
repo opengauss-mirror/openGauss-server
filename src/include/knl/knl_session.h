@@ -2064,6 +2064,7 @@ typedef struct ParallelBtreeInfo {
     BTShared *btShared;
     SharedSort *sharedSort;
     SharedSort *sharedSort2;
+    void *meminfo;
 } ParallelBtreeInfo;
 
 typedef struct ParallelInfoContext {
@@ -2108,6 +2109,9 @@ typedef struct ParallelInfoContext {
     char *library_name;
     char *function_name;
     char *namespace_search_path;
+    Oid currentlyReindexedHeap;
+    Oid currentlyReindexedIndex;
+    List *pendingReindexedIndexes;
 #ifdef __USE_NUMA
     int numaNode;
     cpu_set_t *cpuset;

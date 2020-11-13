@@ -259,7 +259,7 @@ Batchsortstate* batchsort_begin_merge(TupleDesc tupDesc, int nkeys, AttrNumber* 
 #endif
 
     state->m_nKeys = nkeys;
-    TRACE_POSTGRESQL_SORT_START(MERGE_SORT, false, nkeys, workMem, false);
+    TRACE_POSTGRESQL_SORT_START(MERGE_SORT, false, nkeys, workMem, false, PARALLEL_SORT(state));
 
     state->m_nKeys = nkeys;
     state->m_colNum = tupDesc->natts;
@@ -660,11 +660,7 @@ void batchsort_restorepos(Batchsortstate* state)
             } else
                 state->m_eofReached = false;
 
-            if (!LogicalTapeSeek(state->m_tapeset, state->m_resultTape, state->m_markposBlock, state->m_markposOffset))
-                ereport(ERROR,
-                    (errmodule(MOD_EXECUTOR),
-                        errcode(ERRCODE_INVALID_OPERATION),
-                        errmsg("batchsort_restorepos failed")));
+            LogicalTapeSeek(state->m_tapeset, state->m_resultTape, state->m_markposBlock, state->m_markposOffset);
             break;
         default:
             ereport(ERROR,
@@ -866,7 +862,7 @@ void Batchsortstate::GetBatchDisk(bool forward, VectorBatch* batch)
          * Note: READTUP expects we are positioned after the initial
          * length word of the tuple, so back up to that point.
          */
-        if (!LogicalTapeBackspace(m_tapeset, m_resultTape, tuplen))
+        if (LogicalTapeBackspace(m_tapeset, m_resultTape, tuplen) != tuplen)
             ereport(ERROR,
                 (errmodule(MOD_EXECUTOR),
                     errcode(ERRCODE_FILE_READ_FAILED),
@@ -1273,7 +1269,7 @@ void Batchsortstate::MergeRuns()
     if (m_curRun == 1) {
         m_resultTape = m_tpNum[m_destTape];
         /* must freeze and rewind the finished output tape */
-        LogicalTapeFreeze(m_tapeset, m_resultTape);
+        LogicalTapeFreeze(m_tapeset, m_resultTape, NULL);
         m_status = BS_SORTEDONTAPE;
         return;
     }
@@ -1380,7 +1376,7 @@ void Batchsortstate::MergeRuns()
      * a waste of cycles anyway...
      */
     m_resultTape = m_tpNum[m_tapeRange];
-    LogicalTapeFreeze(m_tapeset, m_resultTape);
+    LogicalTapeFreeze(m_tapeset, m_resultTape, NULL);
     m_status = BS_SORTEDONTAPE;
 }
 
@@ -1432,7 +1428,7 @@ void Batchsortstate::InitTapes()
     /*
      * Create the tape set and allocate the per-tape data arrays.
      */
-    m_tapeset = LogicalTapeSetCreate(maxTapes);
+    m_tapeset = LogicalTapeSetCreate(maxTapes, NULL, NULL, 0);
     m_lastFileBlocks = 0L;
 
     m_mergeActive = (bool*)palloc0(maxTapes * sizeof(bool));
