@@ -106,6 +106,7 @@ typedef enum WalLevel {
 #define XLogArchivingActive() \
     (u_sess->attr.attr_common.XLogArchiveMode && g_instance.attr.attr_storage.wal_level >= WAL_LEVEL_ARCHIVE)
 #define XLogArchiveCommandSet() (u_sess->attr.attr_storage.XLogArchiveCommand[0] != '\0')
+#define XLogArchiveDestSet() (u_sess->attr.attr_storage.XLogArchiveDest[0] != '\0')
 
 /*
  * Is WAL-logging necessary for archival or log-shipping, or can we skip

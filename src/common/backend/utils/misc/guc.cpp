@@ -9928,6 +9928,20 @@ static void init_configure_names_string()
         },
         {
             {
+                "archive_dest",
+                PGC_SIGHUP,
+                WAL_ARCHIVING,
+                gettext_noop("Sets the path that will be used to archive a WAL file."),
+                NULL
+            },
+            &u_sess->attr.attr_storage.XLogArchiveDest,
+            "",
+            NULL,
+            NULL,
+            NULL
+        },
+        {
+            {
                 "client_encoding",
                 PGC_USERSET,
                 CLIENT_CONN_LOCALE,
