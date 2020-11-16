@@ -31,6 +31,7 @@
 #include "executor/tuptable.h"
 #include "storage/mot/jit_def.h"
 #include "debug_utils.h"
+#include "logger.h"
 
 #include <vector>
 #include <list>
@@ -231,6 +232,8 @@ protected:
         _sub_instructions.push_back(sub_instruction);
     }
 
+    DECLARE_CLASS_LOGGER()
+
 private:
     /** @var The instruction type. */
     Type _type;
@@ -288,6 +291,8 @@ protected:
      */
     explicit Expression(EvalResult eval_result) : _eval_result(eval_result)
     {}
+
+    DECLARE_CLASS_LOGGER()
 
 private:
     /** @var Specifies whether the evaluation of the expression can fail. */

@@ -35,9 +35,9 @@ ENGINE_INC = ../../core/src
 include $(top_builddir)/src/Makefile.global
 
 OBJ_DIR = ../obj
-OBJS = $(OBJ_DIR)/jit_exec.o $(OBJ_DIR)/jit_common.o $(OBJ_DIR)/jit_llvm_query_codegen.o $(OBJ_DIR)/jit_llvm_blocks.o $(OBJ_DIR)/jit_tvm_exec.o $(OBJ_DIR)/jit_helpers.o $(OBJ_DIR)/jit_context.o $(OBJ_DIR)/jit_source.o $(OBJ_DIR)/jit_source_pool.o $(OBJ_DIR)/jit_source_map.o $(OBJ_DIR)/jit_context_pool.o $(OBJ_DIR)/jit_plan.o $(OBJ_DIR)/jit_plan_expr.o $(OBJ_DIR)/jit_explain.o $(OBJ_DIR)/jit_llvm_util.o $(OBJ_DIR)/jit_tvm_util.o $(OBJ_DIR)/jit_llvm.o $(OBJ_DIR)/jit_tvm.o $(OBJ_DIR)/jit_statistics.o
+OBJS = $(OBJ_DIR)/jit_exec.o $(OBJ_DIR)/jit_common.o $(OBJ_DIR)/jit_llvm_query_codegen.o $(OBJ_DIR)/jit_llvm_blocks.o $(OBJ_DIR)/jit_tvm_query_codegen.o $(OBJ_DIR)/jit_tvm_blocks.o $(OBJ_DIR)/jit_helpers.o $(OBJ_DIR)/jit_context.o $(OBJ_DIR)/jit_source.o $(OBJ_DIR)/jit_source_pool.o $(OBJ_DIR)/jit_source_map.o $(OBJ_DIR)/jit_context_pool.o $(OBJ_DIR)/jit_plan.o $(OBJ_DIR)/jit_plan_expr.o $(OBJ_DIR)/jit_explain.o $(OBJ_DIR)/jit_llvm_util.o $(OBJ_DIR)/jit_tvm_util.o $(OBJ_DIR)/jit_llvm.o $(OBJ_DIR)/jit_tvm.o $(OBJ_DIR)/jit_statistics.o
 
-DEPS := $(OBJ_DIR)/jit_exec.d $(OBJ_DIR)/jit_common.d $(OBJ_DIR)/jit_llvm_query_codegen.d $(OBJ_DIR)/jit_llvm_blocks.d $(OBJ_DIR)/jit_tvm_exec.d $(OBJ_DIR)/jit_helpers.d $(OBJ_DIR)/jit_context.d $(OBJ_DIR)/jit_source.d $(OBJ_DIR)/jit_source_pool.d $(OBJ_DIR)/jit_source_map.d $(OBJ_DIR)/jit_context_pool.d $(OBJ_DIR)/jit_plan.d $(OBJ_DIR)/jit_plan_expr.d $(OBJ_DIR)/jit_explain.d $(OBJ_DIR)/jit_llvm_util.d $(OBJ_DIR)/jit_tvm_util.d $(OBJ_DIR)/jit_llvm.d $(OBJ_DIR)/jit_tvm.d $(OBJ_DIR)/jit_statistics.d
+DEPS := $(OBJ_DIR)/jit_exec.d $(OBJ_DIR)/jit_common.d $(OBJ_DIR)/jit_llvm_query_codegen.d $(OBJ_DIR)/jit_llvm_blocks.d $(OBJ_DIR)/jit_tvm_query_codegen.d $(OBJ_DIR)/jit_tvm_blocks.d $(OBJ_DIR)/jit_helpers.d $(OBJ_DIR)/jit_context.d $(OBJ_DIR)/jit_source.d $(OBJ_DIR)/jit_source_pool.d $(OBJ_DIR)/jit_source_map.d $(OBJ_DIR)/jit_context_pool.d $(OBJ_DIR)/jit_plan.d $(OBJ_DIR)/jit_plan_expr.d $(OBJ_DIR)/jit_explain.d $(OBJ_DIR)/jit_llvm_util.d $(OBJ_DIR)/jit_tvm_util.d $(OBJ_DIR)/jit_llvm.d $(OBJ_DIR)/jit_tvm.d $(OBJ_DIR)/jit_statistics.d
 
 # Shared library stuff
 include $(top_srcdir)/src/gausskernel/common.mk
