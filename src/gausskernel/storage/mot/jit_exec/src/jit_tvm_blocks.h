@@ -140,9 +140,9 @@ bool buildOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* index_scan, int
     JitRangeScanType range_scan_type, JitRangeBoundMode* begin_range_bound, JitRangeBoundMode* end_range_bound,
     tvm::Instruction* outer_row, int subQueryIndex);
 
-bool buildRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* indexScan, int* maxArg,
-    JitRangeScanType rangeScanType, JitRangeBoundMode* beginRangeBound, JitRangeBoundMode* endRangeBound,
-    tvm::Instruction* outerRow, int subQueryIndex = -1);
+bool buildRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* indexScan, int* maxArg, JitRangeScanType rangeScanType,
+    JitRangeBoundMode* beginRangeBound, JitRangeBoundMode* endRangeBound, tvm::Instruction* outerRow,
+    int subQueryIndex = -1);
 
 bool buildPrepareStateScan(JitTvmCodeGenContext* ctx, JitIndexScan* index_scan, int* max_arg,
     JitRangeScanType range_scan_type, tvm::Instruction* outer_row);
@@ -182,8 +182,8 @@ tvm::Expression* buildAggregateMax(JitTvmCodeGenContext* ctx, const JitAggregate
 tvm::Expression* buildAggregateMin(JitTvmCodeGenContext* ctx, const JitAggregate* aggregate,
     tvm::Expression* current_aggregate, tvm::Expression* var_expr);
 
-tvm::Expression* buildAggregateCount(JitTvmCodeGenContext* ctx, const JitAggregate* aggregate,
-    tvm::Expression* count_aggregate);
+tvm::Expression* buildAggregateCount(
+    JitTvmCodeGenContext* ctx, const JitAggregate* aggregate, tvm::Expression* count_aggregate);
 
 bool buildAggregateMaxMin(JitTvmCodeGenContext* ctx, JitAggregate* aggregate, tvm::Expression* var_expr);
 
@@ -198,6 +198,6 @@ void buildCheckLimit(JitTvmCodeGenContext* ctx, int limit_count);
 
 bool selectJoinRows(JitTvmCodeGenContext* ctx, tvm::Instruction* outer_row_copy, tvm::Instruction* inner_row,
     JitJoinPlan* plan, int* max_arg);
-} // namespace JitExec
+}  // namespace JitExec
 
 #endif /* JIT_TVM_BLOCKS_H */

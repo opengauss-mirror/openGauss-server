@@ -236,7 +236,7 @@ static bool ValidateFuncCallExpr(Expr* expr)
         return false;
     }
 
-    const char* exprName = expr->type == T_OpExpr ? "operator" : "function";
+    const char* exprName = (expr->type == T_OpExpr) ? "operator" : "function";
     if (!IsTypeSupported(resultType)) {
         MOT_LOG_TRACE("Disqualifying %s expression: result type %u is unsupported", exprName, resultType);
         return false;

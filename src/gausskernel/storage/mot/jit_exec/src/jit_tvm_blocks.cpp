@@ -373,9 +373,9 @@ Instruction* buildBeginIterator(JitTvmCodeGenContext* ctx, JitRangeScanType rang
     return itr;
 }
 
-Instruction* buildGetRowFromIterator(JitTvmCodeGenContext* ctx, BasicBlock* endLoopBlock,
-    MOT::AccessType access_mode, JitIndexScanDirection index_scan_direction, JitTvmRuntimeCursor* cursor,
-    JitRangeScanType range_scan_type, int subQueryIndex /* = -1 */)
+Instruction* buildGetRowFromIterator(JitTvmCodeGenContext* ctx, BasicBlock* endLoopBlock, MOT::AccessType access_mode,
+    JitIndexScanDirection index_scan_direction, JitTvmRuntimeCursor* cursor, JitRangeScanType range_scan_type,
+    int subQueryIndex /* = -1 */)
 {
     IssueDebugLog("Retrieving row from iterator");
     Instruction* row =
@@ -1368,9 +1368,9 @@ bool buildOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* index_scan, int
     return result;
 }
 
-bool buildRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* indexScan, int* maxArg,
-    JitRangeScanType rangeScanType, JitRangeBoundMode* beginRangeBound, JitRangeBoundMode* endRangeBound,
-    Instruction* outerRow, int subQueryIndex /* = -1 */)
+bool buildRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* indexScan, int* maxArg, JitRangeScanType rangeScanType,
+    JitRangeBoundMode* beginRangeBound, JitRangeBoundMode* endRangeBound, Instruction* outerRow,
+    int subQueryIndex /* = -1 */)
 {
     bool result = false;
 
@@ -1527,7 +1527,7 @@ Instruction* buildPrepareStateScanRow(JitTvmCodeGenContext* ctx, JitIndexScan* i
     // prepare stateful scan if not done so already
     if (!buildPrepareStateScan(ctx, index_scan, max_arg, range_scan_type, outer_row)) {
         MOT_LOG_TRACE("Failed to generate jitted code for range JOIN query: unsupported %s WHERE clause type",
-            range_scan_type == JIT_RANGE_SCAN_MAIN ? "outer" : "inner");
+            (range_scan_type == JIT_RANGE_SCAN_MAIN) ? "outer" : "inner");
         return nullptr;
     }
 
@@ -2130,4 +2130,4 @@ bool selectJoinRows(
     }
     return true;
 }
-} // namespace JitExec
+}  // namespace JitExec

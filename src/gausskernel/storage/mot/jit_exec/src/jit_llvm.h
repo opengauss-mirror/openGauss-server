@@ -94,6 +94,6 @@ dorado::GsCodeGen* SetupCodegenEnv();
  * @param codeGen The GsCodeGen object to free.
  */
 void FreeGsCodeGen(dorado::GsCodeGen* codeGen);
-} // namespace JitExec
+}  // namespace JitExec
 
 #endif /* JIT_LLVM_H */

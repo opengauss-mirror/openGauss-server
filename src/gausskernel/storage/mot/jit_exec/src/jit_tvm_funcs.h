@@ -147,7 +147,7 @@ protected:
     ~UnaryCastOperator() override
     {}
 
-    virtual Datum evalOperator(tvm::ExecContext* exec_context, Datum arg)
+    Datum evalOperator(tvm::ExecContext* exec_context, Datum arg) final
     {
         Datum result = NULL_DATUM;
         exec_context->_expr_rc = MOT_NO_ERROR;
@@ -167,7 +167,7 @@ private:
 /** @class BinaryOperator */
 class BinaryOperator : public tvm::Expression {
 public:
-    Datum eval(tvm::ExecContext* exec_context) override
+    Datum eval(tvm::ExecContext* exec_context) final
     {
         Datum result = NULL_DATUM;
         Datum lhs_arg = _lhs_sub_expr->eval(exec_context);
@@ -191,10 +191,7 @@ public:
 
 protected:
     BinaryOperator(const char* name, tvm::Expression* lhs_sub_expr, Expression* rhs_sub_expr)
-        : Expression(tvm::Expression::CanFail),
-          _name(name),
-          _lhs_sub_expr(lhs_sub_expr),
-          _rhs_sub_expr(rhs_sub_expr)
+        : Expression(tvm::Expression::CanFail), _name(name), _lhs_sub_expr(lhs_sub_expr), _rhs_sub_expr(rhs_sub_expr)
     {}
 
     ~BinaryOperator() noexcept override
@@ -226,7 +223,7 @@ protected:
     ~BinaryCastOperator() override
     {}
 
-    Datum evalOperator(tvm::ExecContext* exec_context, Datum lhs_arg, Datum rhs_arg) override
+    Datum evalOperator(tvm::ExecContext* exec_context, Datum lhs_arg, Datum rhs_arg) final
     {
         Datum result = NULL_DATUM;
         exec_context->_expr_rc = MOT_NO_ERROR;
@@ -246,7 +243,7 @@ private:
 /** @class TernaryOperator */
 class TernaryOperator : public tvm::Expression {
 public:
-    Datum eval(tvm::ExecContext* exec_context) override
+    Datum eval(tvm::ExecContext* exec_context) final
     {
         Datum result = NULL_DATUM;
         exec_context->_expr_rc = MOT_NO_ERROR;
@@ -309,18 +306,15 @@ private:
 /** @class TernaryCastOperator */
 class TernaryCastOperator : public TernaryOperator {
 protected:
-    TernaryCastOperator(const char* name,
-        tvm::Expression* sub_expr1,
-        tvm::Expression* sub_expr2,
-        tvm::Expression* sub_expr3,
-        int arg_pos)
+    TernaryCastOperator(const char* name, tvm::Expression* sub_expr1, tvm::Expression* sub_expr2,
+        tvm::Expression* sub_expr3, int arg_pos)
         : TernaryOperator(name, sub_expr1, sub_expr2, sub_expr3), _arg_pos(arg_pos)
     {}
 
     ~TernaryCastOperator() override
     {}
 
-    Datum evalOperator(tvm::ExecContext* exec_context, Datum arg1, Datum arg2, Datum arg3) override
+    Datum evalOperator(tvm::ExecContext* exec_context, Datum arg1, Datum arg2, Datum arg3) final
     {
         Datum result = NULL_DATUM;
         exec_context->_expr_rc = MOT_NO_ERROR;
@@ -388,23 +382,23 @@ private:
     }                                                         \
     PG_END_TRY();
 
-#define APPLY_UNARY_OPERATOR(funcid, name)                                         \
-    class name##Operator : public UnaryOperator {                                  \
-    public:                                                                        \
-        name##Operator(tvm::Expression* sub_expr) : UnaryOperator(#name, sub_expr) \
-        {}                                                                         \
-        virtual ~name##Operator()                                                  \
-        {}                                                                         \
-                                                                                   \
-    protected:                                                                     \
-        virtual Datum evalOperator(tvm::ExecContext* exec_context, Datum arg)      \
-        {                                                                          \
-            Datum result = NULL_DATUM;                                             \
-            exec_context->_expr_rc = MOT_NO_ERROR;                                 \
-            MOT_LOG_DEBUG("Invoking unary operator: " #name);                      \
-            INVOKE_OPERATOR1(funcid, name, arg);                                   \
-            return result;                                                         \
-        }                                                                          \
+#define APPLY_UNARY_OPERATOR(funcid, name)                                                  \
+    class name##Operator : public UnaryOperator {                                           \
+    public:                                                                                 \
+        explicit name##Operator(tvm::Expression* sub_expr) : UnaryOperator(#name, sub_expr) \
+        {}                                                                                  \
+        ~name##Operator() final                                                             \
+        {}                                                                                  \
+                                                                                            \
+    protected:                                                                              \
+        Datum evalOperator(tvm::ExecContext* exec_context, Datum arg) final                 \
+        {                                                                                   \
+            Datum result = NULL_DATUM;                                                      \
+            exec_context->_expr_rc = MOT_NO_ERROR;                                          \
+            MOT_LOG_DEBUG("Invoking unary operator: " #name);                               \
+            INVOKE_OPERATOR1(funcid, name, arg);                                            \
+            return result;                                                                  \
+        }                                                                                   \
     };
 
 #define APPLY_UNARY_CAST_OPERATOR(funcid, name)                                                              \
@@ -412,11 +406,11 @@ private:
     public:                                                                                                  \
         name##Operator(tvm::Expression* sub_expr, int arg_pos) : UnaryCastOperator(#name, sub_expr, arg_pos) \
         {}                                                                                                   \
-        virtual ~name##Operator()                                                                            \
+        ~name##Operator() final                                                                              \
         {}                                                                                                   \
                                                                                                              \
     protected:                                                                                               \
-        virtual Datum evalCastOperator(tvm::ExecContext* exec_context, Datum arg)                            \
+        Datum evalCastOperator(tvm::ExecContext* exec_context, Datum arg) final                              \
         {                                                                                                    \
             Datum result = NULL_DATUM;                                                                       \
             exec_context->_expr_rc = MOT_NO_ERROR;                                                           \
@@ -426,44 +420,44 @@ private:
         }                                                                                                    \
     };
 
-#define APPLY_BINARY_OPERATOR(funcid, name)                                                      \
-    class name##Operator : public BinaryOperator {                                               \
-    public:                                                                                      \
-        name##Operator(tvm::Expression* lhs_sub_expr, tvm::Expression* rhs_sub_expr)             \
-            : BinaryOperator(#name, lhs_sub_expr, rhs_sub_expr)                                  \
-        {}                                                                                       \
-        virtual ~name##Operator()                                                                \
-        {}                                                                                       \
-                                                                                                 \
-    protected:                                                                                   \
-        virtual Datum evalOperator(tvm::ExecContext* exec_context, Datum lhs_arg, Datum rhs_arg) \
-        {                                                                                        \
-            Datum result = NULL_DATUM;                                                           \
-            exec_context->_expr_rc = MOT_NO_ERROR;                                               \
-            MOT_LOG_DEBUG("Invoking binary operator: " #name);                                   \
-            INVOKE_OPERATOR2(funcid, name, lhs_arg, rhs_arg);                                    \
-            return result;                                                                       \
-        }                                                                                        \
+#define APPLY_BINARY_OPERATOR(funcid, name)                                                    \
+    class name##Operator : public BinaryOperator {                                             \
+    public:                                                                                    \
+        name##Operator(tvm::Expression* lhs_sub_expr, tvm::Expression* rhs_sub_expr)           \
+            : BinaryOperator(#name, lhs_sub_expr, rhs_sub_expr)                                \
+        {}                                                                                     \
+        ~name##Operator() final                                                                \
+        {}                                                                                     \
+                                                                                               \
+    protected:                                                                                 \
+        Datum evalOperator(tvm::ExecContext* exec_context, Datum lhs_arg, Datum rhs_arg) final \
+        {                                                                                      \
+            Datum result = NULL_DATUM;                                                         \
+            exec_context->_expr_rc = MOT_NO_ERROR;                                             \
+            MOT_LOG_DEBUG("Invoking binary operator: " #name);                                 \
+            INVOKE_OPERATOR2(funcid, name, lhs_arg, rhs_arg);                                  \
+            return result;                                                                     \
+        }                                                                                      \
     };
 
-#define APPLY_BINARY_CAST_OPERATOR(funcid, name)                                                     \
-    class name##Operator : public BinaryCastOperator {                                               \
-    public:                                                                                          \
-        name##Operator(tvm::Expression* lhs_sub_expr, tvm::Expression* rhs_sub_expr, int arg_pos)    \
-            : BinaryCastOperator(#name, lhs_sub_expr, rhs_sub_expr, arg_pos)                         \
-        {}                                                                                           \
-        virtual ~name##Operator()                                                                    \
-        {}                                                                                           \
-                                                                                                     \
-    protected:                                                                                       \
-        virtual Datum evalCastOperator(tvm::ExecContext* exec_context, Datum lhs_arg, Datum rhs_arg) \
-        {                                                                                            \
-            Datum result = NULL_DATUM;                                                               \
-            exec_context->_expr_rc = MOT_NO_ERROR;                                                   \
-            MOT_LOG_DEBUG("Invoking binary cast operator: " #name);                                  \
-            INVOKE_OPERATOR2(funcid, name, lhs_arg, rhs_arg);                                        \
-            return result;                                                                           \
-        }                                                                                            \
+#define APPLY_BINARY_CAST_OPERATOR(funcid, name)                                                   \
+    class name##Operator : public BinaryCastOperator {                                             \
+    public:                                                                                        \
+        name##Operator(tvm::Expression* lhs_sub_expr, tvm::Expression* rhs_sub_expr, int arg_pos)  \
+            : BinaryCastOperator(#name, lhs_sub_expr, rhs_sub_expr, arg_pos)                       \
+        {}                                                                                         \
+        ~name##Operator() final                                                                    \
+        {}                                                                                         \
+                                                                                                   \
+    protected:                                                                                     \
+        Datum evalCastOperator(tvm::ExecContext* exec_context, Datum lhs_arg, Datum rhs_arg) final \
+        {                                                                                          \
+            Datum result = NULL_DATUM;                                                             \
+            exec_context->_expr_rc = MOT_NO_ERROR;                                                 \
+            MOT_LOG_DEBUG("Invoking binary cast operator: " #name);                                \
+            INVOKE_OPERATOR2(funcid, name, lhs_arg, rhs_arg);                                      \
+            return result;                                                                         \
+        }                                                                                          \
     };
 
 #define APPLY_TERNARY_OPERATOR(funcid, name)                                                               \
@@ -472,11 +466,11 @@ private:
         name##Operator(tvm::Expression* sub_expr1, tvm::Expression* sub_expr2, tvm::Expression* sub_expr3) \
             : TernaryOperator(#name, sub_expr1, sub_expr2, sub_expr3)                                      \
         {}                                                                                                 \
-        virtual ~name##Operator()                                                                          \
+        ~name##Operator() final                                                                            \
         {}                                                                                                 \
                                                                                                            \
     protected:                                                                                             \
-        virtual Datum evalOperator(tvm::ExecContext* exec_context, Datum arg1, Datum arg2, Datum arg3)     \
+        Datum evalOperator(tvm::ExecContext* exec_context, Datum arg1, Datum arg2, Datum arg3) final       \
         {                                                                                                  \
             Datum result = NULL_DATUM;                                                                     \
             exec_context->_expr_rc = MOT_NO_ERROR;                                                         \
@@ -486,27 +480,25 @@ private:
         }                                                                                                  \
     };
 
-#define APPLY_TERNARY_CAST_OPERATOR(funcid, name)                                                          \
-    class name##Operator : public TernaryCastOperator {                                                    \
-    public:                                                                                                \
-        name##Operator(tvm::Expression* sub_expr1,                                                         \
-            tvm::Expression* sub_expr2,                                                                    \
-            tvm::Expression* sub_expr3,                                                                    \
-            int arg_pos)                                                                                   \
-            : TernaryCastOperator(#name, sub_expr1, sub_expr2, sub_expr3, arg_pos)                         \
-        {}                                                                                                 \
-        virtual ~name##Operator()                                                                          \
-        {}                                                                                                 \
-                                                                                                           \
-    protected:                                                                                             \
-        virtual Datum evalCastOperator(tvm::ExecContext* exec_context, Datum arg1, Datum arg2, Datum arg3) \
-        {                                                                                                  \
-            Datum result = NULL_DATUM;                                                                     \
-            exec_context->_expr_rc = MOT_NO_ERROR;                                                         \
-            MOT_LOG_DEBUG("Invoking ternary cast operator: " #name);                                       \
-            INVOKE_OPERATOR3(funcid, name, arg1, arg2, arg3);                                              \
-            return result;                                                                                 \
-        }                                                                                                  \
+#define APPLY_TERNARY_CAST_OPERATOR(funcid, name)                                                            \
+    class name##Operator : public TernaryCastOperator {                                                      \
+    public:                                                                                                  \
+        name##Operator(                                                                                      \
+            tvm::Expression* sub_expr1, tvm::Expression* sub_expr2, tvm::Expression* sub_expr3, int arg_pos) \
+            : TernaryCastOperator(#name, sub_expr1, sub_expr2, sub_expr3, arg_pos)                           \
+        {}                                                                                                   \
+        ~name##Operator() final                                                                              \
+        {}                                                                                                   \
+                                                                                                             \
+    protected:                                                                                               \
+        Datum evalCastOperator(tvm::ExecContext* exec_context, Datum arg1, Datum arg2, Datum arg3) final     \
+        {                                                                                                    \
+            Datum result = NULL_DATUM;                                                                       \
+            exec_context->_expr_rc = MOT_NO_ERROR;                                                           \
+            MOT_LOG_DEBUG("Invoking ternary cast operator: " #name);                                         \
+            INVOKE_OPERATOR3(funcid, name, arg1, arg2, arg3);                                                \
+            return result;                                                                                   \
+        }                                                                                                    \
     };
 
 APPLY_OPERATORS()
@@ -720,14 +712,8 @@ private:
 /** BuildDatumKeyInstruction */
 class BuildDatumKeyInstruction : public tvm::Instruction {
 public:
-    BuildDatumKeyInstruction(tvm::Instruction* column_inst,
-        tvm::Instruction* sub_expr,
-        int index_colid,
-        int offset,
-        int size,
-        int value_type,
-        JitRangeIteratorType range_itr_type,
-        JitRangeScanType range_scan_type,
+    BuildDatumKeyInstruction(tvm::Instruction* column_inst, tvm::Instruction* sub_expr, int index_colid, int offset,
+        int size, int value_type, JitRangeIteratorType range_itr_type, JitRangeScanType range_scan_type,
         int subQueryIndex)
         : Instruction(tvm::Instruction::Void),
           _column_inst(column_inst),
@@ -3165,7 +3151,6 @@ inline void IssueDebugLogImpl(JitTvmCodeGenContext* ctx, const char* function, c
 #else
 #define IssueDebugLog(msg)
 #endif
-} // namespace JitExec
+}  // namespace JitExec
 
 #endif /* JIT_TVM_FUNCS_H */
-

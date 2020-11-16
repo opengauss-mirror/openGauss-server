@@ -383,7 +383,6 @@ public:
         ++m_totalLimboInuseElements;
         m_totalLimboSizeInBytes += objSize;
         m_totalLimboRetiredSizeInBytes += objSize;  // stats
-        // printf("Theread Id %d , total_limbo_size_in_bytes = %d\n",tid_,total_limbo_size_in_bytes);
         MemoryStatisticsProvider::m_provider->AddGCRetiredBytes(objSize);
     }
 

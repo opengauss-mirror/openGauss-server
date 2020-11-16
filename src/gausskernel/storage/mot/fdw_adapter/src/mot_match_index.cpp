@@ -130,10 +130,10 @@ bool MatchIndex::IsSameOper(KEY_OPER op1, KEY_OPER op2) const
     return res;
 }
 
-void MatchIndex::ClearPreviousMatch(MOTFdwStateSt* state, bool set_local, int i, int j)
+void MatchIndex::ClearPreviousMatch(MOTFdwStateSt* state, bool setLocal, int i, int j)
 {
     if (m_parentColMatch[i][j] != nullptr) {
-        if (set_local) {
+        if (setLocal) {
             if (!list_member(state->m_localConds, m_parentColMatch[i][j])) {
                 state->m_localConds = lappend(state->m_localConds, m_parentColMatch[i][j]);
             }
@@ -145,7 +145,7 @@ void MatchIndex::ClearPreviousMatch(MOTFdwStateSt* state, bool set_local, int i,
 }
 
 bool MatchIndex::SetIndexColumn(
-    MOTFdwStateSt* state, int16_t colNum, KEY_OPER op, Expr* expr, Expr* parent, bool set_local)
+    MOTFdwStateSt* state, int16_t colNum, KEY_OPER op, Expr* expr, Expr* parent, bool setLocal)
 {
     bool res = false;
     int i = 0;
@@ -169,15 +169,15 @@ bool MatchIndex::SetIndexColumn(
                 // we can not differentiate between a > 2 and a > 1
                 if (sameOper) {
                     if (op == KEY_OPER::READ_KEY_EXACT && m_opers[0][i] != op) {
-                        ClearPreviousMatch(state, set_local, 0, i);
-                        ClearPreviousMatch(state, set_local, 1, i);
+                        ClearPreviousMatch(state, setLocal, 0, i);
+                        ClearPreviousMatch(state, setLocal, 1, i);
                         m_parentColMatch[0][i] = parent;
                         m_colMatch[0][i] = expr;
                         m_opers[0][i] = op;
                         m_numMatches[0]++;
                         res = true;
                     } else if (m_opers[0][i] != KEY_OPER::READ_KEY_EXACT) {
-                        ClearPreviousMatch(state, set_local, 0, i);
+                        ClearPreviousMatch(state, setLocal, 0, i);
                     }
                     break;
                 }
@@ -197,14 +197,14 @@ bool MatchIndex::SetIndexColumn(
                 // we can not differentiate between a > 2 and a > 1
                 if (sameOper) {
                     if (op == KEY_OPER::READ_KEY_EXACT && m_opers[0][i] != op) {
-                        ClearPreviousMatch(state, set_local, 0, i);
+                        ClearPreviousMatch(state, setLocal, 0, i);
                         m_parentColMatch[0][i] = parent;
                         m_colMatch[0][i] = expr;
                         m_opers[0][i] = op;
                         m_numMatches[0]++;
                         res = true;
                     } else if (m_opers[0][i] != KEY_OPER::READ_KEY_EXACT) {
-                        ClearPreviousMatch(state, set_local, 0, i);
+                        ClearPreviousMatch(state, setLocal, 0, i);
                     }
                     break;
                 }
@@ -304,30 +304,33 @@ double MatchIndex::GetCost(int numClauses)
         }
 
         for (int i = 0; i < 2; i++) {
-            int estimated_rows = 0;
+            int estimatedRows = 0;
             if (notUsed[i] > 0) {
-                if (m_ixOpers[i] < KEY_OPER::READ_INVALID)
+                if (m_ixOpers[i] < KEY_OPER::READ_INVALID) {
                     m_ixOpers[i] = (KEY_OPER)((uint8_t)m_ixOpers[i] | KEY_OPER_PREFIX_BITMASK);
-                estimated_rows += (notUsed[i] * partialIxMulti);
+                }
+                estimatedRows += (notUsed[i] * partialIxMulti);
             }
 
             // we assume that that all other operations will bring 10 times rows
-            if (m_ixOpers[i] != KEY_OPER::READ_KEY_EXACT)
-                estimated_rows += 10;
+            if (m_ixOpers[i] != KEY_OPER::READ_KEY_EXACT) {
+                estimatedRows += 10;
+            }
 
             // we assume that using partial key will bring 10 times more rows per not used column
             if (used[i] < numClauses) {
-                estimated_rows += (numClauses - used[i]) * 10;
+                estimatedRows += (numClauses - used[i]) * 10;
             }
 
-            m_costs[i] += estimated_rows;
+            m_costs[i] += estimatedRows;
         }
 
         if (!m_ix->GetUnique()) {
-            if (m_ixOpers[0] == KEY_OPER::READ_KEY_EXACT)
+            if (m_ixOpers[0] == KEY_OPER::READ_KEY_EXACT) {
                 m_ixOpers[0] = KEY_OPER::READ_PREFIX;
-            else if (m_ixOpers[1] == KEY_OPER::READ_KEY_EXACT)
+            } else if (m_ixOpers[1] == KEY_OPER::READ_KEY_EXACT) {
                 m_ixOpers[1] = KEY_OPER::READ_PREFIX;
+            }
         }
 
         if (m_costs[0] <= m_costs[1]) {
@@ -384,12 +387,12 @@ bool MatchIndex::AdjustForOrdering(bool desc)
     }
 
     KEY_OPER curr = (KEY_OPER)(m_ixOpers[0] & ~KEY_OPER_PREFIX_BITMASK);
-    bool has_both = (m_start != -1 && m_end != -1);
-    bool curr_desc = !(curr < KEY_OPER::READ_KEY_OR_PREV);
+    bool hasBoth = (m_start != -1 && m_end != -1);
+    bool currDesc = !(curr < KEY_OPER::READ_KEY_OR_PREV);
 
-    if (desc == curr_desc) {
+    if (desc == currDesc) {
         return true;
-    } else if (!has_both) {
+    } else if (!hasBoth) {
         return false;
     }
 

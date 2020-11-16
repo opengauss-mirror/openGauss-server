@@ -102,8 +102,8 @@ public:
     }
 
     bool IsSameOper(KEY_OPER op1, KEY_OPER op2) const;
-    void ClearPreviousMatch(MOTFdwStateSt* state, bool set_local, int i, int j);
-    bool SetIndexColumn(MOTFdwStateSt* state, int16_t colNum, KEY_OPER op, Expr* expr, Expr* parent, bool set_local);
+    void ClearPreviousMatch(MOTFdwStateSt* state, bool setLocal, int i, int j);
+    bool SetIndexColumn(MOTFdwStateSt* state, int16_t colNum, KEY_OPER op, Expr* expr, Expr* parent, bool setLocal);
 
     inline bool IsUsable() const
     {

@@ -1337,6 +1337,6 @@ inline void IssueDebugLogImpl(JitLlvmCodeGenContext* ctx, const char* function, 
 #else
 #define IssueDebugLog(msg)
 #endif
-} // namespace JitExec
+}  // namespace JitExec
 
 #endif /* JIT_LLVM_FUNCS_H */

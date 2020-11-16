@@ -229,6 +229,6 @@ void buildCheckLimit(JitLlvmCodeGenContext* ctx, int limit_count);
 
 bool selectJoinRows(
     JitLlvmCodeGenContext* ctx, llvm::Value* outer_row_copy, llvm::Value* inner_row, JitJoinPlan* plan, int* max_arg);
-} // namespace JitExec
+}  // namespace JitExec
 
 #endif /* JIT_LLVM_BLOCKS_H */

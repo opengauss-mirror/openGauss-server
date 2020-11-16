@@ -370,9 +370,6 @@ public:
 
 }  // namespace MOT
 
-/** @define Enables statistics collection in MM module. */
-//#define MEM_STATS
-
 /** @define Enables/disable entire memory module. */
 #define MEM_ACTIVE
 

@@ -59,7 +59,7 @@
 #include "utilities.h"
 
 #include <vector>
-#include <assert.h>
+#include <cassert>
 
 // for checking if LLVM_ENABLE_DUMP is defined and for using LLVM_VERSION_STRING
 #include "llvm/Config/llvm-config.h"
@@ -255,6 +255,6 @@ struct JitLlvmCodeGenContext {
     dorado::GsCodeGen::LlvmBuilder* _builder;
     llvm::Function* m_jittedQuery;
 };
-} // namespace JitExec
+}  // namespace JitExec
 
 #endif /* JIT_LLVM_QUERY_H */

@@ -177,4 +177,4 @@ void FreeGsCodeGen(GsCodeGen* code_gen)
     code_gen->releaseResource();
     delete code_gen;  // invokes parent class BaseObject::delete() operator defined in palloc.h)
 }
-} // namespace JitExec
+}  // namespace JitExec

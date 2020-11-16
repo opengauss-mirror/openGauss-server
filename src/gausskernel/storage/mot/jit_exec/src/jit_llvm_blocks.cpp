@@ -273,9 +273,8 @@ llvm::Value* buildCreateNewRow(JitLlvmCodeGenContext* ctx)
 }
 
 /** @brief Adds code to search for a row by a key. */
-llvm::Value* buildSearchRow(
-    JitLlvmCodeGenContext* ctx, MOT::AccessType access_type, JitRangeScanType range_scan_type,
-    int subQueryIndex /* = -1*/)
+llvm::Value* buildSearchRow(JitLlvmCodeGenContext* ctx, MOT::AccessType access_type, JitRangeScanType range_scan_type,
+    int subQueryIndex /* = -1 */)
 {
     IssueDebugLog("Searching row");
     llvm::Value* row = AddSearchRow(ctx, access_type, range_scan_type, subQueryIndex);
@@ -404,7 +403,7 @@ llvm::Value* buildBeginIterator(
 /** @brief Adds code to get row from iterator. */
 llvm::Value* buildGetRowFromIterator(JitLlvmCodeGenContext* ctx, llvm::BasicBlock* endLoopBlock,
     MOT::AccessType access_mode, JitIndexScanDirection index_scan_direction, JitLlvmRuntimeCursor* cursor,
-    JitRangeScanType range_scan_type, int subQueryIndex /*= -1*/)
+    JitRangeScanType range_scan_type, int subQueryIndex /* = -1 */)
 {
     IssueDebugLog("Retrieving row from iterator");
     llvm::Value* row =
@@ -1568,7 +1567,7 @@ llvm::Value* buildPrepareStateScanRow(JitLlvmCodeGenContext* ctx, JitIndexScan* 
     // prepare stateful scan if not done so already
     if (!buildPrepareStateScan(ctx, index_scan, max_arg, range_scan_type, outer_row)) {
         MOT_LOG_TRACE("Failed to generate jitted code for range JOIN query: unsupported %s WHERE clause type",
-            range_scan_type == JIT_RANGE_SCAN_MAIN ? "outer" : "inner");
+            (range_scan_type == JIT_RANGE_SCAN_MAIN) ? "outer" : "inner");
         return nullptr;
     }
 
@@ -2172,4 +2171,4 @@ bool selectJoinRows(
     }
     return true;
 }
-} // namespace JitExec
+}  // namespace JitExec

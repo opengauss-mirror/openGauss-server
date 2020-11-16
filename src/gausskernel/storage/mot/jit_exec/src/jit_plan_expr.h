@@ -513,8 +513,8 @@ public:
         _count = nullptr;
     }
 
-    virtual bool OnExpression(
-        Expr* expr, int columnType, int tableColumnId, MOT::Table* table, JitWhereOperatorClass opClass, bool joinExpr)
+    bool OnExpression(Expr* expr, int columnType, int tableColumnId, MOT::Table* table, JitWhereOperatorClass opClass,
+        bool joinExpr) final
     {
         if (opClass != JIT_WOC_EQUALS) {
             MOT_LOG_TRACE("ExpressionCounter::onExpression(): Skipping non-equals operator");
@@ -542,8 +542,8 @@ public:
         _expr_count = nullptr;
     }
 
-    virtual bool OnExpression(
-        Expr* expr, int columnType, int tableColumnId, MOT::Table* table, JitWhereOperatorClass opClass, bool joinExpr)
+    bool OnExpression(Expr* expr, int columnType, int tableColumnId, MOT::Table* table, JitWhereOperatorClass opClass,
+        bool joinExpr) final
     {
         if (opClass != JIT_WOC_EQUALS) {
             MOT_LOG_TRACE("ExpressionCollector::onExpression(): Skipping non-equals operator");
@@ -626,8 +626,8 @@ public:
         return result;
     }
 
-    virtual bool OnExpression(
-        Expr* expr, int columnType, int tableColumnId, MOT::Table* table, JitWhereOperatorClass opClass, bool joinExpr)
+    bool OnExpression(Expr* expr, int columnType, int tableColumnId, MOT::Table* table, JitWhereOperatorClass opClass,
+        bool joinExpr) final
     {
         if (_index_op_count >= _index_scan->_search_exprs._count) {
             MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
@@ -914,7 +914,7 @@ public:
         _count = nullptr;
     }
 
-    virtual bool OnFilterExpr(int filterOp, int filterOpFuncId, Expr* lhs, Expr* rhs)
+    bool OnFilterExpr(int filterOp, int filterOpFuncId, Expr* lhs, Expr* rhs) final
     {
         ++(*_count);
         return true;
@@ -938,7 +938,7 @@ public:
         _filter_count = nullptr;
     }
 
-    virtual bool OnFilterExpr(int filterOp, int filterOpFuncId, Expr* lhs, Expr* rhs)
+    bool OnFilterExpr(int filterOp, int filterOpFuncId, Expr* lhs, Expr* rhs) final
     {
         JitExpr* jit_lhs = parseExpr(_query, lhs, 0, 0);
         if (jit_lhs == nullptr) {
@@ -997,8 +997,8 @@ public:
         return _subLink;
     }
 
-    virtual bool OnExpression(
-        Expr* expr, int columnType, int tableColumnId, MOT::Table* table, JitWhereOperatorClass opClass, bool joinExpr)
+    bool OnExpression(Expr* expr, int columnType, int tableColumnId, MOT::Table* table, JitWhereOperatorClass opClass,
+        bool joinExpr) final
     {
         if (opClass != JIT_WOC_EQUALS) {
             MOT_LOG_TRACE("SubLinkFetcher::onExpression(): Skipping non-equals operator");

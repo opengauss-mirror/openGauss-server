@@ -60,7 +60,7 @@
 
 #include <list>
 #include <string>
-#include <assert.h>
+#include <cassert>
 
 namespace JitExec {
 /** @struct Holds instructions that evaluate in runtime to begin and end iterators of a cursor. */
@@ -92,6 +92,6 @@ struct JitTvmCodeGenContext {
     /** @var The resulting jitted function. */
     tvm::Function* m_jittedQuery;
 };
-} // namespace JitExec
+}  // namespace JitExec
 
 #endif /* JIT_TVM_QUERY_H */

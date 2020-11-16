@@ -888,7 +888,7 @@ static JitContext* JitRangeSelectCodegen(const Query* query, const char* query_s
 
     // wrap up
     JitCommandType cmdType =
-        plan->_index_scan._scan_type == JIT_INDEX_SCAN_FULL ? JIT_COMMAND_FULL_SELECT : JIT_COMMAND_RANGE_SELECT;
+        (plan->_index_scan._scan_type == JIT_INDEX_SCAN_FULL) ? JIT_COMMAND_FULL_SELECT : JIT_COMMAND_RANGE_SELECT;
     JitContext* jit_context = FinalizeCodegen(ctx, max_arg, cmdType);
 
     // cleanup
