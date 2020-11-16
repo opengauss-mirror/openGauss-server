@@ -824,8 +824,8 @@ select * from llvm_vecexpr_table_03 where col_bigint is false order by 1, 2, 3;
 set enable_seqscan=off;
 set enable_bitmapscan=off;
 explain (verbose on, costs off, analyze on) select * from llvm_vecexpr_table_03 where col_int > 4;
-                                                             QUERY PLAN                                                              
--------------------------------------------------------------------------------------------------------------------------------------
+--? .* QUERY PLAN .* 
+--?-------------------.*
 --? Row Adapter (actual time=.* rows=9 loops=1)
    Output: col_sint, col_int, col_bigint, col_char, col_bpchar, col_varchar, col_text, col_date, col_time
 --?   ->  CStore Index Scan using llvm_index_01 on llvm_vecexpr_engine2.llvm_vecexpr_table_03 (actual time=.* rows=9 loops=1)

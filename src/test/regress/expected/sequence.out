@@ -118,11 +118,17 @@ SELECT nextval('sequence_test'::regclass);
 (1 row)
 
 SELECT currval('sequence_test'::text);
-ERROR:  currval function is not supported
-CONTEXT:  referenced column: currval
+ currval 
+---------
+       2
+(1 row)
+
 SELECT currval('sequence_test'::regclass);
-ERROR:  currval function is not supported
-CONTEXT:  referenced column: currval
+ currval 
+---------
+       2
+(1 row)
+
 SELECT setval('sequence_test'::text, 32);
  setval 
 --------
@@ -177,7 +183,7 @@ CREATE SEQUENCE foo_seq;
 ALTER TABLE foo_seq RENAME TO foo_seq_new;
 ERROR:  RENAME SEQUENCE is not yet supported.
 SELECT * FROM foo_seq_new;
-ERROR:  relation "foo_seq_new" does not exist
+ERROR:  relation "foo_seq_new" does not exist on datanode1
 LINE 1: SELECT * FROM foo_seq_new;
                       ^
 SELECT nextval('foo_seq_new');
@@ -191,7 +197,7 @@ LINE 1: SELECT nextval('foo_seq_new');
                        ^
 CONTEXT:  referenced column: nextval
 SELECT * FROM foo_seq_new;
-ERROR:  relation "foo_seq_new" does not exist
+ERROR:  relation "foo_seq_new" does not exist on datanode1
 LINE 1: SELECT * FROM foo_seq_new;
                       ^
 DROP SEQUENCE IF EXISTS foo_seq_new;
@@ -247,23 +253,22 @@ SELECT nextval('sequence_test2');
 
 ALTER SEQUENCE sequence_test2 RESTART WITH 24
 	 INCREMENT BY 4 MAXVALUE 36 MINVALUE 5 CYCLE;
-ERROR:  ALTER SEQUENCE is not yet supported.
 SELECT nextval('sequence_test2');
  nextval 
 ---------
-      33
+      24
 (1 row)
 
 SELECT nextval('sequence_test2');
  nextval 
 ---------
-      34
+      28
 (1 row)
 
 SELECT nextval('sequence_test2');
  nextval 
 ---------
-      35
+      32
 (1 row)
 
 SELECT nextval('sequence_test2');
@@ -275,27 +280,26 @@ SELECT nextval('sequence_test2');
 SELECT nextval('sequence_test2');
  nextval 
 ---------
-      37
+       5
 (1 row)
 
 ALTER SEQUENCE sequence_test2 RESTART;
-ERROR:  ALTER SEQUENCE is not yet supported.
 SELECT nextval('sequence_test2');
  nextval 
 ---------
-      38
+      32
 (1 row)
 
 SELECT nextval('sequence_test2');
  nextval 
 ---------
-      39
+      36
 (1 row)
 
 SELECT nextval('sequence_test2');
  nextval 
 ---------
-      40
+       5
 (1 row)
 
 -- Information schema
@@ -305,7 +309,7 @@ SELECT * FROM information_schema.sequences WHERE sequence_name IN
   ORDER BY sequence_name ASC;
  sequence_catalog | sequence_schema |   sequence_name    | data_type | numeric_precision | numeric_precision_radix | numeric_scale | start_value | minimum_value |    maximum_value    | increment | cycle_option 
 ------------------+-----------------+--------------------+-----------+-------------------+-------------------------+---------------+-------------+---------------+---------------------+-----------+--------------
- regression       | public          | sequence_test2     | bigint    |                64 |                       2 |             0 | 32          | 1             | 9223372036854775807 | 1         | NO
+ regression       | public          | sequence_test2     | bigint    |                64 |                       2 |             0 | 32          | 5             | 36                  | 4         | YES
  regression       | public          | serialtest2_f2_seq | bigint    |                64 |                       2 |             0 | 1           | 1             | 9223372036854775807 | 1         | NO
  regression       | public          | serialtest2_f3_seq | bigint    |                64 |                       2 |             0 | 1           | 1             | 9223372036854775807 | 1         | NO
  regression       | public          | serialtest2_f4_seq | bigint    |                64 |                       2 |             0 | 1           | 1             | 9223372036854775807 | 1         | NO
@@ -327,8 +331,11 @@ SELECT nextval('seq');
 (1 row)
 
 SELECT lastval();
-ERROR:  lastval function is not supported
-CONTEXT:  referenced column: lastval
+ lastval 
+---------
+       1
+(1 row)
+
 SELECT setval('seq', 99);
  setval 
 --------
@@ -336,8 +343,11 @@ SELECT setval('seq', 99);
 (1 row)
 
 SELECT lastval();
-ERROR:  lastval function is not supported
-CONTEXT:  referenced column: lastval
+ lastval 
+---------
+      99
+(1 row)
+
 CREATE SEQUENCE seq2;
 SELECT nextval('seq2');
  nextval 
@@ -346,12 +356,15 @@ SELECT nextval('seq2');
 (1 row)
 
 SELECT lastval();
-ERROR:  lastval function is not supported
-CONTEXT:  referenced column: lastval
+ lastval 
+---------
+       1
+(1 row)
+
 DROP SEQUENCE seq2;
 -- should fail
 SELECT lastval();
-ERROR:  lastval function is not supported
+ERROR:  lastval is not yet defined in this session
 CONTEXT:  referenced column: lastval
 CREATE USER seq_user PASSWORD 'ttest@123';
 START TRANSACTION;
@@ -365,7 +378,7 @@ SELECT nextval('seq3');
 
 REVOKE ALL ON seq3 FROM seq_user;
 SELECT lastval();
-ERROR:  lastval function is not supported
+ERROR:  permission denied for sequence seq3
 CONTEXT:  referenced column: lastval
 ROLLBACK;
 -- Sequences should get wiped out as well:
@@ -375,20 +388,22 @@ SELECT * FROM information_schema.sequences WHERE sequence_name IN
   ('sequence_test2', 'serialtest2_f2_seq', 'serialtest2_f3_seq',
    'serialtest2_f4_seq', 'serialtest2_f5_seq', 'serialtest2_f6_seq')
   ORDER BY sequence_name ASC;
- sequence_catalog | sequence_schema | sequence_name  | data_type | numeric_precision | numeric_precision_radix | numeric_scale | start_value | minimum_value |    maximum_value    | increment | cycle_option 
-------------------+-----------------+----------------+-----------+-------------------+-------------------------+---------------+-------------+---------------+---------------------+-----------+--------------
- regression       | public          | sequence_test2 | bigint    |                64 |                       2 |             0 | 32          | 1             | 9223372036854775807 | 1         | NO
+ sequence_catalog | sequence_schema | sequence_name  | data_type | numeric_precision | numeric_precision_radix | numeric_scale | start_value | minimum_value | maximum_value | increment | cycle_option 
+------------------+-----------------+----------------+-----------+-------------------+-------------------------+---------------+-------------+---------------+---------------+-----------+--------------
+ regression       | public          | sequence_test2 | bigint    |                64 |                       2 |             0 | 32          | 5             | 36            | 4         | YES
 (1 row)
 
 DROP USER seq_user;
 DROP SEQUENCE seq;
 create sequence seqllt;
-create temp table seqllt(c1 int);
+--create temp table seqllt(c1 int);
 select nextval('seqllt');
---?ERROR:  "pg_temp_*
-DETAIL:  Please make sure using the correct schema
-CONTEXT:  referenced column: nextval
-drop table seqllt;
+ nextval 
+---------
+       1
+(1 row)
+
+--drop table seqllt;
 drop sequence seqllt;
 create schema origSchema;
 create schema newSchema;
@@ -430,8 +445,7 @@ select nextval('seqMin');
 (1 row)
 
 select nextval('seqMin');
-WARNING:  Failed to receive GTM rollback transaction response  for aborting prepared (null).
---?ERROR:  Sequence reached minimum value.*
+--?ERROR:  nextval: reached minimum value of sequence.*
 CONTEXT:  referenced column: nextval
 drop sequence seqMin;
 create table t1(c1 int);
@@ -452,23 +466,23 @@ alter sequence  seq maxvalue -1;
 ERROR:  MINVALUE (1) must be less than MAXVALUE (-1)
 alter sequence seq maxvalue 90;
 select * from seq;
- sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called |  uuid   
----------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+---------
---? seq           |         -1 |           1 |            1 |        90 |         1 |           1 |       0 | f         | f         | .*
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
+--? seq           |          1 |           1 |            1 |        90 |         1 |           1 |       0 | f         | f         |.*
 (1 row)
 
 alter sequence seq maxvalue 110;
 select * from seq;
- sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called |  uuid   
----------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+---------
---? seq           |         -1 |           1 |            1 |       110 |         1 |           1 |       0 | f         | f         | .*
+ sequence_name | last_value | start_value | increment_by | max_value | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
+---------------+------------+-------------+--------------+-----------+-----------+-------------+---------+-----------+-----------+------
+--? seq           |          1 |           1 |            1 |       110 |         1 |           1 |       0 | f         | f         |.*
 (1 row)
 
 alter sequence seq nomaxvalue;
 select * from seq;
- sequence_name | last_value | start_value | increment_by |      max_value      | min_value | cache_value | log_cnt | is_cycled | is_called |  uuid   
----------------+------------+-------------+--------------+---------------------+-----------+-------------+---------+-----------+-----------+---------
---? seq           |         -1 |           1 |            1 | 9223372036854775807 |         1 |           1 |       0 | f         | f         | .*
+ sequence_name | last_value | start_value | increment_by |      max_value      | min_value | cache_value | log_cnt | is_cycled | is_called | uuid 
+---------------+------------+-------------+--------------+---------------------+-----------+-------------+---------+-----------+-----------+------
+--? seq           |          1 |           1 |            1 | 9223372036854775807 |         1 |           1 |       0 | f         | f         |.*
 (1 row)
 
 alter sequence seq maxvalue 2;
@@ -485,8 +499,7 @@ select nextval('seq');
 (1 row)
 
 select nextval('seq');
-WARNING:  Failed to receive GTM rollback transaction response  for aborting prepared (null).
---?ERROR:  Sequence reached maximum value 2, seqval 2, uuid .* 
+--?ERROR:  nextval: reached maximum value .* 
 CONTEXT:  referenced column: nextval
 alter sequence seq maxvalue 10;
 select nextval('seq');
@@ -497,7 +510,6 @@ select nextval('seq');
 
 drop sequence seq;
 --normal case with cache
-
 --serial in table
 create table test_seq (a int, b serial);
 NOTICE:  CREATE TABLE will create implicit sequence "test_seq_b_seq" for serial column "test_seq.b"
@@ -518,12 +530,10 @@ select * from test_seq order by a;
 (10 rows)
 
 alter sequence test_seq_b_seq maxvalue 9;
-WARNING:  Failed to receive GTM rollback transaction response  for aborting prepared (null).
---?ERROR:  Can not alter sequence uuid .* maxval from 9223372036854775806 to 9, because new maxval 9 should be greater than currval 11 in gtm
+ERROR:  RESTART value (11) cannot be greater than MAXVALUE (9)
 alter sequence test_seq_b_seq maxvalue 20;
 insert into test_seq(a) values(generate_series(11,20));
---?WARNING:  Failed to receive GTM rollback transaction response  for aborting prepared .*.
---?ERROR:  Sequence reached maximum value 20, seqval 20, uuid .* 
+--?ERROR:  nextval: reached maximum value of sequence "test_seq_b_seq".* 
 CONTEXT:  referenced column: b
 select * from test_seq order by a;
  a  | b  
@@ -577,19 +587,19 @@ create table t_serial(a int, b serial);
 NOTICE:  CREATE TABLE will create implicit sequence "t_serial_b_seq" for serial column "t_serial.b"
 begin;
 insert into t_nextval select a,nextval('seq') from test_base;
-select a.* from pg_locks a,pg_class b where a.relation= b.oid and b.relname='seq';
---?.*
---?.*
---? relation | .* |  .* |      |       |            |               |         |       |          | .*            | .* | RowExclusiveLock | t       | t
+select a.locktype, a.database, a.mode, a.granted, a.fastpath from pg_locks a,pg_class b where a.relation= b.oid and b.relname='seq';
+ locktype | database |       mode       | granted | fastpath 
+----------+----------+------------------+---------+----------
+ relation |    16384 | RowExclusiveLock | t       | t
 (1 row)
 
 end;
 begin;
 insert into t_serial(a) select a from test_base;
-select a.* from pg_locks a,pg_class b where a.relation= b.oid and b.relname='t_serial_b_seq';
---?.*
---?.*
---? relation | .* |  .* |      |       |            |               |         |       |          | .*            | .* | RowExclusiveLock | t       | t
+select a.locktype, a.database, a.mode, a.granted, a.fastpath from pg_locks a,pg_class b where a.relation= b.oid and b.relname='t_serial_b_seq';
+ locktype | database |       mode       | granted | fastpath 
+----------+----------+------------------+---------+----------
+ relation |    16384 | RowExclusiveLock | t       | t
 (1 row)
 
 end;
@@ -597,3 +607,33 @@ drop sequence seq;
 drop table t_nextval;
 drop table test_base;
 drop table t_serial;
+--alter sequence
+create sequence seq_alter start with 1 minvalue 1 maxvalue 2 increment 1 nocycle;
+select nextval('seq_alter');
+ nextval 
+---------
+       1
+(1 row)
+
+select nextval('seq_alter');
+ nextval 
+---------
+       2
+(1 row)
+
+select nextval('seq_alter');
+ERROR:  nextval: reached maximum value of sequence "seq_alter" (2)
+CONTEXT:  referenced column: nextval
+create sequence seq_alter start with 2 minvalue 2 maxvalue 4 restart 7 increment 1 cycle;
+ERROR:  RESTART value (7) cannot be greater than MAXVALUE (4)
+create sequence seq_alter start with 2 minvalue 2 maxvalue 4 restart 3 increment 1 cycle;
+ERROR:  relation "seq_alter" already exists
+select nextval('seq_alter');
+ERROR:  nextval: reached maximum value of sequence "seq_alter" (2)
+CONTEXT:  referenced column: nextval
+select nextval('seq_alter');
+ERROR:  nextval: reached maximum value of sequence "seq_alter" (2)
+CONTEXT:  referenced column: nextval
+select nextval('seq_alter');
+ERROR:  nextval: reached maximum value of sequence "seq_alter" (2)
+CONTEXT:  referenced column: nextval
