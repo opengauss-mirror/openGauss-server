@@ -239,7 +239,7 @@ incremental_checkpoint_timeout = 60s	# range 1s-1h
 				# e.g. 'test ! -f /mnt/server/archivedir/%f && cp %p /mnt/server/archivedir/%f'
 #archive_timeout = 0		# force a logfile segment switch after this
 				# number of seconds; 0 disables
-
+#archive_dest = ''		# path to use to archive a logfile segment
 
 #------------------------------------------------------------------------------
 # REPLICATION

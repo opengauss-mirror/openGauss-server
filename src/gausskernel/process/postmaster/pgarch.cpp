@@ -80,6 +80,8 @@
 
 #define NUM_ARCHIVE_RETRIES 3
 
+#define ARCHIVE_BUF_SIZE (1024 * 1024)
+
 NON_EXEC_STATIC void PgArchiverMain();
 static void pgarch_exit(SIGNAL_ARGS);
 static void ArchSigHupHandler(SIGNAL_ARGS);
@@ -269,6 +271,24 @@ static void pgarch_waken_stop(SIGNAL_ARGS)
     errno = save_errno;
 }
 
+static void VerifyDestDirIsEmptyOrCreate(char* dirname)
+{
+    switch (pg_check_dir(dirname)) {
+        case 0:
+            /* Does not exist, so create */
+            if (pg_mkdir_p(dirname, S_IRWXU) == -1) {
+                ereport(FATAL, (errmsg_internal("could not create directory \"%s\": %s\n", dirname, strerror(errno))));
+            }
+        case -1:
+            /* Access problem */
+            ereport(FATAL, (errmsg_internal("could not access directory \"%s\": %s\n", dirname, strerror(errno))));
+        default: /* Nothing */
+            break;
+    }
+
+    return;
+}
+
 /*
  * pgarch_MainLoop
  *
@@ -287,6 +307,9 @@ static void pgarch_MainLoop(void)
      */
     t_thrd.arch.wakened = true;
 
+    if (XLogArchiveDestSet()) {
+        VerifyDestDirIsEmptyOrCreate(u_sess->attr.attr_storage.XLogArchiveDest);
+    }
     /*
      * There shouldn't be anything for the archiver to do except to wait for a
      * signal ... however, the archiver exists to protect our data, so she
@@ -402,8 +425,8 @@ static void pgarch_ArchiverCopyLoop(void)
             }
 
             /* can't do anything if no command ... */
-            if (!XLogArchiveCommandSet()) {
-                ereport(WARNING, (errmsg("archive_mode enabled, yet archive_command is not set")));
+            if (!XLogArchiveCommandSet() && !XLogArchiveDestSet()) {
+                ereport(WARNING, (errmsg("archive_mode enabled, yet archive_command or archive_dest is not set")));
                 return;
             }
 
@@ -421,6 +444,70 @@ static void pgarch_ArchiverCopyLoop(void)
             }
         }
     }
+}
+
+/*
+ * PgarchArchiveXlogToDest
+ *
+ * Invokes read/write to copy one archive file to wherever it should go
+ *
+ * Returns true if successful
+ */
+static bool PgarchArchiveXlogToDest(const char* xlog)
+{
+    int fdSrc = -1;
+    int fdDest = -1;
+    char srcPath[MAXPGPATH] = {0};
+    char destPath[MAXPGPATH] = {0};
+    char activitymsg[MAXFNAMELEN + 16];
+    unsigned long int fileBytes = 0;
+    int rc = 0;
+
+    if (xlog == NULL) {
+        return false;
+    }
+
+    rc = snprintf_s(srcPath, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%s", xlog);
+    securec_check_ss(rc, "\0", "\0");
+    rc = snprintf_s(destPath, MAXPGPATH, MAXPGPATH - 1, "%s/%s", u_sess->attr.attr_storage.XLogArchiveDest, xlog);
+    securec_check_ss(rc, "\0", "\0");
+
+    if ((fdSrc = open(srcPath, O_RDONLY)) >= 0) {
+        if ((fdDest = open(destPath, O_WRONLY|O_CREAT, S_IRUSR | S_IWUSR)) >= 0) {
+            char pbuff[ARCHIVE_BUF_SIZE] = {0};
+
+            while ((fileBytes = read(fdSrc, pbuff, sizeof(pbuff))) > 0) {
+                if (write(fdDest, pbuff, fileBytes) != fileBytes) {
+                    close(fdSrc);
+                    ereport(FATAL, (errmsg_internal("could not write file\"%s\":%m\n", srcPath)));
+                }
+                (void)memset_s(pbuff, sizeof(pbuff), 0, sizeof(pbuff));
+            }
+
+            close(fdSrc);
+            close(fdDest);
+
+            if (fileBytes < 0) {
+                ereport(FATAL, (errmsg_internal("could not read file\"%s\":%m\n", xlog)));
+            }
+
+            g_instance.WalSegmentArchSucceed = true;
+            ereport(DEBUG1, (errmsg("archived transaction log file \"%s\"", xlog)));
+
+            rc = snprintf_s(activitymsg, sizeof(activitymsg), sizeof(activitymsg) - 1, "last was %s", xlog);
+            securec_check_ss(rc, "\0", "\0");
+            set_ps_display(activitymsg, false);
+
+            return true;
+        } else {
+            close(fdSrc);
+            ereport(FATAL, (errmsg_internal("could not open dest file \"%s\":%m\n", destPath)));
+        }
+    } else {
+        ereport(FATAL, (errmsg_internal("could not open src file \"%s\":%m\n", srcPath, strerror(errno))));
+    }
+
+    return false;
 }
 
 /*
@@ -443,6 +530,9 @@ static bool pgarch_archiveXlog(char* xlog)
     rc = snprintf_s(pathname, MAXPGPATH, MAXPGPATH - 1, XLOGDIR "/%s", xlog);
     securec_check_ss(rc, "\0", "\0");
 
+    if (XLogArchiveDestSet()) {
+        return PgarchArchiveXlogToDest(xlog);
+    }
     /*
      * construct the command to be executed
      */

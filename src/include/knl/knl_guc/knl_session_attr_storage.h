@@ -156,6 +156,7 @@ typedef struct knl_session_attr_storage {
     double candidate_buf_percent_target;
     double dirty_page_percent_max;
     char* XLogArchiveCommand;
+    char* XLogArchiveDest;
     char* default_tablespace;
     char* temp_tablespaces;
     char* XactIsoLevel_string;
