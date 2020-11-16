@@ -39,9 +39,8 @@
 #include <cstdlib>
 #include <map>
 #include <string>
-
-#include "common/mot_forward.h"
 #include "libintl.h"
+
 #include "utils/elog.h"
 #include "securec.h"
 

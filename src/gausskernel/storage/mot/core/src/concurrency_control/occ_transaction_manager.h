@@ -30,6 +30,7 @@
 namespace MOT {
 // forward declaration
 class Access;
+class TxnManager;
 
 constexpr uint64_t LOCK_TIME_OUT = 1 << 16;
 /**
