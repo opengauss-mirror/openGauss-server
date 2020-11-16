@@ -176,10 +176,12 @@ void perm_space_increase(Oid ownerID, uint64 size, DataSpaceType type)
     }
 
     /* we need to update the according dn used space in the hash table according to the debug query id */
-    uint64 space = (uint64)size >> BITS_IN_KB;
-    bool found = false;
-    DnUsedSpaceHashEntry* dnUsedEntry = NULL;
+
     if (NeedComputeDnUsedSize()) {
+        uint64 space = (uint64)size >> BITS_IN_KB;
+        bool found = false;
+        DnUsedSpaceHashEntry* dnUsedEntry = NULL;
+
         (void)LWLockAcquire(DnUsedSpaceHashLock, LW_EXCLUSIVE);
 
         dnUsedEntry = (DnUsedSpaceHashEntry*)hash_search(
@@ -339,11 +341,13 @@ void perm_space_decrease(Oid ownerID, uint64 size, DataSpaceType type)
         update_user_space(userdata, size, type);
     }
 
-    uint64 space = (uint64)size >> BITS_IN_KB;
-    bool found = false;
-    DnUsedSpaceHashEntry* dnUsedEntry = NULL;
     /* we need to update the according dn used space in the hash table according to the debug query id */
     if (NeedComputeDnUsedSize()) {
+        uint64 space = (uint64)size >> BITS_IN_KB;
+        bool found = false;
+        DnUsedSpaceHashEntry* dnUsedEntry = NULL;
+
+        (void)LWLockAcquire(DnUsedSpaceHashLock, LW_EXCLUSIVE);
         dnUsedEntry = (DnUsedSpaceHashEntry*)hash_search(
             g_instance.comm_cxt.usedDnSpace, &u_sess->debug_query_id, HASH_ENTER, &found);
 
@@ -354,6 +358,7 @@ void perm_space_decrease(Oid ownerID, uint64 size, DataSpaceType type)
                 dnUsedEntry->dnUsedSpace = 0;
             }
         }
+        LWLockRelease(DnUsedSpaceHashLock);
     }
 
     return;
