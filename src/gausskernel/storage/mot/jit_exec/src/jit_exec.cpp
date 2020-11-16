@@ -41,7 +41,7 @@
 #include "mot_internal.h"
 #include "storage/mot/jit_exec.h"
 #include "jit_common.h"
-#include "jit_llvm_exec.h"
+#include "jit_llvm_query_codegen.h"
 #include "jit_tvm_exec.h"
 #include "jit_source_pool.h"
 #include "jit_source_map.h"

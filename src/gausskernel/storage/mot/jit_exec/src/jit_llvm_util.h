@@ -28,8 +28,6 @@
 #include "codegen/gscodegen.h"
 #include "jit_common.h"
 
-using namespace dorado;
-
 // ATTENTION: In order to define all macros just once, we use the same class names. In order to avoid
 // name clashes, we include these classes in the llvm name space. Nevertheless, be careful not to
 // include this file and jit_util.h as well.
@@ -56,7 +54,7 @@ public:
      * @return The comparison result (1 if comparison is true, otherwise 0).
      */
     static llvm::Value* ExecCompare(
-        GsCodeGen::LlvmBuilder* builder, llvm::Value* lhs, llvm::Value* rhs, JitExec::JitICmpOp cmpOp);
+        dorado::GsCodeGen::LlvmBuilder* builder, llvm::Value* lhs, llvm::Value* rhs, JitExec::JitICmpOp cmpOp);
 
     /**
      * @brief Constructs a typed zero value by another value.
@@ -83,14 +81,14 @@ protected:
     llvm::LLVMContext& m_context;
 
     /** @var The LLVM builder. */
-    GsCodeGen::LlvmBuilder* m_builder;
+    dorado::GsCodeGen::LlvmBuilder* m_builder;
 
     /**
      * @brief Constructor.
      * @param context The LLVM context.
      * @param builder The LLVM builder.
      */
-    JitStatement(llvm::LLVMContext& context, GsCodeGen::LlvmBuilder* builder);
+    JitStatement(llvm::LLVMContext& context, dorado::GsCodeGen::LlvmBuilder* builder);
 
     /** @brief Destructor. */
     virtual ~JitStatement();
@@ -142,7 +140,7 @@ public:
      * @param jittedFunction The jitted function.
      * @param blockName The if-block name.
      */
-    JitIf(llvm::LLVMContext& context, GsCodeGen::LlvmBuilder* builder, llvm::Function* jittedFunction,
+    JitIf(llvm::LLVMContext& context, dorado::GsCodeGen::LlvmBuilder* builder, llvm::Function* jittedFunction,
         const char* blockName);
 
     /** @brief Destructor. */
@@ -225,7 +223,7 @@ public:
      * @param jittedFunction The jitted function.
      * @param blockName The if-block name.
      */
-    JitWhile(llvm::LLVMContext& context, GsCodeGen::LlvmBuilder* builder, llvm::Function* jittedFunction,
+    JitWhile(llvm::LLVMContext& context, dorado::GsCodeGen::LlvmBuilder* builder, llvm::Function* jittedFunction,
         const char* blockName);
 
     /** @brief Destructor. */
@@ -303,7 +301,7 @@ public:
      * @param jittedFunction The jitted function.
      * @param blockName The if-block name.
      */
-    JitDoWhile(llvm::LLVMContext& context, GsCodeGen::LlvmBuilder* builder, llvm::Function* jittedFunction,
+    JitDoWhile(llvm::LLVMContext& context, dorado::GsCodeGen::LlvmBuilder* builder, llvm::Function* jittedFunction,
         const char* blockName);
 
     /** @brief Destructor. */

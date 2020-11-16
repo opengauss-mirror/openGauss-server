@@ -29,6 +29,8 @@
 #include "utils/elog.h"
 #include "securec.h"
 
+using namespace dorado;
+
 namespace llvm {
 DECLARE_LOGGER(JitUtil, JitExec);
 
