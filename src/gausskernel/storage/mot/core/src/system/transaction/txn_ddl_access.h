@@ -53,6 +53,7 @@ enum DDLAccessType : uint8_t {
 
 // forward declaration
 class OccTransactionManager;
+class TxnManager;
 
 /**
  * @class TxnDDLAccess

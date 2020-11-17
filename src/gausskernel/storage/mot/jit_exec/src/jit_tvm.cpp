@@ -32,6 +32,8 @@
 DECLARE_LOGGER(TVM, JitExec)
 
 namespace tvm {
+IMPLEMENT_CLASS_LOGGER(Instruction, JitExec)
+IMPLEMENT_CLASS_LOGGER(Expression, JitExec)
 
 extern ExecContext* allocExecContext(uint64_t register_count)
 {

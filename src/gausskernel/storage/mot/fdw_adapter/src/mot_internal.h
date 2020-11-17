@@ -14,7 +14,7 @@
  * -------------------------------------------------------------------------
  *
  * mot_internal.h
- *    MOT Foreign Data Wrapper internal interfaces.
+ *    MOT Foreign Data Wrapper internal interfaces to the MOT engine.
  *
  * IDENTIFICATION
  *    src/gausskernel/storage/mot/fdw_adapter/src/mot_internal.h
@@ -27,15 +27,18 @@
 
 #include <map>
 #include <string>
+#include "catalog_column_types.h"
+#include "foreign/fdwapi.h"
+#include "nodes/nodes.h"
 #include "utils/numeric.h"
 #include "utils/numeric_gs.h"
+#include "pgstat.h"
 #include "global.h"
-#include "catalog_column_types.h"
 #include "mot_fdw_xlog.h"
-#include "foreign/fdwapi.h"
 #include "system/mot_engine.h"
 #include "bitmapset.h"
 #include "storage/mot/jit_exec.h"
+#include "mot_match_index.h"
 
 using std::map;
 using std::string;
@@ -77,19 +80,17 @@ using std::string;
         }                                                                                                              \
     }
 
-// forward declaration
-struct CreateStmt;
-
 namespace MOT {
 class Table;
 class Index;
 class IndexIterator;
-class memory_manager_numa;
 class Column;
 class MOTEngine;
 }  // namespace MOT
 
+#ifndef MOTFdwStateSt
 typedef struct MOTFdwState_St MOTFdwStateSt;
+#endif
 
 typedef struct MotErrToPGErr_St {
     int m_pgErr;
@@ -100,31 +101,7 @@ typedef struct MotErrToPGErr_St {
 void report_pg_error(MOT::RC rc, MOT::TxnManager* txn, void* arg1 = nullptr, void* arg2 = nullptr, void* arg3 = nullptr,
     void* arg4 = nullptr, void* arg5 = nullptr);
 
-#define KEY_OPER_PREFIX_BITMASK 0x10
 #define MAX_VARCHAR_LEN 1024
-
-typedef enum : uint8_t {
-    READ_KEY_EXACT = 0,    // equal
-    READ_KEY_LIKE = 1,     // like
-    READ_KEY_OR_NEXT = 2,  // ge
-    READ_KEY_AFTER = 3,    // gt
-    READ_KEY_OR_PREV = 4,  // le
-    READ_KEY_BEFORE = 5,   // lt
-    READ_INVALID = 6,
-
-    // partial key eq
-    READ_PREFIX = KEY_OPER_PREFIX_BITMASK | READ_KEY_EXACT,
-    // partial key ge
-    READ_PREFIX_OR_NEXT = KEY_OPER_PREFIX_BITMASK | READ_KEY_OR_NEXT,
-    // partial key gt
-    READ_PREFIX_AFTER = KEY_OPER_PREFIX_BITMASK | READ_KEY_AFTER,
-    // partial key le
-    READ_PREFIX_OR_PREV = KEY_OPER_PREFIX_BITMASK | READ_KEY_OR_PREV,
-    // partial key lt
-    READ_PREFIX_BEFORE = KEY_OPER_PREFIX_BITMASK | READ_KEY_BEFORE,
-    // partial key like
-    READ_PREFIX_LIKE = KEY_OPER_PREFIX_BITMASK | READ_KEY_LIKE,
-} KEY_OPER;
 
 typedef enum : uint8_t { SORTDIR_NONE = 0, SORTDIR_ASC = 1, SORTDIR_DESC = 2 } SORTDIR_ENUM;
 
@@ -152,95 +129,6 @@ typedef struct MOTRecConvert {
 } MOTRecConvertSt;
 
 #define SORT_STRATEGY(x) ((x == BTGreaterStrategyNumber) ? SORTDIR_DESC : SORTDIR_ASC)
-
-class MatchIndex {
-public:
-    MatchIndex()
-    {
-        Init();
-    }
-
-    ~MatchIndex()
-    {}
-
-    List* m_remoteConds = nullptr;
-    List* m_remoteCondsOrig = nullptr;
-    MOT::Index* m_ix = nullptr;
-    int32_t m_ixPosition = 0;
-    Expr* m_colMatch[2][MAX_KEY_COLUMNS];
-    Expr* m_parentColMatch[2][MAX_KEY_COLUMNS];
-    KEY_OPER m_opers[2][MAX_KEY_COLUMNS];
-    int32_t m_params[2][MAX_KEY_COLUMNS];
-    int32_t m_numMatches[2] = {0, 0};
-    double m_costs[2] = {0, 0};
-    KEY_OPER m_ixOpers[2] = {READ_INVALID, READ_INVALID};
-
-    // this is for iteration start condition
-    int32_t m_start = -1;
-    int32_t m_end = -1;
-    double m_cost = 0;
-
-    void Init()
-    {
-        for (int i = 0; i < 2; i++) {
-            for (uint j = 0; j < MAX_KEY_COLUMNS; j++) {
-                m_colMatch[i][j] = nullptr;
-                m_parentColMatch[i][j] = nullptr;
-                m_opers[i][j] = READ_INVALID;
-                m_params[i][j] = -1;
-            }
-            m_ixOpers[i] = READ_INVALID;
-            m_costs[i] = 0;
-            m_numMatches[i] = 0;
-        }
-        m_start = m_end = -1;
-    }
-
-    bool IsSameOper(KEY_OPER op1, KEY_OPER op2) const;
-    void ClearPreviousMatch(MOTFdwStateSt* state, bool set_local, int i, int j);
-    bool SetIndexColumn(MOTFdwStateSt* state, int16_t colNum, KEY_OPER op, Expr* expr, Expr* parent, bool set_local);
-
-    inline bool IsUsable() const
-    {
-        return (m_colMatch[0][0] != nullptr);
-    }
-    inline bool IsFullMatch() const;
-
-    inline int32_t GetNumMatchedCols() const
-    {
-        return m_numMatches[0];
-    }
-    inline double GetCost(int numClauses);
-    bool CanApplyOrdering(const int* orderCols) const;
-    bool AdjustForOrdering(bool desc);
-    void Serialize(List** list) const;
-    void Deserialize(ListCell* cell, uint64_t exTableID);
-    void Clean(MOTFdwStateSt* state);
-};
-
-class MatchIndexArr {
-public:
-    MatchIndexArr()
-    {
-        for (uint i = 0; i < MAX_NUM_INDEXES; i++)
-            m_idx[i] = nullptr;
-    }
-
-    ~MatchIndexArr()
-    {}
-
-    void Clear(bool release = false)
-    {
-        for (uint i = 0; i < MAX_NUM_INDEXES; i++) {
-            if (m_idx[i]) {
-                if (release)
-                    pfree(m_idx[i]);
-                m_idx[i] = nullptr;
-            }
-        }
-    }
-    MatchIndex* m_idx[MAX_NUM_INDEXES];
-};
 
 struct MOTFdwState_St {
     ::TransactionId m_txnId;
@@ -400,7 +288,25 @@ public:
         Expr* parent, bool set_local);
     static MatchIndex* GetBestMatchIndex(
         MOTFdwStateSt* festate, MatchIndexArr* marr, int numClauses, bool setLocal = true);
-    inline static int32_t AddParam(List** params, Expr* expr);
+    inline static int32_t AddParam(List** params, Expr* expr)
+    {
+        int32_t index = 0;
+        ListCell* cell = nullptr;
+
+        foreach (cell, *params) {
+            ++index;
+            if (equal(expr, (Node*)lfirst(cell))) {
+                break;
+            }
+        }
+        if (cell == nullptr) {
+            /* add the parameter to the list */
+            ++index;
+            *params = lappend(*params, expr);
+        }
+
+        return index;
+    }
 
     static MOT::MOTEngine* m_engine;
     static bool m_initialized;

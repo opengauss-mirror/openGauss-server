@@ -14,7 +14,7 @@
  * -------------------------------------------------------------------------
  *
  * mot_internal.cpp
- *    MOT Foreign Data Wrapper internal interfaces.
+ *    MOT Foreign Data Wrapper internal interfaces to the MOT engine.
  *
  * IDENTIFICATION
  *    src/gausskernel/storage/mot/fdw_adapter/src/mot_internal.cpp
@@ -25,15 +25,12 @@
 #include <ostream>
 #include <istream>
 #include <iomanip>
+#include <pthread.h>
+#include <cstring>
 
 #include "postgres.h"
-
 #include "access/dfs/dfs_query.h"
 #include "access/sysattr.h"
-#include "mot_internal.h"
-#include "row.h"
-
-#include "nodes/nodes.h"
 #include "nodes/parsenodes.h"
 #include "nodes/pg_list.h"
 #include "nodes/nodeFuncs.h"
@@ -45,22 +42,19 @@
 #include "commands/dbcommands.h"
 #include "knl/knl_session.h"
 
+#include "mot_internal.h"
+#include "row.h"
 #include "log_statistics.h"
 #include "spin_lock.h"
-
 #include "txn.h"
 #include "table.h"
 #include "utilities.h"
-
 #include "mot_engine.h"
 #include "sentinel.h"
 #include "txn.h"
 #include "txn_access.h"
 #include "index_factory.h"
 #include "column.h"
-#include <pthread.h>
-#include <cstring>
-
 #include "mm_raw_chunk_store.h"
 #include "ext_config_loader.h"
 #include "config_manager.h"
@@ -69,6 +63,7 @@
 #include "jit_context.h"
 #include "mm_cfg.h"
 #include "jit_statistics.h"
+#include "gaussdb_config_loader.h"
 
 #define IS_CHAR_TYPE(oid) (oid == VARCHAROID || oid == BPCHAROID || oid == TEXTOID || oid == CLOBOID || oid == BYTEAOID)
 #define IS_INT_TYPE(oid)                                                                                           \
@@ -91,8 +86,6 @@
 MOT::MOTEngine* MOTAdaptor::m_engine = nullptr;
 static XLOGLogger xlogger;
 
-static KEY_OPER keyOperStateMachine[KEY_OPER::READ_INVALID + 1][KEY_OPER::READ_INVALID];
-
 // enable MOT Engine logging facilities
 DECLARE_LOGGER(InternalExecutor, FDW)
 
@@ -101,8 +94,6 @@ static void MOTCleanupThread(int status, Datum ptr);
 
 /** @brief Helper for cleaning up all JIT context objects stored in all CachedPlanSource of the current session. */
 static void DestroySessionJitContexts();
-
-extern void MOTOnThreadShutdown();
 
 // in a thread-pooled environment we need to ensure thread-locals are initialized properly
 static inline void EnsureSafeThreadAccessInline()
@@ -247,301 +238,6 @@ static void CancelSessionCleanup()
 {
     pthread_setspecific(sessionCleanupKey, nullptr);
 }
-
-// external configuration loader
-class GaussdbConfigLoader : public MOT::ExtConfigLoader {
-public:
-    GaussdbConfigLoader() : MOT::ExtConfigLoader("GaussDB")
-    {}
-
-    virtual ~GaussdbConfigLoader()
-    {}
-
-protected:
-    virtual bool OnLoadExtConfig()
-    {
-        // we should be careful here, configuration is not fully loaded yet and MOTConfiguration still contains default
-        // values, so we trigger partial configuration reload so we can take what has been loaded up to this point from
-        // the layered configuration tree in the configuration manager
-        MOT_LOG_TRACE("Triggering initial partial configuration loading for external configuration overlaying");
-        MOT::MOTConfiguration& motCfg = MOT::GetGlobalConfiguration();
-        motCfg.LoadPartial();  // trigger partial load
-
-        // load any relevant GUC values here
-        bool result = ConfigureMaxConnections();
-        if (result) {
-            result = ConfigureMaxThreads();
-        }
-        if (result) {
-            result = ConfigureAffinity();
-        }
-        if (result) {
-            result = ConfigureRedoLogHandler();
-        }
-        if (result) {
-            result = ConfigureMaxProcessMemory();
-        }
-        return result;
-    }
-
-private:
-    bool ConfigureMaxConnections()
-    {
-        MOT_LOG_INFO("Loading max_connections from envelope into MOTEngine: %u",
-            (unsigned)g_instance.attr.attr_network.MaxConnections);
-        return AddExtUInt32ConfigItem("", "max_connections", (uint32_t)g_instance.attr.attr_network.MaxConnections);
-    }
-
-    void GetRequiredThreadCount(
-        uint32_t& startupThreadCount, uint32_t& runtimeThreadCount, uint32_t& sessionThreadCount) const
-    {
-        // NOTE: parallel redo recovery also requires thread ids when invoking MOT engine (in case it is configured)
-        MOT::MOTConfiguration& motCfg = MOT::GetGlobalConfiguration();
-        startupThreadCount = motCfg.m_checkpointRecoveryWorkers + motCfg.m_chunkPreallocWorkerCount;
-        runtimeThreadCount = motCfg.m_checkpointWorkers + 1;  // add one for statistics reporting thread
-
-        // get the number of threads used to manage user sessions
-        sessionThreadCount = 0;
-        if (g_instance.attr.attr_common.enable_thread_pool) {  // thread pool enabled
-            // use thread pool size in envelope configuration to determine the number of thread ids required
-            sessionThreadCount = g_threadPoolControler->GetThreadNum();
-        } else {  // thread-pool disabled
-            // use max_connections in envelope configuration to determine the number of thread ids required
-            sessionThreadCount = (uint32_t)g_instance.attr.attr_network.MaxConnections;
-        }
-        MOT_LOG_TRACE("Using %u threads for user sessions", sessionThreadCount);
-    }
-
-    bool ConfigureMaxThreads()
-    {
-        uint32_t startupThreadCount = 0;
-        uint32_t runtimeThreadCount = 0;
-        uint32_t sessionThreadCount = 0;
-
-        GetRequiredThreadCount(startupThreadCount, runtimeThreadCount, sessionThreadCount);
-
-        // compute total required number of threads, starting with run-time requirements
-        uint32_t totalThreadCount = runtimeThreadCount + sessionThreadCount;
-        MOT_LOG_TRACE("Total number of required threads: %u", totalThreadCount);
-
-        // first check: there is enough threads for startup tasks
-        bool warnIssued = false;
-        if (totalThreadCount < startupThreadCount) {
-            totalThreadCount = startupThreadCount;
-            MOT_LOG_WARN("Adjusted maximum number of threads to %u to accommodate for startup tasks", totalThreadCount);
-            warnIssued = true;
-        }
-
-        // second check: verify we did not breach total maximum
-        if (totalThreadCount > MAX_THREAD_COUNT) {
-            totalThreadCount = (unsigned)MAX_THREAD_COUNT;
-            MOT_LOG_WARN("Adjusted maximum number of threads to %u due to maximum limit", totalThreadCount);
-            warnIssued = true;
-        }
-
-        // print final value
-        if (!warnIssued) {
-            MOT_LOG_INFO("Adjusted maximum number of threads to %u", totalThreadCount);
-        }
-
-        return AddExtUInt32ConfigItem("", "max_threads", totalThreadCount);
-    }
-
-    bool ConfigureAffinity()
-    {
-        bool result = true;
-        if (g_instance.attr.attr_common.enable_thread_pool) {
-            MOT_LOG_INFO("Disabling affinity settings due to usage of thread pool in envelope");
-            result = AddExtTypedConfigItem("", "affinity_mode", MOT::AffinityMode::AFFINITY_NONE);
-        }
-        return result;
-    }
-
-    bool ConfigureRedoLogHandler()
-    {
-        bool result = true;
-        if (u_sess->attr.attr_storage.guc_synchronous_commit == SYNCHRONOUS_COMMIT_OFF) {
-            MOT_LOG_INFO("Configuring asynchronous redo-log handler due to synchronous_commit=off");
-            result = AddExtTypedConfigItem<MOT::RedoLogHandlerType>(
-                "", "redo_log_handler_type", MOT::RedoLogHandlerType::ASYNC_REDO_LOG_HANDLER);
-        } else if (MOT::GetGlobalConfiguration().m_enableGroupCommit) {
-            MOT_LOG_INFO("Configuring segmented-group redo-log handler");
-            result = AddExtTypedConfigItem<MOT::RedoLogHandlerType>(
-                "", "redo_log_handler_type", MOT::RedoLogHandlerType::SEGMENTED_GROUP_SYNC_REDO_LOG_HANDLER);
-        } else {
-            MOT_LOG_INFO("Configuring synchronous redo-log handler");
-            result = AddExtTypedConfigItem<MOT::RedoLogHandlerType>(
-                "", "redo_log_handler_type", MOT::RedoLogHandlerType::SYNC_REDO_LOG_HANDLER);
-        }
-        return result;
-    }
-
-    bool ConfigureMaxProcessMemory()
-    {
-        bool result = true;
-
-        // get max/min global memory and large allocation store for sessions from configuration
-        MOT::MOTConfiguration& motCfg = MOT::GetGlobalConfiguration();
-        uint64_t globalMemoryMb = motCfg.m_globalMemoryMaxLimitMB;
-        uint64_t localMemoryMb = motCfg.m_localMemoryMaxLimitMB;
-        uint64_t sessionLargeStoreMb = motCfg.m_sessionLargeBufferStoreSizeMB;
-
-        // compare the sum with max_process_memory and system total
-        uint64_t maxReserveMemoryMb = globalMemoryMb + localMemoryMb + sessionLargeStoreMb;
-
-        // if the total memory is less than the required minimum, then issue a warning, fix it and return
-        if (maxReserveMemoryMb < motCfg.MOT_MIN_MEMORY_USAGE_MB) {
-            MOT_LOG_WARN("MOT memory limits are too low, adjusting values");
-            // we use current total as zero to force session large store zero value
-            result = ConfigureMemoryLimits(motCfg.MOT_MIN_MEMORY_USAGE_MB, 0, globalMemoryMb, localMemoryMb);
-            return result;
-        }
-
-        // get system total
-        uint64_t systemTotalMemoryMb = MOT::GetTotalSystemMemoryMb();
-        if (systemTotalMemoryMb == 0) {
-            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Load Configuration", "Cannot retrieve total system memory");
-            return false;
-        }
-
-        // get envelope limit
-        uint64_t processTotalMemoryMb = g_instance.attr.attr_memory.max_process_memory / KILO_BYTE;
-
-        // compute the real limit
-        uint64_t upperLimitMb = min(systemTotalMemoryMb, processTotalMemoryMb);
-
-        // get dynamic gap we need to preserve between MOT and envelope
-        uint64_t dynamicGapMb = MIN_DYNAMIC_PROCESS_MEMORY / KILO_BYTE;
-
-        MOT_LOG_TRACE("Checking for memory limits: globalMemoryMb=%" PRIu64 ", localMemoryMb=%" PRIu64
-                      ", sessionLargeStoreMb=%" PRIu64 ", systemTotalMemoryMb=%" PRIu64
-                      ", processTotalMemoryMb=%" PRIu64 ", upperLimitMb=%" PRIu64 ", dynamicGapMb=%" PRIu64
-                      ", max_process_memory=%u",
-            globalMemoryMb,
-            localMemoryMb,
-            sessionLargeStoreMb,
-            systemTotalMemoryMb,
-            processTotalMemoryMb,
-            upperLimitMb,
-            dynamicGapMb,
-            g_instance.attr.attr_memory.max_process_memory);
-
-        // we check that a 2GB gap is preserved
-        if (upperLimitMb < maxReserveMemoryMb + dynamicGapMb) {
-            // memory restriction conflict, issue warning and adjust values
-            MOT_LOG_TRACE("MOT engine maximum memory definitions (global: %" PRIu64 " MB, local: %" PRIu64
-                          " MB, session large "
-                          "store: %" PRIu64 " MB, total: %" PRIu64
-                          " MB) breach GaussDB maximum process memory restriction (%" PRIu64
-                          " MB) and/or total system memory (%" PRIu64 " MB). "
-                          "MOT values shall be adjusted accordingly to preserve required gap (%" PRIu64 " MB).",
-                globalMemoryMb,
-                localMemoryMb,
-                sessionLargeStoreMb,
-                maxReserveMemoryMb,
-                processTotalMemoryMb,
-                systemTotalMemoryMb,
-                dynamicGapMb);
-
-            // compute new total memory limit for MOT
-            uint64_t newTotalMemoryMb = 0;
-            if (upperLimitMb < dynamicGapMb) {
-                // this can happen only if system memory is less than 2GB, we still allow minor breach
-                MOT_LOG_WARN("Using minimal memory limits in MOT Engine due to system total memory restrictions");
-                // we use current total as zero to force session large store zero value
-                result = ConfigureMemoryLimits(motCfg.MOT_MIN_MEMORY_USAGE_MB, 0, globalMemoryMb, localMemoryMb);
-            } else {
-                newTotalMemoryMb = upperLimitMb - dynamicGapMb;
-                if (newTotalMemoryMb < motCfg.MOT_MIN_MEMORY_USAGE_MB) {
-                    // in extreme cases we allow a minor breach of the dynamic gap
-                    MOT_LOG_TRACE("Using minimal memory limits in MOT Engine due to GaussDB memory usage restrictions");
-                    // we use current total as zero to force session large store zero value
-                    result = ConfigureMemoryLimits(motCfg.MOT_MIN_MEMORY_USAGE_MB, 0, globalMemoryMb, localMemoryMb);
-                } else {
-                    MOT_LOG_TRACE("Adjusting memory limits in MOT Engine due to GaussDB memory usage restrictions");
-                    result = ConfigureMemoryLimits(newTotalMemoryMb, maxReserveMemoryMb, globalMemoryMb, localMemoryMb);
-                }
-            }
-
-            return result;
-        }
-
-        return result;
-    }
-
-    bool ConfigureMemoryLimits(uint64_t newTotalMemoryMb, uint64_t currentTotalMemoryMb, uint64_t currentGlobalMemoryMb,
-        uint64_t currentLocalMemoryMb)
-    {
-        uint64_t newGlobalMemoryMb = 0;
-        uint64_t newLocalMemoryMb = 0;
-        uint64_t newSessionLargeStoreMemoryMb = 0;
-
-        // compute new configuration values
-        MOT::MOTConfiguration& motCfg = MOT::GetGlobalConfiguration();
-        if (currentTotalMemoryMb > 0) {
-            // we preserve the existing ratio between global and local memory, but reduce the total sum as required
-            double ratio = ((double)newTotalMemoryMb) / ((double)currentTotalMemoryMb);
-            newGlobalMemoryMb = (uint64_t)(currentGlobalMemoryMb * ratio);
-            if (motCfg.m_sessionLargeBufferStoreSizeMB > 0) {
-                newLocalMemoryMb = (uint64_t)(currentLocalMemoryMb * ratio);
-                newSessionLargeStoreMemoryMb = newTotalMemoryMb - (newGlobalMemoryMb + newLocalMemoryMb);
-            } else {
-                // if the user configured zero for the session large store, then we want to keep it this way
-                newSessionLargeStoreMemoryMb = 0;
-                newLocalMemoryMb = newTotalMemoryMb - newGlobalMemoryMb;
-            }
-
-            MOT_LOG_TRACE("Attempting to use adjusted values for MOT memory limits: global = %" PRIu64
-                          " MB, local = %" PRIu64 " MB, session large store = %" PRIu64 " MB, total = %" PRIu64 " MB",
-                newGlobalMemoryMb,
-                newLocalMemoryMb,
-                newSessionLargeStoreMemoryMb,
-                newGlobalMemoryMb + newLocalMemoryMb + newSessionLargeStoreMemoryMb);
-        }
-
-        // when current total memory is zero we use the minimum allowed, and also when minimum values are breached
-        if ((newGlobalMemoryMb < motCfg.MIN_MAX_MOT_GLOBAL_MEMORY_MB) ||
-            (newLocalMemoryMb < motCfg.MIN_MAX_MOT_LOCAL_MEMORY_MB)) {
-            if (currentTotalMemoryMb > 0) {
-                MOT_LOG_TRACE("Adjusted values breach minimum restrictions, falling back to minimum values");
-            }
-            newGlobalMemoryMb = motCfg.MIN_MAX_MOT_GLOBAL_MEMORY_MB;
-            newLocalMemoryMb = motCfg.MIN_MAX_MOT_LOCAL_MEMORY_MB;
-            newSessionLargeStoreMemoryMb = 0;
-        }
-
-        MOT_LOG_WARN("Adjusting MOT memory limits: global = %" PRIu64 " MB, local = %" PRIu64
-                     " MB, session large store = %" PRIu64 " MB, total = %" PRIu64 " MB",
-            newGlobalMemoryMb,
-            newLocalMemoryMb,
-            newSessionLargeStoreMemoryMb,
-            newGlobalMemoryMb + newLocalMemoryMb + newSessionLargeStoreMemoryMb);
-
-        // stream into MOT new definitions
-        MOT::mot_string memCfg;
-        memCfg.format("%" PRIu64 " MB", newGlobalMemoryMb);
-        bool result = AddExtStringConfigItem("", "max_mot_global_memory", memCfg.c_str());
-        if (result) {
-            memCfg.format("%" PRIu64 " MB", newLocalMemoryMb);
-            result = AddExtStringConfigItem("", "max_mot_local_memory", memCfg.c_str());
-        }
-        if (result) {
-            memCfg.format("%" PRIu64 " MB", newSessionLargeStoreMemoryMb);
-            result = AddExtStringConfigItem("", "session_large_buffer_store_size", memCfg.c_str());
-        }
-
-        // Reset pre-allocation to zero, as it may be invalid now
-        MOT_LOG_TRACE("Resetting memory pre-allocation to zero, since memory limits were adjusted");
-        if (result) {
-            result = AddExtStringConfigItem("", "min_mot_global_memory", "0 MB");
-        }
-        if (result) {
-            result = AddExtStringConfigItem("", "min_mot_local_memory", "0 MB");
-        }
-
-        return result;
-    }
-};
 
 static GaussdbConfigLoader* gaussdbConfigLoader = nullptr;
 
@@ -869,53 +565,7 @@ void MOTAdaptor::Init()
         InitSessionCleanup();
     }
     InitDataNodeId();
-    // fill key operation matrix
-    for (uint8_t i = 0; i <= KEY_OPER::READ_INVALID; i++) {
-        for (uint8_t j = 0; j < KEY_OPER::READ_INVALID; j++) {
-            switch ((KEY_OPER)i) {
-                case KEY_OPER::READ_KEY_EXACT:  // = : allows all operations
-                    keyOperStateMachine[i][j] = (KEY_OPER)j;
-                    break;
-                case KEY_OPER::READ_KEY_OR_NEXT:  // >= : allows =, >, >=, like
-                    keyOperStateMachine[i][j] =
-                        (KEY_OPER)(((KEY_OPER)j) < KEY_OPER::READ_KEY_OR_PREV ? j : KEY_OPER::READ_INVALID);
-                    break;
-                case KEY_OPER::READ_KEY_AFTER:  // > : allows nothing
-                    keyOperStateMachine[i][j] = KEY_OPER::READ_INVALID;
-                    break;
-                case KEY_OPER::READ_KEY_OR_PREV:  // <= : allows =, <, <=, like
-                {
-                    switch ((KEY_OPER)j) {
-                        case KEY_OPER::READ_KEY_EXACT:
-                        case KEY_OPER::READ_KEY_LIKE:
-                        case KEY_OPER::READ_KEY_OR_PREV:
-                        case KEY_OPER::READ_KEY_BEFORE:
-                            keyOperStateMachine[i][j] = (KEY_OPER)j;
-                            break;
-                        default:
-                            keyOperStateMachine[i][j] = KEY_OPER::READ_INVALID;
-                            break;
-                    }
-                    break;
-                }
-                case KEY_OPER::READ_KEY_BEFORE:  // < : allows nothing
-                    keyOperStateMachine[i][j] = KEY_OPER::READ_INVALID;
-                    break;
-
-                case KEY_OPER::READ_KEY_LIKE:  // like: allows nothing
-                    keyOperStateMachine[i][j] = KEY_OPER::READ_INVALID;
-                    break;
-
-                case KEY_OPER::READ_INVALID:  // = : allows all operations
-                    keyOperStateMachine[i][j] = (KEY_OPER)j;
-                    break;
-
-                default:
-                    keyOperStateMachine[i][j] = KEY_OPER::READ_INVALID;
-                    break;
-            }
-        }
-    }
+    InitKeyOperStateMachine();
     m_initialized = true;
 }
 
@@ -1052,7 +702,7 @@ extern void MOTOnSessionClose()
 }
 
 /** @brief Notification from thread pool that a pooled thread ended (only when thread pool is ENABLED). */
-extern void MOTOnThreadShutdown()
+static void MOTOnThreadShutdown()
 {
     if (!MOTAdaptor::m_initialized) {
         return;
@@ -1290,25 +940,6 @@ bool MOTAdaptor::SetMatchingExpr(
     return res;
 }
 
-inline int32_t MOTAdaptor::AddParam(List** params, Expr* expr)
-{
-    int32_t index = 0;
-    ListCell* cell = nullptr;
-
-    foreach (cell, *params) {
-        ++index;
-        if (equal(expr, (Node*)lfirst(cell)))
-            break;
-    }
-    if (cell == nullptr) {
-        /* add the parameter to the list */
-        ++index;
-        *params = lappend(*params, expr);
-    }
-
-    return index;
-}
-
 MatchIndex* MOTAdaptor::GetBestMatchIndex(MOTFdwStateSt* festate, MatchIndexArr* marr, int numClauses, bool setLocal)
 {
     MatchIndex* best = nullptr;
@@ -1375,7 +1006,7 @@ MatchIndex* MOTAdaptor::GetBestMatchIndex(MOTFdwStateSt* festate, MatchIndexArr*
                     }
                 }
                 pfree(mix);
-                marr->m_idx[i] = 0;
+                marr->m_idx[i] = nullptr;
             }
         }
     }
@@ -2673,438 +2304,5 @@ void MOTAdaptor::DatumToMOTKey(
         default:
             col->PackKey(data, datum, col->m_size);
             break;
-    }
-}
-
-bool MatchIndex::IsSameOper(KEY_OPER op1, KEY_OPER op2) const
-{
-    bool res = true;
-    if (op1 == op2) {
-        return res;
-    }
-
-    switch (op1) {
-        case KEY_OPER::READ_KEY_EXACT: {
-            res = true;
-            break;
-        }
-        case KEY_OPER::READ_KEY_LIKE: {
-            res = true;
-            break;
-        }
-        case KEY_OPER::READ_KEY_OR_NEXT:
-        case KEY_OPER::READ_KEY_AFTER: {
-            switch (op2) {
-                case KEY_OPER::READ_KEY_EXACT:
-                case KEY_OPER::READ_KEY_LIKE:
-                case KEY_OPER::READ_KEY_OR_NEXT:
-                case KEY_OPER::READ_KEY_AFTER:
-                    break;
-                default:
-                    res = false;
-                    break;
-            }
-            break;
-        }
-        case KEY_OPER::READ_KEY_OR_PREV:
-        case KEY_OPER::READ_KEY_BEFORE: {
-            switch (op2) {
-                case KEY_OPER::READ_KEY_EXACT:
-                case KEY_OPER::READ_KEY_LIKE:
-                case KEY_OPER::READ_KEY_OR_PREV:
-                case KEY_OPER::READ_KEY_BEFORE:
-                    break;
-                default:
-                    res = false;
-                    break;
-            }
-            break;
-        }
-        default:
-            break;
-    }
-
-    return res;
-}
-
-void MatchIndex::ClearPreviousMatch(MOTFdwStateSt* state, bool set_local, int i, int j)
-{
-    if (m_parentColMatch[i][j] != nullptr) {
-        if (set_local) {
-            if (!list_member(state->m_localConds, m_parentColMatch[i][j])) {
-                state->m_localConds = lappend(state->m_localConds, m_parentColMatch[i][j]);
-            }
-        }
-
-        m_parentColMatch[i][j] = nullptr;
-        m_numMatches[i]--;
-    }
-}
-
-bool MatchIndex::SetIndexColumn(
-    MOTFdwStateSt* state, int16_t colNum, KEY_OPER op, Expr* expr, Expr* parent, bool set_local)
-{
-    bool res = false;
-    int i = 0;
-    const int16_t* cols = m_ix->GetColumnKeyFields();
-    int16_t numKeyCols = m_ix->GetNumFields();
-    bool sameOper = false;
-
-    for (; i < numKeyCols; i++) {
-        if (cols[i] == colNum) {
-            if (m_colMatch[0][i] == nullptr) {
-                m_parentColMatch[0][i] = parent;
-                m_colMatch[0][i] = expr;
-                m_opers[0][i] = op;
-                m_numMatches[0]++;
-                res = true;
-                break;
-            } else {
-                sameOper = IsSameOper(m_opers[0][i], op);
-                // do not use current and previous expression for this column
-                // in index selection
-                // we can not differentiate between a > 2 and a > 1
-                if (sameOper) {
-                    if (op == KEY_OPER::READ_KEY_EXACT && m_opers[0][i] != op) {
-                        ClearPreviousMatch(state, set_local, 0, i);
-                        ClearPreviousMatch(state, set_local, 1, i);
-                        m_parentColMatch[0][i] = parent;
-                        m_colMatch[0][i] = expr;
-                        m_opers[0][i] = op;
-                        m_numMatches[0]++;
-                        res = true;
-                    } else if (m_opers[0][i] != KEY_OPER::READ_KEY_EXACT) {
-                        ClearPreviousMatch(state, set_local, 0, i);
-                    }
-                    break;
-                }
-            }
-
-            sameOper = false;
-            if (m_colMatch[1][i] == nullptr) {
-                m_parentColMatch[1][i] = parent;
-                m_colMatch[1][i] = expr;
-                m_opers[1][i] = op;
-                m_numMatches[1]++;
-                res = true;
-            } else {
-                sameOper = IsSameOper(m_opers[1][i], op);
-                // do not use current and previous expression for this column
-                // in index selection
-                // we can not differentiate between a > 2 and a > 1
-                if (sameOper) {
-                    if (op == KEY_OPER::READ_KEY_EXACT && m_opers[0][i] != op) {
-                        ClearPreviousMatch(state, set_local, 0, i);
-                        m_parentColMatch[0][i] = parent;
-                        m_colMatch[0][i] = expr;
-                        m_opers[0][i] = op;
-                        m_numMatches[0]++;
-                        res = true;
-                    } else if (m_opers[0][i] != KEY_OPER::READ_KEY_EXACT) {
-                        ClearPreviousMatch(state, set_local, 0, i);
-                    }
-                    break;
-                }
-            }
-
-            break;
-        }
-    }
-
-    if (res && (i < numKeyCols)) {
-        switch (state->m_table->GetFieldType(cols[i])) {
-            case MOT::MOT_CATALOG_FIELD_TYPES::MOT_TYPE_CHAR:
-            case MOT::MOT_CATALOG_FIELD_TYPES::MOT_TYPE_VARCHAR:
-                res = false;
-                break;
-            default:
-                break;
-        }
-    }
-    return res;
-}
-
-inline bool MatchIndex::IsFullMatch() const
-{
-    return (m_numMatches[0] == m_ix->GetNumFields() || m_numMatches[1] == m_ix->GetNumFields());
-}
-
-inline double MatchIndex::GetCost(int numClauses)
-{
-    if (m_costs[0] == 0) {
-        int partialIxMulti = 100;
-        int notUsed[2] = {0, 0};
-        int used[2] = {0, 0};
-
-        m_costs[0] = 1.0;
-        m_costs[1] = 1.0;
-
-        for (int i = 0; i < m_ix->GetNumFields(); i++) {
-            // we had same operations on the column, clean all settings
-            if (m_parentColMatch[0][i] == nullptr && m_parentColMatch[1][i] != nullptr) {
-                m_parentColMatch[0][i] = m_parentColMatch[1][i];
-                m_colMatch[0][i] = m_colMatch[1][i];
-                m_opers[0][i] = m_opers[1][i];
-
-                m_parentColMatch[1][i] = nullptr;
-                m_colMatch[1][i] = nullptr;
-                m_opers[1][i] = KEY_OPER::READ_INVALID;
-
-                m_numMatches[0]++;
-                m_numMatches[1]--;
-            } else if (m_parentColMatch[0][i] == nullptr) {
-                m_opers[0][i] = KEY_OPER::READ_INVALID;
-                m_colMatch[0][i] = nullptr;
-            } else if (m_parentColMatch[1][i] == nullptr) {
-                m_opers[1][i] = KEY_OPER::READ_INVALID;
-                m_colMatch[1][i] = nullptr;
-            }
-        }
-
-        for (int i = 0; i < m_ix->GetNumFields(); i++) {
-            if (m_colMatch[0][i] == nullptr || notUsed[0] > 0) {
-                m_opers[0][i] = KEY_OPER::READ_INVALID;
-                notUsed[0]++;
-            } else if (m_opers[0][i] < KEY_OPER::READ_INVALID) {
-                KEY_OPER curr = keyOperStateMachine[m_ixOpers[0]][m_opers[0][i]];
-
-                if (curr < KEY_OPER::READ_INVALID) {
-                    m_ixOpers[0] = curr;
-                    used[0]++;
-                    if (m_colMatch[1][i] == nullptr &&
-                        (m_opers[0][i] == KEY_OPER::READ_KEY_EXACT || m_opers[0][i] == KEY_OPER::READ_KEY_LIKE)) {
-                        m_colMatch[1][i] = m_colMatch[0][i];
-                        m_opers[1][i] = m_opers[0][i];
-                        m_parentColMatch[1][i] = m_parentColMatch[0][i];
-                    }
-                } else {
-                    m_opers[0][i] = KEY_OPER::READ_INVALID;
-                    notUsed[0]++;
-                }
-            } else {
-                m_opers[0][i] = KEY_OPER::READ_INVALID;
-                notUsed[0]++;
-            }
-
-            if (m_colMatch[1][i] == nullptr || notUsed[1] > 0) {
-                m_opers[1][i] = KEY_OPER::READ_INVALID;
-                notUsed[1]++;
-            } else if (m_opers[1][i] < KEY_OPER::READ_INVALID) {
-                KEY_OPER curr = keyOperStateMachine[m_ixOpers[1]][m_opers[1][i]];
-
-                if (curr < KEY_OPER::READ_INVALID) {
-                    m_ixOpers[1] = curr;
-                    used[1]++;
-                } else {
-                    m_opers[1][i] = KEY_OPER::READ_INVALID;
-                    notUsed[1]++;
-                }
-            } else {
-                m_opers[1][i] = KEY_OPER::READ_INVALID;
-                notUsed[1]++;
-            }
-        }
-
-        for (int i = 0; i < 2; i++) {
-            int estimated_rows = 0;
-            if (notUsed[i] > 0) {
-                if (m_ixOpers[i] < KEY_OPER::READ_INVALID)
-                    m_ixOpers[i] = (KEY_OPER)((uint8_t)m_ixOpers[i] | KEY_OPER_PREFIX_BITMASK);
-                estimated_rows += (notUsed[i] * partialIxMulti);
-            }
-
-            // we assume that that all other operations will bring 10 times rows
-            if (m_ixOpers[i] != KEY_OPER::READ_KEY_EXACT)
-                estimated_rows += 10;
-
-            // we assume that using partial key will bring 10 times more rows per not used column
-            if (used[i] < numClauses) {
-                estimated_rows += (numClauses - used[i]) * 10;
-            }
-
-            m_costs[i] += estimated_rows;
-        }
-
-        if (!m_ix->GetUnique()) {
-            if (m_ixOpers[0] == KEY_OPER::READ_KEY_EXACT)
-                m_ixOpers[0] = KEY_OPER::READ_PREFIX;
-            else if (m_ixOpers[1] == KEY_OPER::READ_KEY_EXACT)
-                m_ixOpers[1] = KEY_OPER::READ_PREFIX;
-        }
-
-        if (m_costs[0] <= m_costs[1]) {
-            m_cost = m_costs[0];
-            m_start = 0;
-
-            if (m_colMatch[1][0]) {
-                m_end = 1;
-                if (m_ixOpers[1] == KEY_OPER::READ_PREFIX || m_ixOpers[1] == KEY_OPER::READ_PREFIX_LIKE) {
-                    if (((m_ixOpers[0] & ~KEY_OPER_PREFIX_BITMASK) < KEY_OPER::READ_KEY_OR_PREV)) {
-                        m_ixOpers[1] = KEY_OPER::READ_PREFIX_OR_PREV;
-                    } else {
-                        m_ixOpers[1] = KEY_OPER::READ_PREFIX_OR_NEXT;
-                    }
-                }
-            }
-            if (m_ixOpers[m_start] == KEY_OPER::READ_KEY_EXACT && m_ix->GetUnique()) {
-                m_end = -1;
-            } else if (m_ixOpers[m_start] == KEY_OPER::READ_KEY_EXACT) {
-                m_end = m_start;
-                m_ixOpers[1] = m_ixOpers[m_start];
-            } else if (m_ixOpers[m_start] == KEY_OPER::READ_PREFIX) {
-                m_end = m_start;
-                m_ixOpers[1] = KEY_OPER::READ_PREFIX_OR_PREV;
-            } else if (m_ixOpers[m_start] == KEY_OPER::READ_KEY_LIKE) {
-                m_end = m_start;
-                m_ixOpers[1] = KEY_OPER::READ_KEY_OR_PREV;
-            } else if (m_ixOpers[m_start] == KEY_OPER::READ_PREFIX_LIKE) {
-                m_end = m_start;
-                m_ixOpers[1] = KEY_OPER::READ_PREFIX_OR_PREV;
-            }
-        } else {
-            m_cost = m_costs[1];
-            m_start = 1;
-            m_end = 0;
-
-            KEY_OPER tmp = m_ixOpers[0];
-            m_ixOpers[0] = m_ixOpers[1];
-            m_ixOpers[1] = tmp;
-        }
-    }
-
-    if (m_ixOpers[0] == KEY_OPER::READ_INVALID && m_ixOpers[1] == KEY_OPER::READ_INVALID) {
-        return INT_MAX;
-    }
-
-    return m_cost;
-}
-
-bool MatchIndex::AdjustForOrdering(bool desc)
-{
-    if (m_end == -1 && m_ixOpers[0] == READ_KEY_EXACT) {  // READ_KEY_EXACT
-        return true;
-    }
-
-    KEY_OPER curr = (KEY_OPER)(m_ixOpers[0] & ~KEY_OPER_PREFIX_BITMASK);
-    bool has_both = (m_start != -1 && m_end != -1);
-    bool curr_desc = !(curr < KEY_OPER::READ_KEY_OR_PREV);
-
-    if (desc == curr_desc) {
-        return true;
-    } else if (!has_both) {
-        return false;
-    }
-
-    KEY_OPER tmpo = m_ixOpers[0];
-    m_ixOpers[0] = m_ixOpers[1];
-    m_ixOpers[1] = tmpo;
-
-    int32_t tmp = m_start;
-    m_start = m_end;
-    m_end = tmp;
-
-    return true;
-}
-
-bool MatchIndex::CanApplyOrdering(const int* orderCols) const
-{
-    int16_t numKeyCols = m_ix->GetNumFields();
-
-    // check if order columns are overlap index matched columns or are suffix for it
-    for (int16_t i = 0; i < numKeyCols; i++) {
-        // overlap: we can use index ordering
-        if (m_colMatch[0][i] != nullptr && orderCols[i] == 1) {
-            return true;
-        }
-
-        // suffix: the order columns are continuation of index columns, we can use index ordering
-        if (m_colMatch[0][i] == nullptr && orderCols[i] == 1) {
-            return true;
-        }
-
-        // we have gap between matched index columns and order columns
-        if (m_colMatch[0][i] == nullptr && orderCols[i] == 0) {
-            return false;
-        }
-    }
-
-    return false;
-}
-
-void MatchIndex::Serialize(List** list) const
-{
-    List* ixlist = nullptr;
-
-    ixlist = lappend(ixlist, makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum(m_ixPosition), false, true));
-    ixlist = lappend(ixlist, makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum(m_start), false, true));
-    ixlist = lappend(ixlist, makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum(m_end), false, true));
-    ixlist = lappend(ixlist, makeConst(INT4OID, -1, InvalidOid, 4, UInt32GetDatum(m_cost), false, true));
-
-    for (int i = 0; i < 2; i++) {
-        ixlist = lappend(ixlist, makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum(m_numMatches[i]), false, true));
-        ixlist = lappend(ixlist, makeConst(INT4OID, -1, InvalidOid, 4, UInt32GetDatum(m_costs[i]), false, true));
-        ixlist = lappend(ixlist, makeConst(INT4OID, -1, InvalidOid, 4, UInt32GetDatum(m_ixOpers[i]), false, true));
-
-        for (uint j = 0; j < MAX_KEY_COLUMNS; j++) {
-            ixlist = lappend(ixlist, makeConst(INT4OID, -1, InvalidOid, 4, UInt32GetDatum(m_opers[i][j]), false, true));
-            ixlist = lappend(ixlist, makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum(m_params[i][j]), false, true));
-        }
-    }
-
-    *list = list_concat(*list, ixlist);
-}
-
-void MatchIndex::Deserialize(ListCell* cell, uint64_t exTableID)
-{
-    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
-
-    m_ixPosition = (int32_t)((Const*)lfirst(cell))->constvalue;
-    MOT::Table* table = txn->GetTableByExternalId(exTableID);
-    if (table != nullptr) {
-        m_ix = table->GetIndex(m_ixPosition);
-    }
-
-    cell = lnext(cell);
-
-    m_start = (int32_t)((Const*)lfirst(cell))->constvalue;
-    cell = lnext(cell);
-
-    m_end = (int32_t)((Const*)lfirst(cell))->constvalue;
-    cell = lnext(cell);
-
-    m_cost = (uint32_t)((Const*)lfirst(cell))->constvalue;
-    cell = lnext(cell);
-
-    for (int i = 0; i < 2; i++) {
-        m_numMatches[i] = (int32_t)((Const*)lfirst(cell))->constvalue;
-        cell = lnext(cell);
-
-        m_costs[i] = (uint32_t)((Const*)lfirst(cell))->constvalue;
-        cell = lnext(cell);
-
-        m_ixOpers[i] = (KEY_OPER)((Const*)lfirst(cell))->constvalue;
-        cell = lnext(cell);
-        for (uint j = 0; j < MAX_KEY_COLUMNS; j++) {
-            m_opers[i][j] = (KEY_OPER)((Const*)lfirst(cell))->constvalue;
-            cell = lnext(cell);
-
-            m_params[i][j] = (int32_t)((Const*)lfirst(cell))->constvalue;
-            cell = lnext(cell);
-        }
-    }
-}
-
-void MatchIndex::Clean(MOTFdwStateSt* state)
-{
-    for (int k = 0; k < 2; k++) {
-        for (int j = 0; j < m_ix->GetNumFields(); j++) {
-            if (m_colMatch[k][j]) {
-                if (!list_member(state->m_localConds, m_parentColMatch[k][j]) &&
-                    !(m_remoteCondsOrig != nullptr && list_member(m_remoteCondsOrig, m_parentColMatch[k][j])))
-                    state->m_localConds = lappend(state->m_localConds, m_parentColMatch[k][j]);
-                m_colMatch[k][j] = nullptr;
-                m_parentColMatch[k][j] = nullptr;
-            }
-        }
     }
 }

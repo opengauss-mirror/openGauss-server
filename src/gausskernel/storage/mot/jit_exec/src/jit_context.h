@@ -26,7 +26,7 @@
 #define JIT_CONTEXT_H
 
 #include "storage/mot/jit_def.h"
-#include "jit_llvm_exec.h"
+#include "jit_llvm.h"
 #include "jit_tvm.h"
 #include "mot_engine.h"
 

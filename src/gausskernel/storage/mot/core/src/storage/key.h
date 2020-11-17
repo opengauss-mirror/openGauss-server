@@ -149,7 +149,7 @@ public:
     }
 
     /**
-     * @brief Fills a patern in a specific locaion of the key
+     * @brief Fills a pattern in a specific location of the key
      *        to break similarity in secondary non-unique indices
      * @param buf buffer to copy
      * @param len length of the buffer
@@ -185,16 +185,19 @@ public:
 
     bool operator==(const Key& key) const
     {
+        MOT_ASSERT(m_keyLen == key.GetKeyLength());
         return ((memcmp(m_keyBuf, key.GetKeyBuf(), m_keyLen) == 0) ? true : false);
     }
 
     bool operator<(const Key& key) const
     {
+        MOT_ASSERT(m_keyLen == key.GetKeyLength());
         return ((memcmp(m_keyBuf, key.GetKeyBuf(), m_keyLen) < 0) ? true : false);
     }
 
     bool operator<=(const Key& key) const
     {
+        MOT_ASSERT(m_keyLen == key.GetKeyLength());
         return ((memcmp(m_keyBuf, key.GetKeyBuf(), m_keyLen) <= 0) ? true : false);
     }
 
@@ -208,15 +211,19 @@ public:
     Key(Key&&) = delete;
 
     Key& operator=(Key&&) = delete;
+
+    bool operator>(const Key& key) = delete;
+
+    bool operator>=(const Key& key) = delete;
     /** @endcond */
 
-    /** @var key type   */
+    /** @var key type */
     IkeyType m_type;
 
-    /** @var length of the key   */
+    /** @var length of the key */
     uint16_t m_keyLen;
 
-    /** @var key raw buffer   */
+    /** @var key raw buffer */
     uint8_t m_keyBuf[0];
 
     DECLARE_CLASS_LOGGER();

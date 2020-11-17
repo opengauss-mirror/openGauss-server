@@ -13,17 +13,17 @@
  * See the Mulan PSL v2 for more details.
  * -------------------------------------------------------------------------
  *
- * jit_tvm_exec.h
- *    TVM-jitted query execution.
+ * jit_tvm_query_codegen.h
+ *    TVM-jitted code generation.
  *
  * IDENTIFICATION
- *    src/gausskernel/storage/mot/jit_exec/src/jit_tvm_exec.h
+ *    src/gausskernel/storage/mot/jit_exec/src/jit_tvm_query_codegen.h
  *
  * -------------------------------------------------------------------------
  */
 
-#ifndef JIT_TVM_EXEC_H
-#define JIT_TVM_EXEC_H
+#ifndef JIT_TVM_QUERY_CODEGEN_H
+#define JIT_TVM_QUERY_CODEGEN_H
 
 #include "nodes/parsenodes.h"
 #include "nodes/params.h"

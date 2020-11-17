@@ -13,11 +13,11 @@
  * See the Mulan PSL v2 for more details.
  * -------------------------------------------------------------------------
  *
- * jit_llvm_exec.h
- *    LLVM JIT-compiled execution.
+ * jit_llvm.h
+ *    JIT LLVM.
  *
  * IDENTIFICATION
- *    src/gausskernel/storage/mot/jit_exec/src/jit_llvm_exec.h
+ *    src/gausskernel/storage/mot/jit_exec/src/jit_llvm.h
  *
  * -------------------------------------------------------------------------
  */
@@ -28,10 +28,8 @@
 #include "postgres.h"
 #include "nodes/params.h"
 #include "executor/tuptable.h"
-#include "nodes/parsenodes.h"
 
 #include "storage/mot/jit_def.h"
-
 #include "mot_engine.h"
 
 namespace dorado {
@@ -39,10 +37,6 @@ class GsCodeGen;
 };
 
 namespace JitExec {
-// forward declarations
-struct JitContext;
-struct JitPlan;
-
 /**
  * @typedef Jitted function prototype.
  * @param table The main table used for the query.
@@ -71,37 +65,35 @@ typedef int (*JitFunc)(MOT::Table* table, MOT::Index* index, MOT::Key* key, MOT:
 #ifdef __aarch64__
 /**
  * @brief Initializes the global spin-lock used for synchronizing native-LLVM compilation.
- * @return Truen if operation succeeded, otherwise false.
+ * @return True if operation succeeded, otherwise false.
  */
-extern bool InitArmCompileLock();
+bool InitArmCompileLock();
 
 /** @brief Destroys the global spin-lock used for synchronizing native-LLVM compilation. */
-extern void DestroyArmCompileLock();
+void DestroyArmCompileLock();
+
+/** @brief Locks the global ARM compilation lock. */
+bool AcquireArmCompileLock();
+
+/** @brief Unlocks the global ARM compilation lock. */
+bool ReleaseArmCompileLock();
 #endif
 
 /** @brief Prints startup information regarding LLVM version. */
-extern void PrintNativeLlvmStartupInfo();
-
-/**
- * @brief Generates a native LLVM JIT-compiled code for the given query.
- * @param query The query to JIT-compile.
- * @param queryString The query string.
- * @param analysis_result The information gathered during query analysis during a previous call to
- * @ref IsJittable().
- * @param plan The plan resulted from the analysis phase.
- * @return The resulting JIT context, or NULL if failed.
- */
-extern JitContext* JitCodegenLlvmQuery(Query* query, const char* queryString, JitPlan* plan);
+void PrintNativeLlvmStartupInfo();
 
 /** @brief Checks whether the current platforms natively supports LLVM. */
 extern bool JitCanInitThreadCodeGen();
 
+/** @brief Allocates a GsCodeGen object. */
+dorado::GsCodeGen* SetupCodegenEnv();
+
 /**
- * @brief Deallocates a GsCodeGen object, previously allocated during a call to @ref
- * JitCodegenLlvmQuery().
+ * @brief De-allocates a GsCodeGen object, previously allocated by @ref SetupCodegenEnv()
+ * during a call to @ref JitCodegenLlvmQuery().
  * @param codeGen The GsCodeGen object to free.
  */
-extern void FreeGsCodeGen(dorado::GsCodeGen* codeGen);
+void FreeGsCodeGen(dorado::GsCodeGen* codeGen);
 }  // namespace JitExec
 
-#endif
+#endif /* JIT_LLVM_H */
