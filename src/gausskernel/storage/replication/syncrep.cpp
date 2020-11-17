@@ -101,6 +101,9 @@ static int cmp_lsn(const void* a, const void* b);
  */
 #define SYN_TIME_PER_XLOG 0.00225
 
+#define CATCHUP_XLOG_DIFF(ptr1, ptr2, amount) \
+    XLogRecPtrIsInvalid(ptr1) ? false : XLByteDifference(ptr2, ptr1) < amount
+
 /*
  * Determine whether to wait for standby catching up, if requested by user.
  * 
@@ -140,13 +143,13 @@ bool SynRepWaitCatchup(XLogRecPtr XactCommitLSN, int mode)
     /* if catchup will be finished soon, wait for synchronous replication. */
     switch (mode) {
         case SYNC_REP_WAIT_RECEIVE:
-            return XLByteDifference(XactCommitLSN, receivePtr) < max_xlog_diff_amount;
+            return CATCHUP_XLOG_DIFF(receivePtr, XactCommitLSN, max_xlog_diff_amount);
         case SYNC_REP_WAIT_WRITE:
-            return XLByteDifference(XactCommitLSN, writePtr) < max_xlog_diff_amount;
+            return CATCHUP_XLOG_DIFF(writePtr, XactCommitLSN, max_xlog_diff_amount);
         case SYNC_REP_WAIT_FLUSH:
-            return XLByteDifference(XactCommitLSN, flushPtr) < max_xlog_diff_amount;
+            return CATCHUP_XLOG_DIFF(flushPtr, XactCommitLSN, max_xlog_diff_amount);
         case SYNC_REP_WAIT_APPLY:
-            return XLByteDifference(XactCommitLSN, replayPtr) < max_xlog_diff_amount;
+            return CATCHUP_XLOG_DIFF(replayPtr, XactCommitLSN, max_xlog_diff_amount);
         default:
             return true;
     }
@@ -701,7 +704,7 @@ static bool SyncRepGetCatchupRecPtr(XLogRecPtr* receivePtr, XLogRecPtr* writePtr
  * Calculate the oldest Write, Flush and Apply positions among sync standbys.
  */
 static void SyncRepGetOldestSyncRecPtr(
-    XLogRecPtr* receivePtr, XLogRecPtr* writePtr, XLogRecPtr* flushPtr, XLogRecPtr* replayPtr, List* sync_standbys)
+    XLogRecPtr* receivePtr, XLogRecPtr* writePtr, XLogRecPtr* flushPtr, XLogRecPtr* replayPtr, List* standbys)
 {
     ListCell* cell = NULL;
 
@@ -709,7 +712,7 @@ static void SyncRepGetOldestSyncRecPtr(
      * Scan through all sync standbys and calculate the oldest
      * Write, Flush and Apply positions.
      */
-    foreach (cell, sync_standbys) {
+    foreach (cell, standbys) {
         WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[lfirst_int(cell)];
         XLogRecPtr receive;
         XLogRecPtr write;
@@ -739,7 +742,7 @@ static void SyncRepGetOldestSyncRecPtr(
  * standbys.
  */
 static void SyncRepGetNthLatestSyncRecPtr(
-    XLogRecPtr* receivePtr, XLogRecPtr* writePtr, XLogRecPtr* flushPtr, XLogRecPtr* replayPtr, List* sync_standbys, uint8 nth)
+    XLogRecPtr* receivePtr, XLogRecPtr* writePtr, XLogRecPtr* flushPtr, XLogRecPtr* replayPtr, List* standbys, uint8 nth)
 {
     ListCell* cell = NULL;
     XLogRecPtr* receive_array = NULL;
@@ -749,13 +752,13 @@ static void SyncRepGetNthLatestSyncRecPtr(
     int len;
     int i = 0;
 
-    len = list_length(sync_standbys);
+    len = list_length(standbys);
     receive_array = (XLogRecPtr*)palloc(sizeof(XLogRecPtr) * len);
     write_array = (XLogRecPtr*)palloc(sizeof(XLogRecPtr) * len);
     flush_array = (XLogRecPtr*)palloc(sizeof(XLogRecPtr) * len);
     apply_array = (XLogRecPtr*)palloc(sizeof(XLogRecPtr) * len);
 
-    foreach (cell, sync_standbys) {
+    foreach (cell, standbys) {
         WalSnd* walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[lfirst_int(cell)];
 
         SpinLockAcquire(&walsnd->mutex);
@@ -1091,22 +1094,27 @@ static List* SyncRepGetSyncStandbysQuorum(bool* am_sync, List** catchup_standbys
         walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
 
         /* Must be active */
-        if (walsnd->pid == 0)
+        if (walsnd->pid == 0) {
             continue;
+        }
 
         /* Must be synchronous */
-        if (walsnd->sync_standby_priority == 0)
+        if (walsnd->sync_standby_priority == 0) {
             continue;
+        }
+
+        if (walsnd->state == WALSNDSTATE_CATCHUP && catchup_standbys != NULL) {
+            *catchup_standbys = lappend_int(*catchup_standbys, i);
+            continue;
+        }
 
         /* Must have a valid flush position */
-        if (XLogRecPtrIsInvalid(walsnd->flush))
+        if (XLogRecPtrIsInvalid(walsnd->flush)) {
             continue;
+        }
 
         /* Must be streaming */
         if (walsnd->state != WALSNDSTATE_STREAMING) {
-            if (catchup_standbys != NULL && walsnd->state == WALSNDSTATE_CATCHUP) {
-                *catchup_standbys = lappend_int(*catchup_standbys, i);
-            }
             continue;
         }
 
@@ -1161,23 +1169,28 @@ static List* SyncRepGetSyncStandbysPriority(bool* am_sync, List** catchup_standb
         walsnd = &t_thrd.walsender_cxt.WalSndCtl->walsnds[i];
 
         /* Must be active */
-        if (walsnd->pid == 0)
+        if (walsnd->pid == 0) {
             continue;
+        }
 
         /* Must be synchronous */
         this_priority = walsnd->sync_standby_priority;
-        if (this_priority == 0)
+        if (this_priority == 0) {
             continue;
+        }
+
+        if (walsnd->state == WALSNDSTATE_CATCHUP && catchup_standbys != NULL) {
+            *catchup_standbys = lappend_int(*catchup_standbys, i);
+            continue;
+        }
 
         /* Must have a valid flush position */
-        if (XLogRecPtrIsInvalid(walsnd->flush))
+        if (XLogRecPtrIsInvalid(walsnd->flush)) {
             continue;
+        }
 
         /* Must be streaming */
         if (walsnd->state != WALSNDSTATE_STREAMING) {
-            if (catchup_standbys != NULL && walsnd->state == WALSNDSTATE_CATCHUP) {
-                *catchup_standbys = lappend_int(*catchup_standbys, i);
-            }
             continue;
         }
 
