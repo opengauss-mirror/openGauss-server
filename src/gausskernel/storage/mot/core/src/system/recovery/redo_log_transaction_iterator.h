@@ -13,55 +13,22 @@
  * See the Mulan PSL v2 for more details.
  * -------------------------------------------------------------------------
  *
- * transaction_buffer_iterator.h
+ * redo_log_transaction_iterator.h
  *    Iterator for iterating over redo log transactions.
  *
  * IDENTIFICATION
- *    src/gausskernel/storage/mot/core/src/system/recovery/transaction_buffer_iterator.h
+ *    src/gausskernel/storage/mot/core/src/system/recovery/redo_log_transaction_iterator.h
  *
  * -------------------------------------------------------------------------
  */
 
-#ifndef TRANSACTION_BUFFER_ITERATOR_H
-#define TRANSACTION_BUFFER_ITERATOR_H
+#ifndef REDO_LOG_TRANSACTION_ITERATOR_H
+#define REDO_LOG_TRANSACTION_ITERATOR_H
 
-#include "redo_log_global.h"
 #include "redo_log_writer.h"
-#include "serializable.h"
+#include "log_segment.h"
 
 namespace MOT {
-/**
- * @struct LogSegment
- * @brief encapsulates a chunk of logging data
- */
-struct LogSegment : public Serializable {
-    char* m_data;
-
-    size_t m_len;
-
-    EndSegmentBlock m_controlBlock;
-
-    uint64_t m_replayLsn;
-
-    /**
-     * @brief fetches the size of the log segment
-     * @return Size_t value denoting the size of the segment.
-     */
-    virtual size_t SerializeSize();
-
-    /**
-     * @brief serialize the log segment into a given buffer
-     * @param dataOut the output buffer
-     */
-    virtual void Serialize(char* dataOut);
-
-    /**
-     * @brief creates a log segment from a data buffer.
-     * @param dataIn the input buffer.
-     */
-    virtual void Deserialize(const char* dataIn);
-};
-
 /**
  * @class RedoLogBufferIterator
  * @brief Iterator for iterating over redo log transactions.
@@ -123,4 +90,4 @@ private:
 };
 }  // namespace MOT
 
-#endif /* TRANSACTION_BUFFER_ITERATOR_H */
+#endif /* REDO_LOG_TRANSACTION_ITERATOR_H */

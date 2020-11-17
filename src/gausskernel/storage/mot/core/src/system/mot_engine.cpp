@@ -44,6 +44,7 @@
 #include "connection_id.h"
 #include "cycles.h"
 #include "debug_utils.h"
+#include "recovery_manager_factory.h"
 
 // For mtSessionThreadInfo thread local
 #include "kvthread.hh"
@@ -741,7 +742,7 @@ bool MOTEngine::InitializeRecoveryManager()
             MOT_ERROR_INVALID_STATE, "MOT Engine Startup", "Double attempt to initialize recovery manager");
     }
 
-    m_recoveryManager = new (std::nothrow) RecoveryManager();
+    m_recoveryManager = RecoveryManagerFactory::CreateRecoveryManager();
     if (m_recoveryManager == nullptr) {
         MOT_REPORT_ERROR(MOT_ERROR_OOM, "MOT Engine Startup", "Failed to allocate memory for recovery manager object");
         return false;

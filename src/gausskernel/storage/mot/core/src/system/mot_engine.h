@@ -37,12 +37,13 @@
 #include "checkpoint_manager.h"
 #include "utilities.h"
 #include "asynchronous_redo_log_handler.h"
-#include "recovery_manager.h"
+#include "irecovery_manager.h"
 #include "table_manager.h"
 #include "session_manager.h"
 #include "surrogate_key_manager.h"
 #include "gc_context.h"
 #include "mot_atomic_ops.h"
+#include "inprocess_transactions.h"
 
 namespace MOT {
 class ConfigLoader;
@@ -301,9 +302,14 @@ public:
     /**********************************************************************/
     // Recovery API
     /**********************************************************************/
-    inline RecoveryManager* GetRecoveryManager()
+    inline IRecoveryManager* GetRecoveryManager()
     {
         return m_recoveryManager;
+    }
+
+    inline InProcessTransactions& GetInProcessTransactions()
+    {
+        return m_inProcessTransactions;
     }
 
     inline bool CreateRecoverySessionContext()
@@ -356,8 +362,8 @@ public:
 
     inline bool IsInProcessTx(uint64_t id)
     {
-        MOT_ASSERT(m_recoveryManager);
-        return m_recoveryManager->IsInProcessTx(id);
+        uint64_t intId;
+        return m_inProcessTransactions.FindTransactionId(id, intId, false);
     }
 
     inline uint64_t PerformInProcessTx(uint64_t id, bool isCommit)
@@ -535,13 +541,16 @@ private:
     SurrogateKeyManager* m_surrogateKeyManager;
 
     /** @var The recovery manager. */
-    RecoveryManager* m_recoveryManager;
+    IRecoveryManager* m_recoveryManager;
 
     /** @var The redo-log handler. */
     RedoLogHandler* m_redoLogHandler;
 
     /** @var The checkpoint manager. */
     CheckpointManager* m_checkpointManager;
+
+    /** @var The In-ProcessTransactions container. */
+    InProcessTransactions m_inProcessTransactions;
 
     // record initialization failure point, so that Destroy can be called at any point of failure
     enum InitPhase {
@@ -630,7 +639,7 @@ inline SurrogateKeyManager* GetSurrogateKeyManager()
 }
 
 /** @brief Retrieves the recovery manager. */
-inline RecoveryManager* GetRecoveryManager()
+inline IRecoveryManager* GetRecoveryManager()
 {
     return MOTEngine::GetInstance()->GetRecoveryManager();
 }

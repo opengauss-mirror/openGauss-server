@@ -38,7 +38,7 @@ class Row;
 class TxnManager;
 class TxnAccess;
 class CheckpointWorkerPool;
-class RecoveryManager;
+class RecoveryOps;
 // forward declarations
 enum RC : uint32_t;
 enum AccessType : uint8_t;
@@ -238,7 +238,7 @@ private:
     friend Row;
     friend OccTransactionManager;
     friend CheckpointWorkerPool;
-    friend RecoveryManager;
+    friend RecoveryOps;
     friend Index;
 };
 }  // namespace MOT

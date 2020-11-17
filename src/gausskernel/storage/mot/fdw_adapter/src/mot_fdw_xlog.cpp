@@ -34,8 +34,6 @@
 #include "recovery_manager.h"
 #include "miscadmin.h"
 
-extern int MOTXlateRecoveryErr(int err);
-
 bool IsValidEntry(uint8 code)
 {
     return code == MOT_REDO_DATA;
@@ -74,9 +72,7 @@ void MOTRedo(XLogReaderState* record)
     }
     if (MOT::GetRecoveryManager()->IsErrorSet() || !MOT::GetRecoveryManager()->ApplyRedoLog(lsn, data, len)) {
         // we treat errors fatally.
-        ereport(FATAL,
-            (MOTXlateRecoveryErr(MOT::GetRecoveryManager()->GetErrorCode()),
-                errmsg("%s", MOT::GetRecoveryManager()->GetErrorString())));
+        ereport(FATAL, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("MOT recovery failed.")));
     }
 }
 

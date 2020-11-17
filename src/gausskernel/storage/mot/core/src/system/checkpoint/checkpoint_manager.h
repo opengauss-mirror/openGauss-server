@@ -166,6 +166,11 @@ public:
         return m_id;
     }
 
+    void SetId(uint64_t id)
+    {
+        m_id = id;
+    }
+
     uint64_t GetLastReplayLsn()
     {
         return m_lastReplayLsn;
@@ -267,11 +272,6 @@ private:
 
     // this lock guards gs_ctl checkpoint fetching
     pthread_rwlock_t m_fetchLock;
-
-    void SetId(uint64_t id)
-    {
-        m_id = id;
-    }
 
     CheckpointPhase GetPhase() const
     {
@@ -384,6 +384,12 @@ private:
      * @return Boolean value denoting success or failure.
      */
     bool CreateEndFile();
+
+    /**
+     * @brief Serializes inProcess transactions to disk
+     * @return Boolean value denoting success or failure.
+     */
+    bool SerializeInProcessTxns(int fd);
 
     void ResetFlags();
 

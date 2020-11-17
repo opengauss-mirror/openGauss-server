@@ -82,12 +82,14 @@ public:
     inline Table* GetTable(InternalTableId tableId)
     {
         Table* table = nullptr;
+
         m_rwLock.RdLock();
         InternalTableMap::iterator it = m_tablesById.find(tableId);
-        if (it != m_tablesById.end())
+        if (it != m_tablesById.end()) {
             table = it->second;
-
+        }
         m_rwLock.RdUnlock();
+
         return table;
     }
 

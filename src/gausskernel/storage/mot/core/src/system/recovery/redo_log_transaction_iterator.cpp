@@ -13,16 +13,16 @@
  * See the Mulan PSL v2 for more details.
  * -------------------------------------------------------------------------
  *
- * transaction_buffer_iterator.cpp
+ * redo_log_transaction_iterator.cpp
  *    Iterator for iterating over redo log transactions.
  *
  * IDENTIFICATION
- *    src/gausskernel/storage/mot/core/src/system/recovery/transaction_buffer_iterator.cpp
+ *    src/gausskernel/storage/mot/core/src/system/recovery/redo_log_transaction_iterator.cpp
  *
  * -------------------------------------------------------------------------
  */
 
-#include "transaction_buffer_iterator.h"
+#include "redo_log_transaction_iterator.h"
 
 namespace MOT {
 bool RedoLogTransactionIterator::End()
@@ -71,23 +71,5 @@ LogSegment* RedoLogTransactionIterator::AllocRedoSegment(uint64_t replayLsn)
     securec_check(erc, "\0", "\0");
     segment->m_replayLsn = replayLsn;
     return segment;
-}
-
-size_t LogSegment::SerializeSize()
-{
-    return SerializableCharBuf::SerializeSize(m_len) + EndSegmentBlockSerializer::SerializeSize(&m_controlBlock);
-}
-
-void LogSegment::Serialize(char* dataOut)
-{
-    dataOut = SerializableCharBuf::Serialize(dataOut, m_data, m_len);
-    EndSegmentBlockSerializer::Serialize(&m_controlBlock, dataOut);
-}
-
-void LogSegment::Deserialize(const char* in)
-{
-    char* dataIn = (char*)in;
-    dataIn = SerializableCharBuf::Deserialize(dataIn, m_data, m_len);
-    EndSegmentBlockSerializer::Deserialize(&m_controlBlock, dataIn);
 }
 }  // namespace MOT

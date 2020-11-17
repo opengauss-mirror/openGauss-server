@@ -205,30 +205,6 @@ static inline List* BitmapSerialize(List* result, uint8_t* bitmap, int16_t len)
     return result;
 }
 
-int MOTXlateRecoveryErr(int err)
-{
-    int code = 0;
-    switch (err) {
-        case MOT::RecoveryManager::ErrCodes::NO_ERROR:
-            code = ERRCODE_SUCCESSFUL_COMPLETION;
-            break;
-        case MOT::RecoveryManager::ErrCodes::CP_SETUP:
-            code = ERRCODE_CONFIG_FILE_ERROR;
-            break;
-        case MOT::RecoveryManager::ErrCodes::CP_META:
-            code = ERRCODE_INVALID_TABLE_DEFINITION;
-            break;
-        case MOT::RecoveryManager::ErrCodes::CP_RECOVERY:
-        case MOT::RecoveryManager::ErrCodes::XLOG_SETUP:
-        case MOT::RecoveryManager::ErrCodes::XLOG_RECOVERY:
-            code = ERRCODE_INTERNAL_ERROR;
-            break;
-        default:
-            break;
-    }
-    return code;
-}
-
 void MOTRecover()
 {
     if (!MOTAdaptor::m_initialized) {
@@ -239,9 +215,7 @@ void MOTRecover()
     EnsureSafeThreadAccess();
     if (!MOT::MOTEngine::GetInstance()->StartRecovery()) {
         // we treat errors fatally.
-        ereport(FATAL,
-            (MOTXlateRecoveryErr(MOT::GetRecoveryManager()->GetErrorCode()),
-                errmsg("%s", MOT::GetRecoveryManager()->GetErrorString())));
+        ereport(FATAL, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("MOT checkpoint recovery failed.")));
     }
 
     if (!g_instance.attr.attr_common.enable_thread_pool) {
@@ -260,10 +234,8 @@ void MOTRecoveryDone()
 
     EnsureSafeThreadAccess();
     if (!MOT::MOTEngine::GetInstance()->EndRecovery()) {
-        // we treat errors fatally.
-        ereport(FATAL,
-            (MOTXlateRecoveryErr(MOT::GetRecoveryManager()->GetErrorCode()),
-                errmsg("%s", MOT::GetRecoveryManager()->GetErrorString())));
+
+        ereport(FATAL, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("MOT recovery failed.")));
     }
 }
 
@@ -2160,13 +2132,12 @@ bool MOTCheckpointExists(
         return false;
     }
 
-    MOT::RecoveryManager* recoveryManager = engine->GetRecoveryManager();
     MOT::CheckpointManager* checkpointManager = engine->GetCheckpointManager();
-    if (recoveryManager == nullptr || checkpointManager == nullptr) {
+    if (checkpointManager == nullptr) {
         return false;
     }
 
-    if (recoveryManager->GetCheckpointId() == MOT::CheckpointControlFile::invalidId) {
+    if (checkpointManager->GetId() == MOT::CheckpointControlFile::invalidId) {
         return false;
     }
 

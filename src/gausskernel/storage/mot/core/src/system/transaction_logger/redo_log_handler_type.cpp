@@ -28,7 +28,7 @@
 #include <string.h>
 
 namespace MOT {
-DECLARE_LOGGER(RedoLogHandlerType, redolog)
+DECLARE_LOGGER(RedoLogHandlerType, RedoLog)
 
 static const char* NONE_STR = "none";
 static const char* SYNC_REDO_LOG_HANDLER_STR = "synchronous";
