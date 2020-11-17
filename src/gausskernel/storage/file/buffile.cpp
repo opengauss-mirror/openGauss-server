@@ -74,7 +74,6 @@ struct BufFile {
      * offsets[i] is the current seek position of files[i].  We use this to
      * avoid making redundant FileSeek calls.
      */
-    bool isTemp;      /* can only add files if this is TRUE */
     bool isInterXact; /* keep open over transactions? */
     bool dirty;       /* does buffer need to be written? */
     bool readOnly;    /* has the file been set to read only? */
@@ -137,7 +136,6 @@ static BufFile *makeBufFileCommon(int nfiles)
     file->numFiles = nfiles;
     file->offsets = (off_t *)palloc(sizeof(off_t));
     file->offsets[0] = 0L;
-    file->isTemp = false;
     file->isInterXact = false;
     file->dirty = false;
     file->resowner = t_thrd.utils_cxt.CurrentResourceOwner;
@@ -179,7 +177,6 @@ static void extendBufFile(BufFile* file)
     oldowner = t_thrd.utils_cxt.CurrentResourceOwner;
     t_thrd.utils_cxt.CurrentResourceOwner = file->resowner;
 
-    Assert(file->isTemp);
     if (file->fileset == NULL) {
         pfile = OpenTemporaryFile(file->isInterXact);
     } else {
@@ -216,7 +213,6 @@ static BufFile* CreateTempBufFile(bool interXact)
     Assert(pfile >= 0);
 
     file = makeBufFile(pfile);
-    file->isTemp = true;
     file->isInterXact = interXact;
 
     return file;
@@ -395,20 +391,6 @@ void BufFileExportShared(BufFile *file)
     file->readOnly = true;
 }
 
-#ifdef NOT_USED
-/*
- * Create a BufFile and attach it to an already-opened virtual File.
- *
- * This is comparable to fdopen() in stdio.  This is the only way at present
- * to attach a BufFile to a non-temporary file.  Note that BufFiles created
- * in this way CANNOT be expanded into multiple files.
- */
-BufFile* BufFileCreate(File file)
-{
-    return makeBufFile(file);
-}
-#endif
-
 /*
  * Close a BufFile
  *
@@ -506,7 +488,7 @@ static void BufFileDumpBuffer(BufFile* file)
         /*
          * Advance to next component file if necessary and possible.
          */
-        if (file->curOffset >= MAX_PHYSICAL_FILESIZE && file->isTemp) {
+        if (file->curOffset >= MAX_PHYSICAL_FILESIZE) {
             while (file->curFile + 1 >= file->numFiles) {
                 extendBufFile(file);
             }
@@ -519,12 +501,10 @@ static void BufFileDumpBuffer(BufFile* file)
          * write as much as asked...
          */
         bytestowrite = file->nbytes - wpos;
-        if (file->isTemp) {
-            off_t availbytes = MAX_PHYSICAL_FILESIZE - file->curOffset;
+        off_t availbytes = MAX_PHYSICAL_FILESIZE - file->curOffset;
 
-            if ((off_t)bytestowrite > availbytes) {
-                bytestowrite = (int)availbytes;
-            }
+        if ((off_t)bytestowrite > availbytes) {
+            bytestowrite = (int)availbytes;
         }
 
         /*
@@ -757,19 +737,17 @@ int BufFileSeek(BufFile* file, int fileno, off_t offset, int whence)
      * At this point and no sooner, check for seek past last segment. The
      * above flush could have created a new segment, so checking sooner would
      * not work (at least not with this code).
+     * convert seek to "start of next seg" to "end of last seg"
      */
-    if (file->isTemp) {
-        /* convert seek to "start of next seg" to "end of last seg" */
-        if (new_file == file->numFiles && new_offset == 0) {
-            new_file--;
-            new_offset = MAX_PHYSICAL_FILESIZE;
+    if (new_file == file->numFiles && new_offset == 0) {
+        new_file--;
+        new_offset = MAX_PHYSICAL_FILESIZE;
+    }
+    while (new_offset > MAX_PHYSICAL_FILESIZE) {
+        if (++new_file >= file->numFiles) {
+            return EOF;
         }
-        while (new_offset > MAX_PHYSICAL_FILESIZE) {
-            if (++new_file >= file->numFiles) {
-                return EOF;
-            }
-            new_offset -= MAX_PHYSICAL_FILESIZE;
-        }
+        new_offset -= MAX_PHYSICAL_FILESIZE;
     }
     if (new_file >= file->numFiles) {
         return EOF;
