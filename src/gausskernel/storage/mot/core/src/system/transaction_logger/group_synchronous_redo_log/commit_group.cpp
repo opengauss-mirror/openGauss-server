@@ -29,7 +29,7 @@
 #include "group_synchronous_redo_log_handler.h"
 
 namespace MOT {
-DECLARE_LOGGER(CommitGroup, redolog);
+DECLARE_LOGGER(CommitGroup, RedoLog);
 
 CommitGroup::CommitGroup(RedoLogBuffer* buffer, GroupSyncRedoLogHandler* handler, const uint8_t id)
     : m_handlerId(id),

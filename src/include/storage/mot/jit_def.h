@@ -44,14 +44,9 @@
 
 namespace JitExec {
 
-// uncomment this to debug JIT execution
-//#define MOT_JIT_DEBUG
-
-// uncomment this to use advanced WHERE clause operators
-//#define MOT_JIT_ADVANCED_WHERE_OP
-
-// uncomment to enable features required for JIT testing
-//#define MOT_JIT_TEST
+// To debug JIT execution, #define MOT_JIT_DEBUG
+// To use advanced WHERE clause operators, #define MOT_JIT_ADVANCED_WHERE_OP
+// To enable features required for JIT testing, #define MOT_JIT_TEST
 
 /** @enum JitCommandType Command types supported by jitted queries. */
 enum JitCommandType : uint8_t {

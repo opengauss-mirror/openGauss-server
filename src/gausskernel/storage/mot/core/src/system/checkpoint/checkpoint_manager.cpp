@@ -532,7 +532,6 @@ void CheckpointManager::CompleteCheckpoint()
 
         // Update checkpoint Id
         SetId(m_inProgressId);
-        GetRecoveryManager()->SetCheckpointId(m_id);
         finishedUpdatingFiles = true;
     } while (0);
     (void)pthread_rwlock_unlock(&m_fetchLock);
@@ -779,8 +778,7 @@ bool CheckpointManager::CreateCheckpointId(uint64_t& checkpointId)
 
 bool CheckpointManager::GetCheckpointDirName(std::string& dirName)
 {
-    uint64_t checkpointId = GetRecoveryManager()->GetCheckpointId();
-    if (!CheckpointUtils::SetDirName(dirName, checkpointId)) {
+    if (!CheckpointUtils::SetDirName(dirName, GetId())) {
         MOT_LOG_ERROR("SetDirName failed");
         return false;
     }
@@ -829,10 +827,11 @@ bool CheckpointManager::CreateTpcRecoveryFile()
         // this lock is held while serializing the in process transactions call by
         // checkpoint. It prevents gs_clean removing entries from the in-process map
         // while they are serialized
-        GetRecoveryManager()->LockInProcessTxns();
+        MOTEngine::GetInstance()->GetInProcessTransactions().Lock();
         CheckpointUtils::TpcFileHeader tpcFileHeader;
         tpcFileHeader.m_magic = CP_MGR_MAGIC;
-        tpcFileHeader.m_numEntries = GetRecoveryManager()->GetInProcessTxnsSize();
+        tpcFileHeader.m_numEntries = MOTEngine::GetInstance()->GetInProcessTransactions().GetNumTxns();
+
         size_t wrStat = CheckpointUtils::WriteFile(fd, (char*)&tpcFileHeader, sizeof(CheckpointUtils::TpcFileHeader));
         if (wrStat != sizeof(CheckpointUtils::TpcFileHeader)) {
             MOT_LOG_ERROR("create2PCRecoveryFile: failed to write 2pc file's header (%d) [%d %s]",
@@ -842,7 +841,7 @@ bool CheckpointManager::CreateTpcRecoveryFile()
             break;
         }
 
-        if (tpcFileHeader.m_numEntries > 0 && GetRecoveryManager()->SerializeInProcessTxns(fd) == false) {
+        if (tpcFileHeader.m_numEntries > 0 && SerializeInProcessTxns(fd) == false) {
             MOT_LOG_ERROR("create2PCRecoveryFile: failed to serialize transactions [%d %s]", errno, gs_strerror(errno));
             break;
         }
@@ -858,8 +857,84 @@ bool CheckpointManager::CreateTpcRecoveryFile()
         }
         ret = true;
     } while (0);
-    GetRecoveryManager()->UnlockInProcessTxns();
+    MOTEngine::GetInstance()->GetInProcessTransactions().Unlock();
     return ret;
+}
+
+bool CheckpointManager::SerializeInProcessTxns(int fd)
+{
+    if (fd == -1) {
+        MOT_LOG_ERROR("SerializeInProcessTxns: bad fd");
+        return false;
+    }
+
+    auto serializeLambda = [this, fd](RedoLogTransactionSegments* segments, uint64_t) -> RC {
+        errno_t erc;
+        LogSegment* segment = segments->GetSegment(segments->GetCount() - 1);
+        size_t bufSize = 0;
+        char* buf = nullptr;
+        CheckpointUtils::TpcEntryHeader header;
+        uint64_t csn = segment->m_controlBlock.m_csn;
+        for (uint32_t i = 0; i < segments->GetCount(); i++) {
+            segment = segments->GetSegment(i);
+            size_t sz = segment->SerializeSize();
+            if (buf == nullptr) {
+                buf = (char*)malloc(sz);
+                MOT_LOG_DEBUG("SerializeInProcessTxns: alloc %lu - %p", sz, buf);
+                bufSize = sz;
+            } else if (sz > bufSize) {
+                char* bufTmp = (char*)malloc(sz);
+                if (bufTmp == nullptr) {
+                    free(buf);
+                    buf = nullptr;
+                } else {
+                    erc = memcpy_s(bufTmp, sz, buf, bufSize);
+                    securec_check(erc, "\0", "\0");
+                    free(buf);
+                    buf = bufTmp;
+                }
+                MOT_LOG_DEBUG("SerializeInProcessTxns: realloc %lu - %p", sz, buf);
+                bufSize = sz;
+            }
+
+            if (buf == nullptr) {
+                MOT_LOG_ERROR("SerializeInProcessTxns: failed to allocate buffer (%lu bytes)", sz);
+                return RC_ERROR;
+            }
+
+            header.m_magic = CP_MGR_MAGIC;
+            header.m_len = bufSize;
+            segment->Serialize(buf);
+
+            size_t wrStat = CheckpointUtils::WriteFile(fd, (char*)&header, sizeof(CheckpointUtils::TpcEntryHeader));
+            if (wrStat != sizeof(CheckpointUtils::TpcEntryHeader)) {
+                MOT_LOG_ERROR("SerializeInProcessTxns: failed to write header (wrote %lu) [%d:%s]",
+                    wrStat,
+                    errno,
+                    gs_strerror(errno));
+                free(buf);
+                return RC_ERROR;
+            }
+
+            wrStat = CheckpointUtils::WriteFile(fd, buf, bufSize);
+            if (wrStat != bufSize) {
+                MOT_LOG_ERROR("SerializeInProcessTxns: failed to write %lu bytes to file (wrote %lu) [%d:%s]",
+                    bufSize,
+                    wrStat,
+                    errno,
+                    gs_strerror(errno));
+                free(buf);
+                return RC_ERROR;
+            }
+            MOT_LOG_DEBUG("SerializeInProcessTxns: wrote seg %p %lu bytes", segment, bufSize);
+            if (buf != nullptr) {
+                free(buf);
+            }
+        }
+        return RC_OK;
+    };
+
+    return MOTEngine::GetInstance()->GetInProcessTransactions().ForEachTransaction(serializeLambda, false);
 }
 
 bool CheckpointManager::CreateEndFile()

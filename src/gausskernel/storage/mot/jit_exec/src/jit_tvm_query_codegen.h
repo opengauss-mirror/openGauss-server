@@ -66,4 +66,4 @@ extern int JitExecTvmQuery(JitContext* jitContext, ParamListInfo params, TupleTa
     uint64_t* tuplesProcessed, int* scanEnded, int newScan);
 }  // namespace JitExec
 
-#endif  // JIT_TVM_EXEC_H
+#endif  /* JIT_TVM_QUERY_CODEGEN_H */

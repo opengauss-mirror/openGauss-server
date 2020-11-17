@@ -32,7 +32,7 @@
 #include "mot_configuration.h"
 
 namespace MOT {
-DECLARE_LOGGER(AsyncRedoLogHandler, redolog)
+DECLARE_LOGGER(AsyncRedoLogHandler, RedoLog)
 
 AsyncRedoLogHandler::AsyncRedoLogHandler()
     : m_bufferPool(),

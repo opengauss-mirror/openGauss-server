@@ -40,7 +40,7 @@
 namespace MOT {
 class OccTransactionManager;
 class CheckpointWorkerPool;
-class RecoveryManager;
+class RecoveryOps;
 
 /**
  * @class Row
@@ -608,7 +608,7 @@ protected:
     friend CheckpointManager;
     friend CheckpointWorkerPool;
     friend Index;
-    friend RecoveryManager;
+    friend RecoveryOps;
     friend Table;
 
     DECLARE_CLASS_LOGGER()

@@ -29,7 +29,7 @@
 #include "session_context.h"
 
 namespace MOT {
-DECLARE_LOGGER(SegmentedGroupSyncRedoLogHandler, redolog);
+DECLARE_LOGGER(SegmentedGroupSyncRedoLogHandler, RedoLog);
 
 SegmentedGroupSyncRedoLogHandler::SegmentedGroupSyncRedoLogHandler()
     : m_numaNodes(GetGlobalConfiguration().m_numaNodes), m_redoLogHandlerArray(NULL)

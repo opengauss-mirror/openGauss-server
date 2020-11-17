@@ -1270,7 +1270,7 @@ RC TxnManager::SavePreparedData()
 
     if (m_transactionId != INVALID_TRANSACTION_ID) {
         MOT_LOG_DEBUG("mapping ext txid %lu to %lu", m_transactionId, m_internalTransactionId);
-        MOT::GetRecoveryManager()->UpdateTxIdMap(m_internalTransactionId, m_transactionId);
+        MOTEngine::GetInstance()->GetInProcessTransactions().UpdateTxIdMap(m_internalTransactionId, m_transactionId);
     }
 
     return RC_OK;

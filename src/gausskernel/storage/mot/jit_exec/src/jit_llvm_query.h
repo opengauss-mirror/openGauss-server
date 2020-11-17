@@ -64,8 +64,6 @@
 // for checking if LLVM_ENABLE_DUMP is defined and for using LLVM_VERSION_STRING
 #include "llvm/Config/llvm-config.h"
 
-extern bool GlobalCodeGenEnvironmentSuccess;
-
 namespace JitExec {
 /** @struct Holds instructions that evaluate in runtime to begin and end iterators of a cursor. */
 struct JitLlvmRuntimeCursor {
