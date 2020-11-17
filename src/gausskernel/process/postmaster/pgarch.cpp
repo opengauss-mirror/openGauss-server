@@ -460,7 +460,7 @@ static bool PgarchArchiveXlogToDest(const char* xlog)
     char srcPath[MAXPGPATH] = {0};
     char destPath[MAXPGPATH] = {0};
     char activitymsg[MAXFNAMELEN + 16];
-    unsigned long int fileBytes = 0;
+    long int fileBytes = 0;
     int rc = 0;
 
     if (xlog == NULL) {
@@ -504,7 +504,7 @@ static bool PgarchArchiveXlogToDest(const char* xlog)
             ereport(FATAL, (errmsg_internal("could not open dest file \"%s\":%m\n", destPath)));
         }
     } else {
-        ereport(FATAL, (errmsg_internal("could not open src file \"%s\":%m\n", srcPath, strerror(errno))));
+        ereport(FATAL, (errmsg_internal("could not open src file \"%s\":%m\n", srcPath)));
     }
 
     return false;
