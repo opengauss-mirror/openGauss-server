@@ -1116,6 +1116,36 @@ class ErrorCode():
                        
     }
 
+    ##########################################################################
+    # gs_dropnode
+    # [GAUSS-358] : gs_dropnode failed
+    ##########################################################################
+    GAUSS_358 = {
+        "GAUSS_35800": "[GAUSS-35800] Expansion standby node failed.",
+        "GAUSS_35801": "[GAUSS-35801] Empty parameter. The %s parameter is "
+                       "missing in the command.",
+        "GAUSS_35802": "[GAUSS-35802] The IP list of target node: %s"
+                       "is not in the current cluster. Please check!",
+        "GAUSS_35803": "[GAUSS-35803] The IP of primary node %s is in the "
+                       "target node list. \n"
+                       "The primary node can not be dropped! \n",
+        "GAUSS_35804": "[GAUSS-35804] The dropnode operation can only be executed"
+                       " at the primary node. \n ",
+        "GAUSS_35805": "[GAUSS-35805] Input %s. Operation aborted. ",
+        "GAUSS_35806": "[GAUSS-35806] Current status of cluster is %s .\n"
+                       "It doesn't meet the requirement.! ",
+        "GAUSS_35807": "[GAUSS-35807] The host %s which still exist in the "
+                       "cluster can't be connected.\n"
+                       "It doesn't meet the requirement.! ",
+        "GAUSS_35808": "[GAUSS-35808] The %s is running switchover/failover!\n"
+                       "The dropnode operation can only be executed when there is"
+                       " no such operation!",
+        "GAUSS_35809": "[GAUSS-35809] Some important steps failed to execute. "
+                       "Please refer to log for detail!",
+        "GAUSS_35810": "[GAUSS-35810] A same process is already running! "
+
+    }
+
 
 class OmError(BaseException):
     """

@@ -1601,7 +1601,7 @@ char* parse_AZ_result(char* AZStr, const char* data_dir)
     array[0] = get_nodename_list_by_AZ(azList[0], data_dir);
     // input az name is incorrect
     if (NULL == array[0]) {
-        (void)write_stderr("ERROR: The AZ name \"%s\" does not be found on cluster. please makesure the AZ string "
+        (void)write_log("ERROR: The AZ name \"%s\" does not be found on cluster. please makesure the AZ string "
                            "\"%s\" is correct.\n",
             azList[0],
             AZStr);
@@ -1613,7 +1613,7 @@ char* parse_AZ_result(char* AZStr, const char* data_dir)
         array[1] = get_nodename_list_by_AZ(azList[1], data_dir);
         // input az name is incorrect
         if (NULL == array[1]) {
-            (void)write_stderr("ERROR: The AZ name \"%s\" does not be found on cluster. please makesure the AZ string "
+            (void)write_log("ERROR: The AZ name \"%s\" does not be found on cluster. please makesure the AZ string "
                                "\"%s\" is correct.\n",
                 azList[1],
                 AZStr);
@@ -1626,7 +1626,7 @@ char* parse_AZ_result(char* AZStr, const char* data_dir)
         array[2] = get_nodename_list_by_AZ(azList[2], data_dir);
         // input az name is incorrect
         if (NULL == array[2]) {
-            (void)write_stderr("ERROR: The AZ name \"%s\" does not be found on cluster. please makesure the AZ string "
+            (void)write_log("ERROR: The AZ name \"%s\" does not be found on cluster. please makesure the AZ string "
                                "\"%s\" is correct.\n",
                 azList[2],
                 AZStr);
@@ -1725,6 +1725,10 @@ char* get_AZ_value(const char* value, const char* data_dir)
     char* result = NULL;
     size_t len = 0;
     char* az1 = getAZNamebyPriority(g_az_master);
+    char* vouter_ptr = NULL;
+    char delims[] = ",";
+    char* vptr = NULL;
+    char emptyvalue[] = "''";
 
     if (az1 != NULL) {
         minLen = strlen("ANY X()") + strlen(az1);
@@ -1746,7 +1750,7 @@ char* get_AZ_value(const char* value, const char* data_dir)
     }
 
     /* check value length */
-    if (strlen(value) > MAX_VALUE_LEN || strlen(value) < minLen) {
+    if (strlen(value) > MAX_VALUE_LEN) {
         (void)write_stderr("ERROR: The value of pamameter synchronous_standby_names is incorrect.\n");
         return NULL;
     }
@@ -1756,6 +1760,14 @@ char* get_AZ_value(const char* value, const char* data_dir)
     // skip the space
     while (isspace((unsigned char)*p))
         p++;
+    
+    if (strlen(p) == 0) {
+        len = strlen(emptyvalue) + 1;
+        result = (char*)pg_malloc_zero(len * sizeof(char));
+        nRet = snprintf_s(result, len, len - 1, "%s", emptyvalue);
+        securec_check_ss_c(nRet, "\0", "\0");
+        return result;
+    }
 
     if (0 != strncmp(p, "FIRST ", strlen("FIRST ")) && 0 != strncmp(p, "ANY ", strlen("ANY "))) {
         (void)write_stderr("ERROR: The value of pamameter synchronous_standby_names is incorrect.\n");
@@ -1833,7 +1845,25 @@ char* get_AZ_value(const char* value, const char* data_dir)
     // parse and check the AZName string
     nodenameList = parse_AZ_result(q, data_dir);
     if (NULL == nodenameList) {
-        goto failed;
+        // try dn
+        nodenameList = get_nodename_list_by_AZ(az1, data_dir);
+
+        vptr = strtok_r(q, delims, &vouter_ptr);
+        while (NULL != vptr) {
+            p = vptr;
+            //p like this: dn_6001, dn_6002...
+            while (isspace((unsigned char)*p))
+                p++;
+        
+            if(NULL == strstr(nodenameList, p)) {
+                goto failed;
+            }
+            vptr = strtok_r(NULL, delims, &vouter_ptr);
+        }
+
+        len = strlen(nodenameList);
+        nRet = snprintf_s(nodenameList, len + 1, len, q);
+
     } else if ('\0' == nodenameList[0]) {
         (void)write_stderr("ERROR: There is no standby node name. Please make sure the value of "
                            "synchronous_standby_names is correct.\n");
@@ -1853,7 +1883,7 @@ char* get_AZ_value(const char* value, const char* data_dir)
     len = strlen(preStr) + 5 + strlen(nodenameList);
     result = (char*)pg_malloc_zero(len * sizeof(char));
     nRet = snprintf_s(result, len, len - 1, "'%s(%s)'", preStr, nodenameList);
-    securec_check_ss_c(nRet, result, "\0");
+    securec_check_ss_c(nRet, "\0", "\0");
 
     GS_FREE(nodenameList);
     return result;
