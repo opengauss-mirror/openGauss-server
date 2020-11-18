@@ -373,10 +373,13 @@ void AtCCI_RelationMap(void)
  *
  * During abort, we just have to throw away any pending map changes.
  * Normal post-abort cleanup will take care of fixing relcache entries.
+ * Parallel worker commit/abort is handled by resetting active mappings
+ * that may have been received from the leader process.  (There should be
+ * no pending updates in parallel workers.)
  */
-void AtEOXact_RelationMap(bool isCommit)
+void AtEOXact_RelationMap(bool isCommit, bool isParallelWorker)
 {
-    if (isCommit) {
+    if (isCommit && !isParallelWorker) {
         /*
          * We should not get here with any "pending" updates.  (We could
          * logically choose to treat such as committed, but in the current
@@ -397,7 +400,10 @@ void AtEOXact_RelationMap(bool isCommit)
             u_sess->relmap_cxt.active_local_updates->num_mappings = 0;
         }
     } else {
-        /* Abort --- drop all local and pending updates */
+        /* Abort or parallel worker --- drop all local and pending updates */
+        Assert(!isParallelWorker || u_sess->relmap_cxt.pending_shared_updates->num_mappings == 0);
+        Assert(!isParallelWorker || u_sess->relmap_cxt.pending_local_updates->num_mappings == 0);
+
         u_sess->relmap_cxt.active_shared_updates->num_mappings = 0;
         u_sess->relmap_cxt.active_local_updates->num_mappings = 0;
         u_sess->relmap_cxt.pending_shared_updates->num_mappings = 0;

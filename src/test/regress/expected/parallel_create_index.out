@@ -1,0 +1,37 @@
+CREATE TABLE parallel_sort_test AS SELECT hashint8(i) randint, md5(i::text) collate "C" padding1,
+ md5(i::text || '2') collate "C" padding2 FROM generate_series(0, 200000) i;
+CHECKPOINT;
+--set parallel parameter
+set trace_sort = on;
+set client_min_messages = 'log';
+set max_parallel_maintenance_workers=2;
+LOG:  statement: set max_parallel_maintenance_workers=2;
+set min_parallel_index_scan_size=0;
+LOG:  statement: set min_parallel_index_scan_size=0;
+set min_parallel_table_scan_size=0;
+LOG:  statement: set min_parallel_table_scan_size=0;
+set maintenance_work_mem=262144;
+LOG:  statement: set maintenance_work_mem=262144;
+CREATE INDEX parallel_index ON parallel_sort_test (randint);
+LOG:  statement: CREATE INDEX parallel_index ON parallel_sort_test (randint);
+--?LOG:  begin index sort: unique = f, workMem = .*, randomAccess = f, maxMem = .*
+--?LOG:  performsort of worker 0 starting: CPU .*s/.* sec elapsed .* sec
+--?LOG:  worker 0 switching to external sort with .* tapes: CPU .*s/.* sec elapsed .* sec
+--?LOG:  worker 0 finished writing final run .* to tape .*: CPU .*s/.* sec elapsed .* sec
+--?LOG:  performsort of worker 0 done: CPU .*s/.* sec elapsed .* sec
+--?LOG:  parallel external sort of worker 0 ended, .* disk blocks used: CPU .*s/.* sec elapsed .* sec
+--?LOG:  begin index sort: unique = f, workMem = .*, randomAccess = f, maxMem = .*
+--?LOG:  performsort of worker -1 starting: CPU .*s/.* sec elapsed .* sec
+--?LOG:  Profiling LOG: Sort(.*) Begin Merge : activeTapes: .*, slotsPerTape: .*, spacePerTape: .*
+--?LOG:  performsort of worker -1 done (except .*-way final merge): CPU .*s/.* sec elapsed .* sec
+--?LOG:  parallel external sort of worker -1 ended, .* disk blocks used: CPU .*s/.* sec elapsed .* sec
+--clean up
+reset trace_sort;
+LOG:  statement: reset trace_sort;
+reset client_min_messages;
+LOG:  statement: reset client_min_messages;
+reset max_parallel_maintenance_workers;
+reset min_parallel_index_scan_size;
+reset min_parallel_table_scan_size;
+reset maintenance_work_mem;
+drop table parallel_sort_test cascade;

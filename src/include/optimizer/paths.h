@@ -20,7 +20,7 @@ extern RelOptInfo* make_one_rel(PlannerInfo* root, List* joinlist);
 extern RelOptInfo* standard_join_search(PlannerInfo* root, int levels_needed, List* initial_rels);
 
 extern void generate_gather_paths(PlannerInfo *root, RelOptInfo *rel);
-extern int compute_parallel_worker(RelOptInfo *rel, BlockNumber heap_pages, BlockNumber index_pages);
+extern int compute_parallel_worker(const RelOptInfo *rel, double heap_pages, double index_pages, int max_workers);
 
 extern void set_rel_size(PlannerInfo* root, RelOptInfo* rel, Index rti, RangeTblEntry* rte);
 

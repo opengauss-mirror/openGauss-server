@@ -74,7 +74,6 @@ struct BufFile {
      * offsets[i] is the current seek position of files[i].  We use this to
      * avoid making redundant FileSeek calls.
      */
-    bool isTemp;      /* can only add files if this is TRUE */
     bool isInterXact; /* keep open over transactions? */
     bool dirty;       /* does buffer need to be written? */
     bool readOnly;    /* has the file been set to read only? */
@@ -137,7 +136,6 @@ static BufFile *makeBufFileCommon(int nfiles)
     file->numFiles = nfiles;
     file->offsets = (off_t *)palloc(sizeof(off_t));
     file->offsets[0] = 0L;
-    file->isTemp = false;
     file->isInterXact = false;
     file->dirty = false;
     file->resowner = t_thrd.utils_cxt.CurrentResourceOwner;
@@ -179,7 +177,6 @@ static void extendBufFile(BufFile* file)
     oldowner = t_thrd.utils_cxt.CurrentResourceOwner;
     t_thrd.utils_cxt.CurrentResourceOwner = file->resowner;
 
-    Assert(file->isTemp);
     if (file->fileset == NULL) {
         pfile = OpenTemporaryFile(file->isInterXact);
     } else {
@@ -216,7 +213,6 @@ static BufFile* CreateTempBufFile(bool interXact)
     Assert(pfile >= 0);
 
     file = makeBufFile(pfile);
-    file->isTemp = true;
     file->isInterXact = interXact;
 
     return file;
@@ -395,20 +391,6 @@ void BufFileExportShared(BufFile *file)
     file->readOnly = true;
 }
 
-#ifdef NOT_USED
-/*
- * Create a BufFile and attach it to an already-opened virtual File.
- *
- * This is comparable to fdopen() in stdio.  This is the only way at present
- * to attach a BufFile to a non-temporary file.  Note that BufFiles created
- * in this way CANNOT be expanded into multiple files.
- */
-BufFile* BufFileCreate(File file)
-{
-    return makeBufFile(file);
-}
-#endif
-
 /*
  * Close a BufFile
  *
@@ -506,7 +488,7 @@ static void BufFileDumpBuffer(BufFile* file)
         /*
          * Advance to next component file if necessary and possible.
          */
-        if (file->curOffset >= MAX_PHYSICAL_FILESIZE && file->isTemp) {
+        if (file->curOffset >= MAX_PHYSICAL_FILESIZE) {
             while (file->curFile + 1 >= file->numFiles) {
                 extendBufFile(file);
             }
@@ -519,12 +501,10 @@ static void BufFileDumpBuffer(BufFile* file)
          * write as much as asked...
          */
         bytestowrite = file->nbytes - wpos;
-        if (file->isTemp) {
-            off_t availbytes = MAX_PHYSICAL_FILESIZE - file->curOffset;
+        off_t availbytes = MAX_PHYSICAL_FILESIZE - file->curOffset;
 
-            if ((off_t)bytestowrite > availbytes) {
-                bytestowrite = (int)availbytes;
-            }
+        if ((off_t)bytestowrite > availbytes) {
+            bytestowrite = (int)availbytes;
         }
 
         /*
@@ -757,19 +737,17 @@ int BufFileSeek(BufFile* file, int fileno, off_t offset, int whence)
      * At this point and no sooner, check for seek past last segment. The
      * above flush could have created a new segment, so checking sooner would
      * not work (at least not with this code).
+     * convert seek to "start of next seg" to "end of last seg"
      */
-    if (file->isTemp) {
-        /* convert seek to "start of next seg" to "end of last seg" */
-        if (new_file == file->numFiles && new_offset == 0) {
-            new_file--;
-            new_offset = MAX_PHYSICAL_FILESIZE;
+    if (new_file == file->numFiles && new_offset == 0) {
+        new_file--;
+        new_offset = MAX_PHYSICAL_FILESIZE;
+    }
+    while (new_offset > MAX_PHYSICAL_FILESIZE) {
+        if (++new_file >= file->numFiles) {
+            return EOF;
         }
-        while (new_offset > MAX_PHYSICAL_FILESIZE) {
-            if (++new_file >= file->numFiles) {
-                return EOF;
-            }
-            new_offset -= MAX_PHYSICAL_FILESIZE;
-        }
+        new_offset -= MAX_PHYSICAL_FILESIZE;
     }
     if (new_file >= file->numFiles) {
         return EOF;
@@ -821,3 +799,69 @@ long BufFileTellBlock(BufFile* file)
 }
 
 #endif
+
+/*
+ * Return the current shared BufFile size.
+ *
+ * Counts any holes left behind by BufFileAppend as part of the size.
+ * ereport()s on failure.
+ */
+int64 BufFileSize(const BufFile *file)
+{
+    Assert(file->fileset != NULL);
+
+    /* Get the size of the last physical file. */
+    int64 lastFileSize = FileSize(file->files[file->numFiles - 1]);
+    if (lastFileSize < 0) {
+        ereport(ERROR, (errcode_for_file_access(),
+            errmsg("could not determine size of temporary file \"%s\" from BufFile \"%s\": %m",
+                FilePathName(file->files[file->numFiles - 1]), file->name)));
+    }
+
+    return ((file->numFiles - 1) * (int64)MAX_PHYSICAL_FILESIZE) + lastFileSize;
+}
+
+/*
+ * Append the contents of source file (managed within shared fileset) to
+ * end of target file (managed within same shared fileset).
+ *
+ * Note that operation subsumes ownership of underlying resources from
+ * "source".  Caller should never call BufFileClose against source having
+ * called here first.  Resource owners for source and target must match,
+ * too.
+ *
+ * This operation works by manipulating lists of segment files, so the
+ * file content is always appended at a MAX_PHYSICAL_FILESIZE-aligned
+ * boundary, typically creating empty holes before the boundary.  These
+ * areas do not contain any interesting data, and cannot be read from by
+ * caller.
+ *
+ * Returns the block number within target where the contents of source
+ * begins.  Caller should apply this as an offset when working off block
+ * positions that are in terms of the original BufFile space.
+ */
+long BufFileAppend(BufFile *target, const BufFile *source)
+{
+    long startBlock = target->numFiles * BUFFILE_SEG_SIZE;
+    int newNumFiles = target->numFiles + source->numFiles;
+
+    Assert(target->fileset != NULL);
+    Assert(source->readOnly);
+    Assert(!source->dirty);
+    Assert(source->fileset != NULL);
+    Assert(newNumFiles > 0);
+
+    if (target->resowner != source->resowner) {
+        elog(ERROR, "could not append BufFile with non-matching resource owner");
+    }
+
+    target->files = (File *)repalloc(target->files, sizeof(File) * (uint32)newNumFiles);
+    target->offsets = (off_t*)repalloc(target->offsets, sizeof(off_t) * (uint32)newNumFiles);
+    for (int i = target->numFiles; i < newNumFiles; i++) {
+        target->files[i] = source->files[i - target->numFiles];
+        target->offsets[i] = source->offsets[i - target->numFiles];
+    }
+    target->numFiles = newNumFiles;
+
+    return startBlock;
+}

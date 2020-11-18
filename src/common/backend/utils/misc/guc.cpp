@@ -9324,6 +9324,22 @@ static void init_configure_names_int()
             NULL,
             NULL
         },
+        {
+            {
+                "max_parallel_maintenance_workers",
+                PGC_USERSET,
+                RESOURCES_ASYNCHRONOUS,
+                gettext_noop("Sets the maximum number of parallel processes per maintenance operation."),
+                NULL
+            },
+            &u_sess->attr.attr_sql.max_parallel_maintenance_workers,
+            2,
+            0,
+            MAX_PARALLEL_WORKER_LIMIT,
+            NULL,
+            NULL,
+            NULL
+        },
         /* End-of-list marker */
         {
             {

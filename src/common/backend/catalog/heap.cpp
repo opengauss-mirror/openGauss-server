@@ -3679,7 +3679,7 @@ static void RelationTruncateIndexes(Relation heapRelation, LOCKMODE lockmode)
 
         /* Initialize the index and rebuild */
         /* Note: we do not need to re-establish pkey setting */
-        index_build(heapRelation, NULL, currentIndex, NULL, indexInfo, false, true, INDEX_CREATE_NONE_PARTITION);
+        index_build(heapRelation, NULL, currentIndex, NULL, indexInfo, false, true, false, INDEX_CREATE_NONE_PARTITION);
 
         /* We're done with this index */
         index_close(currentIndex, NoLock);
@@ -3915,7 +3915,8 @@ void heap_truncate_one_rel(Relation rel)
                 }
 
                 p = partitionOpen(rel, indexPart->pd_part->indextblid, NoLock);
-                index_build(rel, p, currentIndex, indexPart, indexInfo, false, true, INDEX_CREATE_LOCAL_PARTITION);
+                index_build(rel, p, currentIndex, indexPart, indexInfo, false, true, false,
+                    INDEX_CREATE_LOCAL_PARTITION);
 
                 partitionClose(rel, p, NoLock);
                 partitionClose(currentIndex, indexPart, NoLock);

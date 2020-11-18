@@ -1024,7 +1024,7 @@ extern int tas_sema(volatile slock_t *lock);
 #if !defined(S_LOCK)
 #define S_LOCK(lock) do { \
     if (TAS(lock))                          \
-        s_lock((lock), __FILE__, __LINE__); \
+        (void)s_lock((lock), __FILE__, __LINE__); \
 } while (0)
 #endif /* S_LOCK */
 

@@ -1200,12 +1200,8 @@ bool IsInSameTransaction(PGPROC *proc1, PGPROC *proc2)
  * when query run as parallel mode, the parallel leader and worker thread hold differnt
  * Procs, but we treat them as one transaction.
  */
-static bool IsInSameParallelQuery(PGPROC *proc1, PGPROC *proc2)
+bool IsInSameParallelQuery(PGPROC *proc1, PGPROC *proc2)
 {
-    if (!IsInParallelMode()) {
-        return false;
-    }
-
     /* Which proc is me? */
     PGPROC *otherProc = NULL;
     if (proc1 == t_thrd.proc) {
@@ -1217,8 +1213,9 @@ static bool IsInSameParallelQuery(PGPROC *proc1, PGPROC *proc2)
     }
 
     if (ParallelWorkerAmI()) {
-        /* I'm worker, so check whether other proc is my master or not */
-        return t_thrd.msqueue_cxt.pq_mq_parallel_master_pid == otherProc->pid;
+        /* I'm worker, so check whether other proc is my master or is other worker in same parallel query */
+        return t_thrd.msqueue_cxt.pq_mq_parallel_master_pid == otherProc->pid ||
+            GetBackgroundWorkerTypeByPid(otherProc->pid) != NULL;
     } else if (ParallelLeaderAmI()) {
         /* I'm leader, so check whether other proc is a worker of mine or not */
         return GetBackgroundWorkerTypeByPid(otherProc->pid) != NULL;
@@ -1268,6 +1265,7 @@ int LockCheckConflicts(LockMethod lockMethodTable, LOCKMODE lockmode, LOCK *lock
      */
     myLocks = proclock->holdMask;
     otherLocks = 0;
+    bool parallelMode = (StreamTopConsumerAmI() || StreamThreadAmI() || ParallelWorkerAmI() || ParallelLeaderAmI());
     for (i = 1; i <= numLockModes; i++) {
         int myHolding = (myLocks & LOCKBIT_ON((unsigned int)i)) ? 1 : 0;
 
@@ -1276,7 +1274,7 @@ int LockCheckConflicts(LockMethod lockMethodTable, LOCKMODE lockmode, LOCK *lock
          * thread is in one transaction, but these threads use differnt procs.
          * We need treat these procs as one proc
          */
-        if (StreamTopConsumerAmI() || StreamThreadAmI() || ParallelWorkerAmI() || ParallelLeaderAmI()) {
+        if (parallelMode) {
             SHM_QUEUE *otherProcLocks = &(lock->procLocks);
             PROCLOCK *otherProcLock = (PROCLOCK *)SHMQueueNext(otherProcLocks, otherProcLocks,
                                                                offsetof(PROCLOCK, lockLink));
@@ -1296,11 +1294,10 @@ int LockCheckConflicts(LockMethod lockMethodTable, LOCKMODE lockmode, LOCK *lock
 
     /* find the conflicting thread and lts lock mode. */
     conflictLocks = 0;
-    bool streamingMode = (StreamTopConsumerAmI() || StreamThreadAmI());
     SHM_QUEUE *otherProcLocks = &(lock->procLocks);
     PROCLOCK *otherProcLock = (PROCLOCK *)SHMQueueNext(otherProcLocks, otherProcLocks, offsetof(PROCLOCK, lockLink));
     while (otherProcLock != NULL) {
-        if (!streamingMode && otherProcLock->tag.myProc->pid != proc->pid) {
+        if (!parallelMode && otherProcLock->tag.myProc->pid != proc->pid) {
             conflictLocks = (lockMethodTable->conflictTab[lockmode] & otherProcLock->holdMask);
 
             if (conflictLocks) {

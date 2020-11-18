@@ -1245,8 +1245,8 @@ void init_gtt_storage(CmdType operation, ResultRelInfo* resultRelInfo)
         IndexInfo* info = resultRelInfo->ri_IndexRelationInfo[i];
         Assert(index->rd_index->indisvalid);
         Assert(index->rd_index->indisready);
-        index_build(
-            relation, NULL, index, NULL, info, index->rd_index->indisprimary, false, INDEX_CREATE_NONE_PARTITION);
+        index_build(relation, NULL, index, NULL, info, index->rd_index->indisprimary, false, false,
+            INDEX_CREATE_NONE_PARTITION);
     }
 
     toastrelid = relation->rd_rel->reltoastrelid;
@@ -1272,6 +1272,7 @@ void init_gtt_storage(CmdType operation, ResultRelInfo* resultRelInfo)
                 NULL,
                 indexInfo,
                 currentIndex->rd_index->indisprimary,
+                false,
                 false,
                 INDEX_CREATE_NONE_PARTITION);
             index_close(currentIndex, NoLock);

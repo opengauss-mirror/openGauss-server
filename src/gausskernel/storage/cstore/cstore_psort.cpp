@@ -104,6 +104,7 @@ CStorePSort::CStorePSort(Relation rel, AttrNumber* sortKeys, int keyNum, int typ
             m_sortCollations,
             m_nullsFirst,
             sortMem,
+            NULL,
             false,
             canSpreadmaxMem);
 
@@ -359,6 +360,7 @@ void CStorePSort::ResetTupleSortState(bool endFlag)
             m_sortCollations,
             m_nullsFirst,
             sortMem,
+            NULL,
             false,
             canSpreadMaxMem);
 

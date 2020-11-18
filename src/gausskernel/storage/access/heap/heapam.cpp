@@ -1902,8 +1902,15 @@ void heap_parallelscan_initialize(ParallelHeapScanDesc target, Size pscan_len, R
     target->phs_startblock = InvalidBlockNumber;
     target->pscan_len = pscan_len;
     pg_atomic_write_u64(&target->phs_nallocated, 0);
-    SerializeSnapshot(snapshot, target->phs_snapshot_data,
-        pscan_len - offsetof(ParallelHeapScanDescData, phs_snapshot_data));
+
+    if (IsMVCCSnapshot(snapshot)) {
+        SerializeSnapshot(snapshot, target->phs_snapshot_data,
+            pscan_len - offsetof(ParallelHeapScanDescData, phs_snapshot_data));
+        target->phs_snapshot_any = false;
+    } else {
+        Assert(snapshot == SnapshotAny);
+        target->phs_snapshot_any = true;
+    }
 }
 
 /* ----------------
@@ -1915,11 +1922,20 @@ void heap_parallelscan_initialize(ParallelHeapScanDesc target, Size pscan_len, R
 HeapScanDesc heap_beginscan_parallel(Relation relation, ParallelHeapScanDesc parallel_scan)
 {
     Assert(RelationGetRelid(relation) == parallel_scan->phs_relid);
-    Snapshot snapshot = RestoreSnapshot(parallel_scan->phs_snapshot_data,
-        parallel_scan->pscan_len - offsetof(ParallelHeapScanDescData, phs_snapshot_data));
-    RegisterSnapshot(snapshot);
 
-    uint32 flag = SO_ALLOW_STRAT | SO_ALLOW_SYNC | SO_TEMP_SNAPSHOT;
+    Snapshot snapshot = NULL;
+    uint32 flag = SO_ALLOW_STRAT | SO_ALLOW_SYNC;
+    if (!parallel_scan->phs_snapshot_any) {
+        /* Snapshot was serialized -- restore it */
+        snapshot = RestoreSnapshot(parallel_scan->phs_snapshot_data,
+            parallel_scan->pscan_len - offsetof(ParallelHeapScanDescData, phs_snapshot_data));
+        RegisterSnapshot(snapshot);
+        flag |= SO_TEMP_SNAPSHOT;
+    } else {
+        /* SnapshotAny passed by caller (not serialized) */
+        snapshot = SnapshotAny;
+    }
+
     return heap_beginscan_internal(relation, snapshot, 0, NULL, parallel_scan, flag);
 }
 

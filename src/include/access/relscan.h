@@ -33,12 +33,13 @@
 typedef struct ParallelHeapScanDescData {
     int plan_node_id;                /* used to identify speicific plan */
     Oid phs_relid;                   /* OID of relation to scan */
-    bool phs_syncscan;               /* report location to syncscan logic? */
     BlockNumber phs_nblocks;         /* # blocks in relation at start of scan */
     slock_t phs_mutex;               /* mutual exclusion for setting startblock */
     BlockNumber phs_startblock;      /* starting block number */
-    pg_atomic_uint64 phs_nallocated; /* number of blocks allocated to workers so far. */
     uint32 pscan_len;                /* total size of this struct, including phs_snapshot_data */
+    pg_atomic_uint64 phs_nallocated; /* number of blocks allocated to workers so far. */
+    bool phs_syncscan;               /* report location to syncscan logic? */
+    bool phs_snapshot_any;           /* SnapshotAny, not phs_snapshot_data? */
     char phs_snapshot_data[FLEXIBLE_ARRAY_MEMBER];
 } ParallelHeapScanDescData;
 

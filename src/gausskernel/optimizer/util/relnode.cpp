@@ -558,6 +558,7 @@ RelOptInfo* build_join_rel(PlannerInfo* root, Relids joinrelids, RelOptInfo* out
     joinrel->encodedwidth = 0;
     joinrel->encodednum = 0;
     joinrel->reltargetlist = NIL;
+    joinrel->rel_parallel_workers = -1;
     joinrel->pathlist = NIL;
     joinrel->ppilist = NIL;
     joinrel->partial_pathlist = NIL;

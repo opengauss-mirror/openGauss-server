@@ -41,6 +41,7 @@
 #include "utils/memutils.h"
 #include "utils/relmapper.h"
 #include "utils/snapmgr.h"
+#include "utils/tqual.h"
 #include "utils/typcache.h"
 #ifdef __USE_NUMA
 #include <numa.h>
@@ -65,6 +66,9 @@ static const struct {
 }   InternalParallelWorkers[] = {
     {
         "ParallelQueryMain", ParallelQueryMain
+    },
+    {
+        "_bt_parallel_build_main", _bt_parallel_build_main
     }
 };
 
@@ -177,11 +181,13 @@ void InitializeParallelDSM(ParallelContext *pcxt, const void *snap)
         SerializeSnapshot(active_snapshot, cxt->pwCtx->asnapspace, asnaplen);
 
         /* Save transaction snapshot */
-        cxt->pwCtx->xmin = ((Snapshot)snap)->xmin;
-        cxt->pwCtx->xmax = ((Snapshot)snap)->xmax;
-        cxt->pwCtx->timeline = ((Snapshot)snap)->timeline;
-        cxt->pwCtx->snapshotcsn  = ((Snapshot)snap)->snapshotcsn;
-        cxt->pwCtx->curcid  = ((Snapshot)snap)->curcid;
+        if (snap != SnapshotAny) {
+            cxt->pwCtx->xmin = ((Snapshot)snap)->xmin;
+            cxt->pwCtx->xmax = ((Snapshot)snap)->xmax;
+            cxt->pwCtx->timeline = ((Snapshot)snap)->timeline;
+            cxt->pwCtx->snapshotcsn  = ((Snapshot)snap)->snapshotcsn;
+            cxt->pwCtx->curcid  = ((Snapshot)snap)->curcid;
+        }
 
         Size searchPathLen = strlen(u_sess->attr.attr_common.namespace_search_path);
         cxt->pwCtx->namespace_search_path = (char *)palloc(searchPathLen + 1);
@@ -191,6 +197,11 @@ void InitializeParallelDSM(ParallelContext *pcxt, const void *snap)
 
         /* Serialize transaction state. */
         SerializeTransactionState(cxt->pwCtx);
+
+        /* Serialize reindex state. */
+        cxt->pwCtx->currentlyReindexedHeap = u_sess->catalog_cxt.currentlyReindexedHeap;
+        cxt->pwCtx->currentlyReindexedIndex = u_sess->catalog_cxt.currentlyReindexedIndex;
+        cxt->pwCtx->pendingReindexedIndexes = u_sess->catalog_cxt.pendingReindexedIndexes;
 
         /* Serialize relmapper state. */
         cxt->pwCtx->active_shared_updates = u_sess->relmap_cxt.active_shared_updates;
@@ -1039,9 +1050,21 @@ void ParallelWorkerMain(Datum main_arg)
     /* Restore temp-namespace state to ensure search path matches leader's. */
     SetTempNamespaceState(ctx->pwCtx->temp_namespace_id, ctx->pwCtx->temp_toast_namespace_id);
 
+    /* Restore reindex state. */
+    u_sess->catalog_cxt.currentlyReindexedHeap = ctx->pwCtx->currentlyReindexedHeap;
+    u_sess->catalog_cxt.currentlyReindexedIndex = ctx->pwCtx->currentlyReindexedIndex;
+    Assert(u_sess->catalog_cxt.pendingReindexedIndexes == NIL);
+    MemoryContext oldcontext = MemoryContextSwitchTo(TopMemoryContext);
+    u_sess->catalog_cxt.pendingReindexedIndexes = list_copy(ctx->pwCtx->pendingReindexedIndexes);
+    (void)MemoryContextSwitchTo(oldcontext);
+
     /* Restore relmapper state. */
-    u_sess->relmap_cxt.active_shared_updates = ctx->pwCtx->active_shared_updates;
-    u_sess->relmap_cxt.active_local_updates = ctx->pwCtx->active_local_updates;
+    rc = memcpy_s(u_sess->relmap_cxt.active_shared_updates, sizeof(RelMapFile),
+        ctx->pwCtx->active_shared_updates, sizeof(RelMapFile));
+    securec_check(rc, "", "");
+    rc = memcpy_s(u_sess->relmap_cxt.active_local_updates, sizeof(RelMapFile),
+        ctx->pwCtx->active_local_updates, sizeof(RelMapFile));
+    securec_check(rc, "", "");
 
     /*
      * We've initialized all of our state now; nothing should change

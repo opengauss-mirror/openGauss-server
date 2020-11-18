@@ -1199,8 +1199,8 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count, bool part
          * sequential as for parallel scans the pages are accessed in random
          * order.
          */
-        path->path.parallel_workers =
-            compute_parallel_worker(baserel, (BlockNumber)rand_heap_pages, (BlockNumber)index_pages);
+        path->path.parallel_workers = compute_parallel_worker(baserel, rand_heap_pages,
+            index_pages, u_sess->attr.attr_sql.max_parallel_workers_per_gather);
 
         /*
          * Fall out if workers can't be assigned for parallel scan, because in

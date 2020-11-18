@@ -763,9 +763,8 @@ static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry
  */
 static void create_plain_partial_paths(PlannerInfo* root, RelOptInfo* rel)
 {
-    int parallel_workers = 0;
-
-    parallel_workers = compute_parallel_worker(rel, rel->pages, 0);
+    int parallel_workers =
+        compute_parallel_worker(rel, rel->pages, -1, u_sess->attr.attr_sql.max_parallel_workers_per_gather);
 
     if (parallel_workers <= 0) {
         return;
@@ -3382,16 +3381,20 @@ bool is_single_baseresult_plan(Plan* plan)
  * be scanned and the size of the index to be scanned, then choose a minimum
  * of those.
  *
- * "heap_pages" is the number of pages from the table that we expect to scan.
- * "index_pages" is the number of pages from the index that we expect to scan.
+ * "heap_pages" is the number of pages from the table that we expect to scan, or
+ * -1 if we don't expect to scan any.
+ *
+ * "index_pages" is the number of pages from the index that we expect to scan, or
+ * -1 if we don't expect to scan any.
+ *
+ * "max_workers" is caller's limit on the number of workers.  This typically
+ * comes from a GUC.
  */
-int compute_parallel_worker(RelOptInfo *rel, BlockNumber heap_pages, BlockNumber index_pages)
+int compute_parallel_worker(const RelOptInfo *rel, double heap_pages, double index_pages, int max_workers)
 {
     int min_parallel_table_scan_size = u_sess->attr.attr_sql.min_parallel_table_scan_size;
     int min_parallel_index_scan_size = u_sess->attr.attr_sql.min_parallel_index_scan_size;
     int parallel_workers = 0;
-    int heap_parallel_workers = 1;
-    int index_parallel_workers = 1;
 
     /*
      * If the user has set the parallel_workers reloption, use that; otherwise
@@ -3400,22 +3403,23 @@ int compute_parallel_worker(RelOptInfo *rel, BlockNumber heap_pages, BlockNumber
     if (rel->rel_parallel_workers != -1) {
         parallel_workers = rel->rel_parallel_workers;
     } else {
-        int heap_parallel_threshold;
-        int index_parallel_threshold;
-
         /*
-         * If this relation is too small to be worth a parallel scan, just
-         * return without doing anything ... unless it's an inheritance child.
-         * In that case, we want to generate a parallel path here anyway.  It
-         * might not be worthwhile just for this relation, but when combined
-         * with all of its inheritance siblings it may well pay off.
+         * If the number of pages being scanned is insufficient to justify a
+         * parallel scan, just return zero ... unless it's an inheritance
+         * child. In that case, we want to generate a parallel path here
+         * anyway.  It might not be worthwhile just for this relation, but
+         * when combined with all of its inheritance siblings it may well pay
+         * off.
          */
-        if (heap_pages < (BlockNumber)min_parallel_table_scan_size &&
-            index_pages < (BlockNumber)min_parallel_index_scan_size && rel->reloptkind == RELOPT_BASEREL) {
+        if (rel->reloptkind == RELOPT_BASEREL &&
+            ((heap_pages >= 0 && heap_pages < min_parallel_table_scan_size) ||
+            (index_pages >= 0 && index_pages < min_parallel_index_scan_size))) {
             return 0;
         }
 
-        if (heap_pages > 0) {
+        if (heap_pages >= 0) {
+            int heap_parallel_workers = 1;
+
             /*
              * Select the number of workers based on the log of the size of
              * the relation.  This probably needs to be a good deal more
@@ -3423,7 +3427,7 @@ int compute_parallel_worker(RelOptInfo *rel, BlockNumber heap_pages, BlockNumber
              * the upper limit of the min_parallel_table_scan_size GUC is
              * chosen to prevent overflow here.
              */
-            heap_parallel_threshold = Max(min_parallel_table_scan_size, 1);
+            int heap_parallel_threshold = Max(min_parallel_table_scan_size, 1);
             while (heap_pages >= (BlockNumber)(heap_parallel_threshold * 3)) {
                 heap_parallel_workers++;
                 heap_parallel_threshold *= 3;
@@ -3435,9 +3439,11 @@ int compute_parallel_worker(RelOptInfo *rel, BlockNumber heap_pages, BlockNumber
             parallel_workers = heap_parallel_workers;
         }
 
-        if (index_pages > 0) {
+        if (index_pages >= 0) {
+            int index_parallel_workers = 1;
+
             /* same calculation as for heap_pages above */
-            index_parallel_threshold = Max(min_parallel_index_scan_size, 1);
+            int index_parallel_threshold = Max(min_parallel_index_scan_size, 1);
             while (index_pages >= (BlockNumber)(index_parallel_threshold * 3)) {
                 index_parallel_workers++;
                 index_parallel_threshold *= 3;
@@ -3454,13 +3460,10 @@ int compute_parallel_worker(RelOptInfo *rel, BlockNumber heap_pages, BlockNumber
         }
     }
 
-    /*
-     * In no case use more than max_parallel_workers_per_gather workers.
-     */
-    parallel_workers = Min(parallel_workers, u_sess->attr.attr_sql.max_parallel_workers_per_gather);
-
-    return parallel_workers;
+    /* In no case use more than caller supplied maximum number of workers */
+    return Min(parallel_workers, max_workers);
 }
+
 
 /*****************************************************************************
  *			DEBUG SUPPORT

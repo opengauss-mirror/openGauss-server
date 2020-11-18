@@ -88,7 +88,7 @@ Datum hashbuild(PG_FUNCTION_ARGS)
     buildstate.indtuples = 0;
 
     /* do the heap scan */
-    reltuples = IndexBuildHeapScan(heap, index, indexInfo, true, hashbuildCallback, (void*)&buildstate);
+    reltuples = IndexBuildHeapScan(heap, index, indexInfo, true, hashbuildCallback, (void*)&buildstate, NULL);
 
     if (buildstate.spool != NULL) {
         /* sort the tuples and insert them into the index */

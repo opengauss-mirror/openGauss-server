@@ -2344,6 +2344,7 @@ bool SortFusion::execute(long max_rows, char *completionTag)
                 sortnode->collations,
                 sortnode->nullsFirst,
                 sortMem,
+                NULL,
                 false,
                 maxMem,
                 sortnode->plan.plan_node_id,

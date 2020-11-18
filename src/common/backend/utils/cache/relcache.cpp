@@ -3859,7 +3859,7 @@ void DescTableSetNewRelfilenode(Oid relid, TransactionId freezeXid, bool partiti
         /* Note: we do not need to re-establish pkey setting */
         /* Fetch info needed for index_build */
         IndexInfo* index_info = BuildIndexInfo(current_index);
-        index_build(cudesc_rel, NULL, current_index, NULL, index_info, false, true, INDEX_CREATE_NONE_PARTITION);
+        index_build(cudesc_rel, NULL, current_index, NULL, index_info, false, true, false, INDEX_CREATE_NONE_PARTITION);
         index_close(current_index, NoLock);
     }
 

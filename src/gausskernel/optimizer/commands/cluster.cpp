@@ -1551,7 +1551,7 @@ static double copy_heap_data_internal(Relation OldHeap, Relation OldIndex, Relat
     if (use_sort) {
         int workMem = (memUsage->work_mem > 0) ? memUsage->work_mem : u_sess->attr.attr_memory.maintenance_work_mem;
         int maxMem = memUsage->max_mem;
-        tuplesort = tuplesort_begin_cluster(oldTupDesc, OldIndex, workMem, false, maxMem);
+        tuplesort = tuplesort_begin_cluster(oldTupDesc, OldIndex, workMem, NULL, false, maxMem);
     } else {
         tuplesort = NULL;
     }

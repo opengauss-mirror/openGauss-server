@@ -126,7 +126,7 @@ Datum spgbuild(PG_FUNCTION_ARGS)
         ALLOCSET_DEFAULT_INITSIZE,
         ALLOCSET_DEFAULT_MAXSIZE);
 
-    reltuples = IndexBuildHeapScan(heap, index, indexInfo, true, spgistBuildCallback, (void*)&buildstate);
+    reltuples = IndexBuildHeapScan(heap, index, indexInfo, true, spgistBuildCallback, (void*)&buildstate, NULL);
 
     MemoryContextDelete(buildstate.tmpCtx);
 

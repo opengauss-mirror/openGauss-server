@@ -376,6 +376,10 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
      * mode, this will typically require the caller to have already locked
      * the relation.  To avoid lock upgrade hazards, that lock should be at
      * least as strong as the one we take here.
+     *
+     * NB: If the lock strength here ever changes, code that is run by
+     * parallel workers under the control of certain particular ambuild
+     * functions will need to be updated, too.
      */
     lockmode = concurrent ? ShareUpdateExclusiveLock : ShareLock;
     rel = heap_open(relationId, lockmode);
@@ -754,6 +758,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     indexInfo->ii_ReadyForInserts = !concurrent;
     indexInfo->ii_Concurrent = concurrent;
     indexInfo->ii_BrokenHotChain = false;
+    indexInfo->ii_ParallelWorkers = 0;
     indexInfo->ii_PgClassAttrId = 0;
 
     typeObjectId = (Oid*)palloc(numberOfAttributes * sizeof(Oid));
@@ -1196,7 +1201,7 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
     indexInfo->ii_BrokenHotChain = false;
 
     /* Now build the index */
-    index_build(rel, NULL, indexRelation, NULL, indexInfo, stmt->primary, false, INDEX_CREATE_NONE_PARTITION);
+    index_build(rel, NULL, indexRelation, NULL, indexInfo, stmt->primary, false, true, INDEX_CREATE_NONE_PARTITION);
 
     /* Close both the relations, but keep the locks */
     heap_close(rel, NoLock);

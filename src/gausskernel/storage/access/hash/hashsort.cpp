@@ -68,7 +68,7 @@ HSpool* _h_spoolinit(Relation index, uint32 num_buckets, void* meminfo)
      * speed index creation.  This should be OK since a single backend can't
      * run multiple index creations in parallel.
      */
-    hspool->sortstate = tuplesort_begin_index_hash(index, hash_mask, work_mem, false, max_mem);
+    hspool->sortstate = tuplesort_begin_index_hash(index, hash_mask, work_mem, NULL, false, max_mem);
 
     return hspool;
 }

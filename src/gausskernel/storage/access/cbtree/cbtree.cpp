@@ -88,7 +88,7 @@ Datum cbtreebuild(PG_FUNCTION_ARGS)
     buildstate.spool = NULL;
     buildstate.spool2 = NULL;
     buildstate.indtuples = 0;
-    buildstate.spool = _bt_spoolinit(indexRel, indexInfo->ii_Unique, false, &indexInfo->ii_desc);
+    buildstate.spool = _bt_spoolinit(heapRel, indexRel, indexInfo->ii_Unique, false, &indexInfo->ii_desc);
 
     /* 3. scan heap table and insert tuple into btree */
     if (RelationIsDfsStore(heapRel)) {

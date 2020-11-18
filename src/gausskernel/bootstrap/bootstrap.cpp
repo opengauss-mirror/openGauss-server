@@ -977,8 +977,8 @@ void build_indices(void)
         /* need not bother with locks during bootstrap */
         heap = heap_open(t_thrd.bootstrap_cxt.ILHead->il_heap, NoLock);
         ind = index_open(t_thrd.bootstrap_cxt.ILHead->il_ind, NoLock);
-        index_build(
-            heap, NULL, ind, NULL, t_thrd.bootstrap_cxt.ILHead->il_info, false, false, INDEX_CREATE_NONE_PARTITION);
+        index_build(heap, NULL, ind, NULL, t_thrd.bootstrap_cxt.ILHead->il_info,
+            false, false, false, INDEX_CREATE_NONE_PARTITION);
 
         index_close(ind, NoLock);
         heap_close(heap, NoLock);

@@ -2779,7 +2779,7 @@ static void CommitTransaction(bool stpCommit)
     HOLD_INTERRUPTS();
 
     /* Commit updates to the relation map --- do this as late as possible */
-    AtEOXact_RelationMap(true);
+    AtEOXact_RelationMap(true, is_parallel_worker);
 
     /*
      * set the current transaction state information appropriately during
@@ -3899,7 +3899,7 @@ static void AbortTransaction(bool PerfectRollback, bool stpRollback)
     AtAbort_Portals(stpRollback);
     AtEOXact_LargeObject(false);
     AtAbort_Notify();
-    AtEOXact_RelationMap(false);
+    AtEOXact_RelationMap(false, is_parallel_worker);
     AtAbort_Twophase();
 #ifdef ENABLE_MULTIPLE_NODES
     rollback_searchlet();
