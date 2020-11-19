@@ -79,7 +79,6 @@ THR_LOCAL bool PTFastQueryShippingStore = true;
 THR_LOCAL bool IsExplainPlanStmt = false;
 THR_LOCAL bool IsExplainPlanSelectForUpdateStmt = false;
 
-template void PlanTable::set_plan_name<true, true>();
 extern TrackDesc trackdesc[];
 extern sortMessage sortmessage[];
 
