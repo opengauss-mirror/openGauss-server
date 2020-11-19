@@ -229,6 +229,48 @@ select count(b) from parallel_t2 where a < 5000;
   4999
 (1 row)
 
+--normal plan for index only scan
+explain (costs off) select count(*) from parallel_t2;
+                    QUERY PLAN                     
+---------------------------------------------------
+ Aggregate
+   ->  Index Only Scan using t2_idx on parallel_t2
+(2 rows)
+
+explain (costs off) select count(*) from parallel_t2 where a > 5000;
+                    QUERY PLAN                     
+---------------------------------------------------
+ Aggregate
+   ->  Index Only Scan using t2_idx on parallel_t2
+         Index Cond: (a > 5000)
+(3 rows)
+
+explain (costs off) select count(*) from parallel_t2 where a < 5000;
+                    QUERY PLAN                     
+---------------------------------------------------
+ Aggregate
+   ->  Index Only Scan using t2_idx on parallel_t2
+         Index Cond: (a < 5000)
+(3 rows)
+
+select count(*) from parallel_t2;
+ count  
+--------
+ 100000
+(1 row)
+
+select count(*) from parallel_t2 where a > 5000;
+ count 
+-------
+ 95000
+(1 row)
+
+select count(*) from parallel_t2 where a < 5000;
+ count 
+-------
+  4999
+(1 row)
+
 --set parallel parameter
 set force_parallel_mode=on;
 set parallel_setup_cost=0;
@@ -243,7 +285,7 @@ explain (costs off) select count(b) from parallel_t2 where a > 5000;
 -------------------------------------------------------------
  Aggregate
    ->  Gather
-         Number of Workers: 1
+         Number of Workers: 2
          ->  Parallel Index Scan using t2_idx on parallel_t2
                Index Cond: (a > 5000)
 (5 rows)
@@ -253,7 +295,7 @@ explain (costs off) select count(b) from parallel_t2 where a < 5000;
 -------------------------------------------------------------
  Aggregate
    ->  Gather
-         Number of Workers: 1
+         Number of Workers: 2
          ->  Parallel Index Scan using t2_idx on parallel_t2
                Index Cond: (a < 5000)
 (5 rows)
@@ -265,6 +307,54 @@ select count(b) from parallel_t2 where a > 5000;
 (1 row)
 
 select count(b) from parallel_t2 where a < 5000;
+ count 
+-------
+  4999
+(1 row)
+
+--parallel plan for index only scan
+explain (costs off) select count(a) from parallel_t2;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Aggregate
+   ->  Gather
+         Number of Workers: 2
+         ->  Parallel Index Only Scan using t2_idx on parallel_t2
+(4 rows)
+
+explain (costs off) select count(a) from parallel_t2 where a > 5000;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Aggregate
+   ->  Gather
+         Number of Workers: 2
+         ->  Parallel Index Only Scan using t2_idx on parallel_t2
+               Index Cond: (a > 5000)
+(5 rows)
+
+explain (costs off) select count(a) from parallel_t2 where a < 5000;
+                            QUERY PLAN                            
+------------------------------------------------------------------
+ Aggregate
+   ->  Gather
+         Number of Workers: 2
+         ->  Parallel Index Only Scan using t2_idx on parallel_t2
+               Index Cond: (a < 5000)
+(5 rows)
+
+select count(a) from parallel_t2;
+ count  
+--------
+ 100000
+(1 row)
+
+select count(a) from parallel_t2 where a > 5000;
+ count 
+-------
+ 95000
+(1 row)
+
+select count(a) from parallel_t2 where a < 5000;
  count 
 -------
   4999

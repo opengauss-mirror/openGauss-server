@@ -96,7 +96,8 @@ typedef struct PlannedStmt {
 
     Node* utilityStmt; /* non-null if this is DECLARE CURSOR */
 
-    List* subplans; /* Plan trees for SubPlan expressions */
+    List* subplans; /* Plan trees for SubPlan expressions; note
+                     * that some could be NULL */
 
     Bitmapset* rewindPlanIDs; /* indices of subplans that require REWIND */
 

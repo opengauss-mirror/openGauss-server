@@ -1650,6 +1650,8 @@ typedef struct IndexScanState {
  *		ScanDesc		   index scan descriptor
  *		VMBuffer		   buffer in use for visibility map testing, if any
  *		HeapFetches		   number of tuples we were forced to fetch from heap
+
+ *		ioss_PscanLen	   Size of parallel index-only scan descriptor
  * ----------------
  */
 typedef struct IndexOnlyScanState {
@@ -1670,6 +1672,8 @@ typedef struct IndexOnlyScanState {
     List* ioss_IndexPartitionList;
     LOCKMODE lockMode;
     Relation ioss_CurrentIndexPartition;
+
+    Size ioss_PscanLen;
 } IndexOnlyScanState;
 
 /* ----------------

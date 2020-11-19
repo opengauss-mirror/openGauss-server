@@ -15,6 +15,7 @@
 #define NODEINDEXONLYSCAN_H
 
 #include "nodes/execnodes.h"
+#include "access/parallel.h"
 
 extern IndexOnlyScanState* ExecInitIndexOnlyScan(IndexOnlyScan* node, EState* estate, int eflags);
 extern TupleTableSlot* ExecIndexOnlyScan(IndexOnlyScanState* node);
@@ -23,4 +24,9 @@ extern void ExecIndexOnlyMarkPos(IndexOnlyScanState* node);
 extern void ExecIndexOnlyRestrPos(IndexOnlyScanState* node);
 extern void ExecReScanIndexOnlyScan(IndexOnlyScanState* node);
 extern void StoreIndexTuple(TupleTableSlot* slot, IndexTuple itup, TupleDesc itupdesc);
+
+/* Support functions for parallel index-only scans */
+extern void ExecIndexOnlyScanEstimate(IndexOnlyScanState *node, ParallelContext *pcxt);
+extern void ExecIndexOnlyScanInitializeDSM(IndexOnlyScanState *node, ParallelContext *pcxt, int nodeid);
+extern void ExecIndexOnlyScanInitializeWorker(IndexOnlyScanState *node, void *context);
 #endif /* NODEINDEXONLYSCAN_H */
