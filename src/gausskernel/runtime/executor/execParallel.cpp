@@ -489,12 +489,6 @@ void ExecParallelFinish(ParallelExecutorInfo *pei)
     for (i = 0; i < nworkers; ++i) {
         InstrAccumParallelQuery(&pei->buffer_usage[i]);
     }
-
-    /* Finally, accumulate instrumentation, if any. */
-    if (pei->instrumentation) {
-        (void)ExecParallelRetrieveInstrumentation(pei->planstate, pei->instrumentation);
-    }
-
     pei->finished = true;
 }
 
@@ -506,6 +500,11 @@ void ExecParallelFinish(ParallelExecutorInfo *pei)
  */
 void ExecParallelCleanup(ParallelExecutorInfo *pei)
 {
+    /* Finally, accumulate instrumentation, if any. */
+    if (pei->instrumentation) {
+        (void)ExecParallelRetrieveInstrumentation(pei->planstate, pei->instrumentation);
+    }
+
     if (pei->pcxt != NULL) {
         DestroyParallelContext(pei->pcxt);
         pei->pcxt = NULL;
