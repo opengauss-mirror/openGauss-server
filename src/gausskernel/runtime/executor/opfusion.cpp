@@ -776,6 +776,14 @@ void OpFusion::bindClearPosition()
     MemoryContextReset(m_tmpContext);
 }
 
+void OpFusion::clearForCplan(OpFusion* opfusion, CachedPlanSource* psrc)
+{
+    if (opfusion == NULL)
+        return;
+    if (psrc->cplan != NULL)
+        tearDown(opfusion);
+}
+
 SelectFusion::SelectFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree_list, ParamListInfo params)
     : OpFusion(context, psrc, plantree_list)
 {

@@ -22,11 +22,10 @@ explain (costs off, verbose on) execute s (1,1);
 explain (costs off, verbose on) execute i (6,6,6);
          QUERY PLAN         
 ----------------------------
- [Bypass]
  Insert on public.t1_xc_fqs
    ->  Result
          Output: 6, 6, 6
-(4 rows)
+(3 rows)
 
 explain (costs off, verbose on) execute u (2,2);
                           QUERY PLAN                           
@@ -189,11 +188,10 @@ explain (costs off, verbose on) execute s (1);
 explain (costs off, verbose on) execute i (6);
          QUERY PLAN         
 ----------------------------
- [Bypass]
  Insert on public.t1_xc_fqs
    ->  Result
          Output: 6, 2, 3
-(4 rows)
+(3 rows)
 
 explain (costs off, verbose on) execute u (2);
                           QUERY PLAN                           
@@ -2558,11 +2556,10 @@ explain (costs off, verbose on) execute s (1);
 explain (costs off, verbose on) execute i (6);
          QUERY PLAN         
 ----------------------------
- [Bypass]
  Insert on public.t1_xc_fqs
    ->  Result
          Output: 6, 2, 3
-(4 rows)
+(3 rows)
 
 explain (costs off, verbose on) execute u (2);
                           QUERY PLAN                           

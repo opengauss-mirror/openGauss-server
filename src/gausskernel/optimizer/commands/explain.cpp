@@ -610,6 +610,7 @@ static void ExplainOneQuery(
     }
 
     u_sess->exec_cxt.remotequery_list = NIL;
+    es->is_explain_gplan = false;
     /* planner will not cope with utility statements */
     if (query->commandType == CMD_UTILITY) {
         if (IsA(query->utilityStmt, CreateTableAsStmt)) {
@@ -1054,6 +1055,8 @@ void ExplainOnePlan(
     if (IS_PGXC_DATANODE && u_sess->attr.attr_sql.enable_opfusion == true &&
         es->format == EXPLAIN_FORMAT_TEXT) {
         FusionType type = OpFusion::getFusionType(NULL, NULL, list_make1(queryDesc->plannedstmt));
+        if (!es->is_explain_gplan)
+            type = NOBYPASS_NO_CPLAN;
         if (type < BYPASS_OK && type > NONE_FUSION) {
             appendStringInfo(es->str, "[Bypass]\n");
         } else if (u_sess->attr.attr_sql.opfusion_debug_mode == BYPASS_LOG) {
