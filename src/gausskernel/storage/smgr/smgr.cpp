@@ -50,7 +50,7 @@ typedef struct f_smgr {
     void (*smgr_extend)(
         SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const char* buffer, bool skipFsync);
     void (*smgr_prefetch)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum);
-    void (*smgr_read)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char* buffer);
+    bool (*smgr_read)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char* buffer);
     void (*smgr_write)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, const char* buffer, bool skipFsync);
     void (*smgr_writeback)(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, BlockNumber nblocks);
     BlockNumber (*smgr_nblocks)(SMgrRelation reln, ForkNumber forknum);
@@ -560,9 +560,9 @@ void smgrasyncwrite(SMgrRelation reln, ForkNumber forknum, AioDispatchDesc_t** d
  * instantiate pages in the shared buffer cache.  All storage managers
  * return pages in the format that POSTGRES expects.
  */
-void smgrread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char* buffer)
+bool smgrread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char* buffer)
 {
-    (*(g_smgrsw[reln->smgr_which].smgr_read))(reln, forknum, blocknum, buffer);
+    return (*(g_smgrsw[reln->smgr_which].smgr_read))(reln, forknum, blocknum, buffer);
 }
 
 /*
