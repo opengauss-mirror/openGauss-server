@@ -237,10 +237,9 @@ analyze gtt3;
 explain (COSTS FALSE) select * from gtt3 where a =300;
              QUERY PLAN             
 ------------------------------------
- [Bypass]
  Index Scan using gtt3_pkey on gtt3
    Index Cond: (a = 300)
-(3 rows)
+(2 rows)
 
 insert into gtt_t_kenyon select generate_series(1,2000),repeat('kenyon here'||'^_^',2),repeat('^_^ Kenyon is not God',500);
 insert into gtt_t_kenyon select generate_series(1,2),repeat('kenyon here'||'^_^',2),repeat('^_^ Kenyon is not God,Remark here!!',2000);

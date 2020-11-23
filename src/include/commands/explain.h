@@ -456,6 +456,7 @@ typedef struct ExplainState {
     int* wlm_statistics_plan_max_digit; /* print plan for wlm statistics */
     char* statement_id;                 /* statement_id for EXPLAIN PLAN */
     char* opt_model_name;
+    bool is_explain_gplan;
 } ExplainState;
 
 extern void ExplainQuery(

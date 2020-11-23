@@ -216,6 +216,8 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
         paramLI = EvaluateParams(entry, stmt->params, queryString, estate);
     }
 
+    OpFusion::clearForCplan((OpFusion*)psrc->opFusionObj, psrc);
+
     if (psrc->opFusionObj != NULL) {
         ((OpFusion*)psrc->opFusionObj)->setPreparedDestReceiver(dest);
         ((OpFusion*)psrc->opFusionObj)->useOuterParameter(paramLI);
@@ -275,7 +277,7 @@ void ExecuteQuery(ExecuteStmt* stmt, IntoClause* intoClause, const char* querySt
         count = FETCH_ALL;
     }
 
-    if (IS_PGXC_DATANODE && psrc->is_checked_opfusion == false) {
+    if (IS_PGXC_DATANODE && psrc->cplan == NULL && psrc->is_checked_opfusion == false) {
         psrc->opFusionObj =
             OpFusion::FusionFactory(OpFusion::getFusionType(cplan, paramLI, NULL), psrc->context, psrc, NULL, paramLI);
         psrc->is_checked_opfusion = true;
@@ -937,6 +939,10 @@ void ExplainExecuteQuery(
     cplan = GetCachedPlan(entry->plansource, paramLI, true);
 
     plan_list = cplan->stmt_list;
+
+    es->is_explain_gplan = false;
+    if (entry->plansource->cplan == NULL)
+        es->is_explain_gplan = true;
 
     /* Explain each query */
     foreach (p, plan_list) {

@@ -88,6 +88,8 @@ public:
 
     static void tearDown(OpFusion* opfusion);
 
+    static void clearForCplan(OpFusion* opfusion, CachedPlanSource* psrc);
+
     void checkPermission();
 
     void setReceiver();

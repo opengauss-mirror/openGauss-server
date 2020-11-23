@@ -45,6 +45,9 @@ const char *getBypassReason(FusionType result)
         case NONE_FUSION: {
             return "Bypass not executed";
         }
+        case NOBYPASS_NO_CPLAN: {
+            return "Bypass not executed because the plan is custom plan";
+        }
         case SELECT_FUSION: {
             return "Bypass executed through select fusion";
         }
@@ -274,13 +277,20 @@ static bool checkFlinfo(Node *node)
     return true;
 }
 
-static bool checkExpr(Node *node, bool is_first)
+static bool checkExpr(Node *node, bool is_first, int resno)
 {
+    const int noVarInSubtree = -1;
     NodeTag tag = nodeTag(node);
     switch (tag) {
         case T_Const:
-        case T_Var:
         case T_Param: {
+            return true;
+        }
+        case T_Var: {
+            /* bypass currently does not support updating with var */
+            if ((resno != ((Var*)node)->varattno) || (resno == noVarInSubtree)) {
+                return false;
+            }
             return true;
         }
 
@@ -306,7 +316,7 @@ static bool checkExpr(Node *node, bool is_first)
             bool result = true;
             ListCell *lc = NULL;
             foreach (lc, args) {
-                result = result && checkExpr((Node *)lfirst(lc), is_first);
+                result = result && checkExpr((Node *)lfirst(lc), is_first, noVarInSubtree);
                 is_first = false;
             }
             return result;
@@ -329,14 +339,14 @@ static bool checkExpr(Node *node, bool is_first)
             bool result = true;
             ListCell *lc = NULL;
             foreach (lc, args) {
-                result = result && checkExpr((Node *)lfirst(lc), is_first);
+                result = result && checkExpr((Node *)lfirst(lc), is_first, noVarInSubtree);
                 is_first = false;
             }
             return result;
         }
 
         case T_RelabelType: {
-            return checkExpr((Node *)((RelabelType *)node)->arg, is_first);
+            return checkExpr((Node *)((RelabelType *)node)->arg, is_first, noVarInSubtree);
         }
 
         default: {
@@ -718,7 +728,10 @@ FusionType checkTargetlist(List *targetList, FusionType ftype)
     TargetEntry *target = NULL;
     foreach (lc, targetList) {
         target = (TargetEntry *)lfirst(lc);
-        if (!checkExpr((Node *)target->expr, true)) {
+        if (target->resjunk && nodeTag((Node *)target->expr) == T_Var) {
+            continue;
+        }
+        if (!checkExpr((Node *)target->expr, true, target->resno)) {
             return NOBYPASS_EXP_NOT_SUPPORT;
         }
     }

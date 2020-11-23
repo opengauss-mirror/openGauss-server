@@ -106,13 +106,12 @@ drop index idx2;
 explain (verbose on, costs off) select sum(c2) from t1 where c2=3;
                   QUERY PLAN                   
 -----------------------------------------------
- [Bypass]
  Aggregate
    Output: sum(c2)
    ->  Index Only Scan using idx1 on public.t1
          Output: c2
          Index Cond: (t1.c2 = 3::numeric)
-(6 rows)
+(5 rows)
 
 select sum(c2) from t1 where c2=3;
  sum 
@@ -124,13 +123,12 @@ select sum(c2) from t1 where c2=3;
 explain (verbose on, costs off) select sum(c3) from t1 where c2=3;
                 QUERY PLAN                
 ------------------------------------------
- [Bypass]
  Aggregate
    Output: sum(c3)
    ->  Index Scan using idx1 on public.t1
          Output: c1, c2, c3, c4, colreal
          Index Cond: (t1.c2 = 3::numeric)
-(6 rows)
+(5 rows)
 
 select sum(c3) from t1 where c2=3;
  sum 
@@ -144,46 +142,42 @@ create index idx3 on t1(c3, c2);
 explain (verbose on, costs off) select sum(c3) from t1 where c3=3;
                   QUERY PLAN                   
 -----------------------------------------------
- [Bypass]
  Aggregate
    Output: sum(c3)
    ->  Index Only Scan using idx3 on public.t1
          Output: c3, c2
          Index Cond: (t1.c3 = 3::numeric)
-(6 rows)
+(5 rows)
 
 explain (verbose on, costs off) select sum(c2) from t1 where c3=3;
                   QUERY PLAN                   
 -----------------------------------------------
- [Bypass]
  Aggregate
    Output: sum(c2)
    ->  Index Only Scan using idx3 on public.t1
          Output: c3, c2
          Index Cond: (t1.c3 = 3::numeric)
-(6 rows)
+(5 rows)
 
 explain (verbose on, costs off) select sum(c3) from t1 where c2=3;
                   QUERY PLAN                   
 -----------------------------------------------
- [Bypass]
  Aggregate
    Output: sum(c3)
    ->  Index Only Scan using idx3 on public.t1
          Output: c3, c2
          Index Cond: (t1.c2 = 3::numeric)
-(6 rows)
+(5 rows)
 
 explain (verbose on, costs off) select sum(c2) from t1 where c2=3;
                   QUERY PLAN                   
 -----------------------------------------------
- [Bypass]
  Aggregate
    Output: sum(c2)
    ->  Index Only Scan using idx3 on public.t1
          Output: c3, c2
          Index Cond: (t1.c2 = 3::numeric)
-(6 rows)
+(5 rows)
 
 select sum(c3) from t1 where c3=3;
  sum 
@@ -213,14 +207,13 @@ select sum(c2) from t1 where c2=3;
 explain (verbose on, costs off) select c3 from t1 where c3 < 10 order by c2;
                   QUERY PLAN                   
 -----------------------------------------------
- [Bypass]
  Sort
    Output: c3, c2
    Sort Key: t1.c2
    ->  Index Only Scan using idx3 on public.t1
          Output: c3, c2
          Index Cond: (t1.c3 < 10::numeric)
-(7 rows)
+(6 rows)
 
 select c3 from t1 where c3 < 10 order by c2;
  c3 

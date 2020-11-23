@@ -619,10 +619,9 @@ EXPLAIN (NUM_NODES OFF, NODES OFF, COSTS OFF)
 SELECT * FROM point_tbl WHERE f1 IS NULL;
                QUERY PLAN                
 -----------------------------------------
- [Bypass]
  Index Scan using gpointind on point_tbl
    Index Cond: (f1 IS NULL)
-(3 rows)
+(2 rows)
 
 SELECT * FROM point_tbl WHERE f1 IS NULL;
  f1 
