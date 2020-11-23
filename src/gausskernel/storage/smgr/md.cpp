@@ -968,7 +968,7 @@ do {\
 /*
  *  mdread() -- Read the specified block from a relation.
  */
-void mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char* buffer)
+bool mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char* buffer)
 {
     off_t seekpos;
     int nbytes;
@@ -1058,6 +1058,12 @@ void mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char* b
     }
 
     if (nbytes != BLCKSZ) {
+#ifndef ENABLE_MULTIPLE_NODES
+       if(RecoveryInProgress()) {
+           return false;
+       }
+#endif
+
         if (nbytes < 0) {
             ereport(ERROR,
                 (errcode_for_file_access(),
@@ -1085,6 +1091,9 @@ void mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char* b
                         BLCKSZ)));
         }
     }
+
+    /* Target block exists */
+    return true;
 }
 
 /*
