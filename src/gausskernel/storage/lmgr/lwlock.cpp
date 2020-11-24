@@ -156,6 +156,7 @@ static const char *BuiltinTrancheNames[] = {
     /* LWTRANCHE_GTT_CTL */
     "GlobalTempTableControl",
     "PLdebugger",
+    "SharedTupleStore",
     "parallel_append"
 };
 
