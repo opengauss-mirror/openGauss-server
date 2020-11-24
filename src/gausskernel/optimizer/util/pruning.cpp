@@ -107,6 +107,7 @@ PruningResult* copyPruningResult(PruningResult* srcPruningResult)
         newpruningInfo->intervalOffset = srcPruningResult->intervalOffset;
         newpruningInfo->intervalSelectedPartitions = bms_copy(srcPruningResult->intervalSelectedPartitions);
         newpruningInfo->ls_rangeSelectedPartitions = list_copy(srcPruningResult->ls_rangeSelectedPartitions);
+        newpruningInfo->paramArg = (Param *)copyObject(srcPruningResult->paramArg);
 
         return newpruningInfo;
     } else {
@@ -735,6 +736,7 @@ static PruningResult* intersectChildPruningResult(const List* resultList, Prunin
             result->bm_rangeSelectedPartitions = bms_copy(iteratorResult->bm_rangeSelectedPartitions);
             result->intervalSelectedPartitions = bms_copy(iteratorResult->intervalSelectedPartitions);
             result->state = iteratorResult->state;
+            result->paramArg = (Param *)copyObject(iteratorResult->paramArg);
         } else if (result != NULL) {
             if (intervalOffset == -1 && iteratorResult->intervalOffset >= 0) {
                 intervalOffset = iteratorResult->intervalOffset;
@@ -812,6 +814,10 @@ static PruningResult* unionChildPruningResult(const List* resultList, PruningCon
 
         if (iteratorResult->state == PRUNING_RESULT_EMPTY) {
             continue;
+        } else if (iteratorResult->paramArg != NULL) {
+            result->state = iteratorResult->state;
+            result->paramArg = (Param *)copyObject(iteratorResult->paramArg);
+            return result;
         } else if (iteratorResult->state == PRUNING_RESULT_FULL) {
             result->state = PRUNING_RESULT_FULL;
             return result;
@@ -995,6 +1001,7 @@ static PruningResult* recordBoundaryFromOpExpr(const OpExpr* expr, PruningContex
     PruningResult* result = NULL;
     bool rightArgIsConst = true;
     Node* node = NULL;
+    Param* paramArg = NULL;
 
     AssertEreport(PointerIsValid(context), MOD_OPT, "Unexpected NULL pointer for context.");
     AssertEreport(PointerIsValid(context->relation), MOD_OPT, "Unexpected NULL pointer for context->relation.");
@@ -1035,18 +1042,27 @@ static PruningResult* recordBoundaryFromOpExpr(const OpExpr* expr, PruningContex
     }
 
     /* one of args MUST be Const, and another argument Must be Var */
-    if (!((T_Const == nodeTag(leftArg) && T_Var == nodeTag(rightArg)) ||
-            (T_Var == nodeTag(leftArg) && T_Const == nodeTag(rightArg)))) {
+    /* Be const or param, for PBE */
+    if (!(((T_Const == nodeTag(leftArg) || T_Param == nodeTag(leftArg)) && T_Var == nodeTag(rightArg)) ||
+            (T_Var == nodeTag(leftArg) && (T_Const == nodeTag(rightArg) || T_Param == nodeTag(rightArg))))) {
         result->state = PRUNING_RESULT_FULL;
         return result;
     }
 
-    if (T_Const == nodeTag(leftArg)) {
-        constArg = (Const*)leftArg;
+    if (T_Var == nodeTag(rightArg)) {
+        if (T_Const == nodeTag(leftArg)) {
+            constArg = (Const*)leftArg;
+        } else {
+            paramArg = (Param *)leftArg;
+        }
         varArg = (Var*)rightArg;
         rightArgIsConst = false;
     } else {
-        constArg = (Const*)rightArg;
+        if (T_Const == nodeTag(rightArg)) {
+            constArg = (Const*)rightArg;
+        } else {
+            paramArg = (Param *)rightArg;
+        }
         varArg = (Var*)leftArg;
     }
 
@@ -1065,6 +1081,19 @@ static PruningResult* recordBoundaryFromOpExpr(const OpExpr* expr, PruningContex
     if (attrOffset < 0) {
         result->state = PRUNING_RESULT_FULL;
         return result;
+    }
+
+    if (paramArg != NULL) {
+        /* Dynamic pruning for EXTERN params + range partition + '=' */
+        if (!u_sess->attr.attr_sql.enable_pbe_optimization || paramArg->paramkind != PARAM_EXTERN
+            || strcmp("=", opName) != 0 || !PartitionMapIsRange(partMap)) {
+            result->state = PRUNING_RESULT_FULL;
+            return result;
+        } else {
+            result->paramArg = paramArg;
+            result->state = PRUNING_RESULT_SUBSET;
+            return result;
+        }
     }
 
     if (constArg->constisnull) {
@@ -1747,6 +1776,11 @@ static void destroyPruningResult(PruningResult* pruningResult)
     if (PointerIsValid(pruningResult->ls_rangeSelectedPartitions)) {
         list_free_ext(pruningResult->ls_rangeSelectedPartitions);
         pruningResult->ls_rangeSelectedPartitions = NIL;
+    }
+
+    if (PointerIsValid(pruningResult->paramArg)) {
+        pfree(pruningResult->paramArg);
+        pruningResult->paramArg = NULL;
     }
 
     pfree_ext(pruningResult);

@@ -25,10 +25,13 @@
 
 #include "executor/execParallel.h"
 #include "executor/executor.h"
+#include "executor/hashjoin.h"
 #include "executor/nodeSeqscan.h"
 #include "executor/nodeAppend.h"
 #include "executor/nodeIndexscan.h"
 #include "executor/nodeIndexonlyscan.h"
+#include "executor/nodeHashjoin.h"
+#include "executor/nodeHash.h"
 #include "executor/tqueue.h"
 #include "nodes/nodeFuncs.h"
 #include "optimizer/planmain.h"
@@ -70,6 +73,7 @@ typedef struct ExecParallelInitializeDSMContext {
 static char *ExecSerializePlan(Plan *plan, EState *estate);
 static bool ExecParallelEstimate(PlanState *node, ExecParallelEstimateContext *e);
 static bool ExecParallelInitializeDSM(PlanState *node, ExecParallelInitializeDSMContext *d);
+static bool ExecParallelReInitializeDSM(PlanState* planstate, ParallelContext* pcxt);
 static shm_mq_handle **ExecParallelSetupTupleQueues(ParallelContext *pcxt, bool reinitialize);
 static bool ExecParallelRetrieveInstrumentation(PlanState *planstate, SharedExecutorInstrumentation *instrumentation);
 
@@ -214,28 +218,45 @@ static bool ExecParallelInitializeDSM(PlanState *planstate, ExecParallelInitiali
      * estimated using shm_toc_allocate, and add the keys they previously
      * estimated using shm_toc_insert, in each case targeting pcxt->toc.
      */
-    if (planstate->plan->parallel_aware) {
-        switch (nodeTag(planstate)) {
-            case T_SeqScanState:
+    switch (nodeTag(planstate)) {
+        case T_SeqScanState:
+            if (planstate->plan->parallel_aware) {
                 ExecSeqScanInitializeDSM((SeqScanState *)planstate, d->pcxt, cxt->pwCtx->queryInfo.pscan_num);
                 cxt->pwCtx->queryInfo.pscan_num++;
-                break;
-            case T_IndexScanState:
+            }
+            break;
+        case T_IndexScanState:
+            if (planstate->plan->parallel_aware) {
                 ExecIndexScanInitializeDSM((IndexScanState*)planstate, d->pcxt, cxt->pwCtx->queryInfo.piscan_num);
                 cxt->pwCtx->queryInfo.piscan_num++;
-                break;
-            case T_IndexOnlyScanState:
+            }
+            break;
+        case T_IndexOnlyScanState:
+            if (planstate->plan->parallel_aware) {
                 ExecIndexOnlyScanInitializeDSM((IndexOnlyScanState*)planstate, d->pcxt,
                     cxt->pwCtx->queryInfo.piscan_num);
                 cxt->pwCtx->queryInfo.piscan_num++;
-                break;
-            case T_AppendState:
+            }
+            break;
+        case T_AppendState:
+            if (planstate->plan->parallel_aware) {
                 ExecAppendInitializeDSM((AppendState *)planstate, d->pcxt, cxt->pwCtx->queryInfo.pappend_num);
                 cxt->pwCtx->queryInfo.pappend_num++;
-                break;
-            default:
-                break;
-        }
+            }
+            break;
+        case T_HashJoinState:
+            if (planstate->plan->parallel_aware) {
+                ExecHashJoinInitializeDSM((HashJoinState*)planstate, d->pcxt, cxt->pwCtx->queryInfo.jstate_num);
+                cxt->pwCtx->queryInfo.jstate_num++;
+            }
+            break;
+        case T_HashState:
+            /* even when not parallel-aware, for EXPLAIN ANALYZE */
+            ExecHashInitializeDSM((HashState*)planstate, d->pcxt, cxt->pwCtx->queryInfo.hash_num);
+            cxt->pwCtx->queryInfo.hash_num++;
+            break;
+        default:
+            break;
     }
 
     return planstate_tree_walker(planstate, (bool (*)())ExecParallelInitializeDSM, d);
@@ -300,12 +321,13 @@ void ExecParallelCreateReaders(ParallelExecutorInfo *pei, TupleDesc tupDesc)
  * Re-initialize the parallel executor info such that it can be reused by
  * workers.
  */
-void ExecParallelReinitialize(ParallelExecutorInfo *pei)
+void ExecParallelReinitialize(PlanState *planstate, ParallelExecutorInfo *pei)
 {
     ReinitializeParallelDSM(pei->pcxt);
     pei->tqueue = ExecParallelSetupTupleQueues(pei->pcxt, true);
     pei->reader = NULL;
     pei->finished = false;
+    (void)ExecParallelReInitializeDSM(planstate, pei->pcxt);
 }
 
 /*
@@ -401,6 +423,8 @@ ParallelExecutorInfo *ExecInitParallelPlan(PlanState *planstate, EState *estate,
     queryInfo.pscan = (ParallelHeapScanDesc *)palloc0(sizeof(ParallelHeapScanDesc) * e.nnodes);
     queryInfo.piscan = (ParallelIndexScanDesc *)palloc0(sizeof(ParallelIndexScanDesc) * e.nnodes);
     queryInfo.pappend = (ParallelAppendState**)palloc0(sizeof(ParallelAppendState*) * e.nnodes);
+    queryInfo.jstate = (ParallelHashJoinState**)palloc0(sizeof(ParallelHashJoinState*) * e.nnodes);
+    queryInfo.shared_info = (SharedHashInfo**)palloc0(sizeof(SharedHashInfo*) * e.nnodes);
 
     /*
      * Give parallel-aware nodes a chance to initialize their shared data.
@@ -430,6 +454,48 @@ ParallelExecutorInfo *ExecInitParallelPlan(PlanState *planstate, EState *estate,
 
     /* OK, we're ready to rock and roll. */
     return pei;
+}
+
+/*
+ * Traverse plan tree to reinitialize per-node dynamic shared memory state
+ */
+static bool ExecParallelReInitializeDSM(PlanState* planstate, ParallelContext* pcxt)
+{
+    if (planstate == NULL) {
+        return false;
+    }
+    /*
+     * Call reinitializers for DSM-using plan nodes.
+     */
+    switch (nodeTag(planstate)) {
+        case T_SeqScanState:
+            if (planstate->plan->parallel_aware) {
+                ExecSeqScanReInitializeDSM((SeqScanState*)planstate, pcxt);
+            }
+            break;
+        case T_IndexScanState:
+            if (planstate->plan->parallel_aware) {
+                ExecIndexScanReInitializeDSM((IndexScanState*)planstate, pcxt);
+            }
+            break;
+        case T_AppendState:
+            if (planstate->plan->parallel_aware) {
+                ExecAppendReInitializeDSM((AppendState*)planstate, pcxt);
+            }
+            break;
+        case T_HashJoinState:
+            if (planstate->plan->parallel_aware) {
+                ExecHashJoinReInitializeDSM((HashJoinState*)planstate, pcxt);
+            }
+            break;
+        /* these nodes have DSM state, but no reinitialization is required */
+        case T_HashState:
+            break;
+        default:
+            break;
+    }
+
+    return planstate_tree_walker(planstate, (bool (*)())ExecParallelReInitializeDSM, pcxt);
 }
 
 /*
@@ -465,6 +531,14 @@ static bool ExecParallelRetrieveInstrumentation(PlanState *planstate, SharedExec
     planstate->worker_instrument->num_workers = instrumentation->num_workers;
     int rc = memcpy_s(&planstate->worker_instrument->instrument, ibytes, instrument, ibytes);
     securec_check(rc, "", "");
+
+    switch (nodeTag(planstate)) {
+        case T_HashState:
+            ExecHashRetrieveInstrumentation((HashState*)planstate);
+            break;
+        default:
+            break;
+    }
 
     return planstate_tree_walker(planstate, (bool (*)())ExecParallelRetrieveInstrumentation, instrumentation);
 }
@@ -516,12 +590,6 @@ void ExecParallelFinish(ParallelExecutorInfo *pei)
     for (i = 0; i < nworkers; ++i) {
         InstrAccumParallelQuery(&pei->buffer_usage[i]);
     }
-
-    /* Finally, accumulate instrumentation, if any. */
-    if (pei->instrumentation) {
-        (void)ExecParallelRetrieveInstrumentation(pei->planstate, pei->instrumentation);
-    }
-
     pei->finished = true;
 }
 
@@ -533,6 +601,11 @@ void ExecParallelFinish(ParallelExecutorInfo *pei)
  */
 void ExecParallelCleanup(ParallelExecutorInfo *pei)
 {
+    /* Finally, accumulate instrumentation, if any. */
+    if (pei->instrumentation) {
+        (void)ExecParallelRetrieveInstrumentation(pei->planstate, pei->instrumentation);
+    }
+
     if (pei->pcxt != NULL) {
         DestroyParallelContext(pei->pcxt);
         pei->pcxt = NULL;
@@ -631,23 +704,38 @@ static bool ExecParallelInitializeWorker(PlanState *planstate, void *context)
         return false;
 
     /* Call initializers for parallel-aware plan nodes. */
-    if (planstate->plan->parallel_aware) {
-        switch (nodeTag(planstate)) {
-            case T_SeqScanState:
-                ExecSeqScanInitializeWorker((SeqScanState *)planstate, context);
-                break;
-            case T_IndexScanState:
-                ExecIndexScanInitializeWorker((IndexScanState *)planstate, context);
-                break;
-            case T_IndexOnlyScanState:
+    switch (nodeTag(planstate)) {
+        case T_SeqScanState:
+            if (planstate->plan->parallel_aware) {
+                ExecSeqScanInitializeWorker((SeqScanState*)planstate, context);
+            }
+            break;
+        case T_HashJoinState:
+            if (planstate->plan->parallel_aware) {
+                ExecHashJoinInitializeWorker((HashJoinState*)planstate, context);
+            }
+            break;
+        case T_IndexScanState:
+            if (planstate->plan->parallel_aware) {
+                ExecIndexScanInitializeWorker((IndexScanState*)planstate, context);
+            }
+            break;
+        case T_IndexOnlyScanState:
+            if (planstate->plan->parallel_aware) {
                 ExecIndexOnlyScanInitializeWorker((IndexOnlyScanState *)planstate, context);
-                break;
-            case T_AppendState:
-                ExecAppendInitializeWorker((AppendState *)planstate, context);
-                break;
-            default:
-                break;
-        }
+            }
+            break;
+        case T_AppendState:
+            if (planstate->plan->parallel_aware) {
+                ExecAppendInitializeWorker((AppendState*)planstate, context);
+            }
+            break;
+        case T_HashState:
+            /* even when not parallel-aware, for EXPLAIN ANALYZE */
+            ExecHashInitializeWorker((HashState*)planstate, context);
+            break;
+        default:
+            break;
     }
 
     return planstate_tree_walker(planstate, (bool (*)())ExecParallelInitializeWorker, context);

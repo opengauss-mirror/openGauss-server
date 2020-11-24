@@ -32,6 +32,7 @@ select count(*) from parallel_t1 where a = 5000;
 select count(*) from parallel_t1 where a > 5000;
 select count(*) from parallel_t1 where a < 5000;
 select count(*) from parallel_t1 where a <> 5000;
+explain (costs off,analyse on,verbose on) select count(*) from parallel_t1;
 
 --clean up
 reset force_parallel_mode;
@@ -131,3 +132,26 @@ reset max_parallel_workers_per_gather;
 reset min_parallel_table_scan_size;
 reset parallel_leader_participation;
 reset min_parallel_index_scan_size;
+
+-- nestloop
+set enable_hashjoin=off;
+set enable_mergejoin=off;
+explain (costs off, analyse on) select schemaname, tablename from pg_tables where tablename like 'sql%' order by tablename;
+--set parallel parameter
+set force_parallel_mode=on;
+set parallel_setup_cost=0;
+set parallel_tuple_cost=0.000005;
+set max_parallel_workers_per_gather=2;
+set min_parallel_table_scan_size=0;
+set parallel_leader_participation=on;
+-- nestloop
+explain (costs off, analyse on) select schemaname, tablename from pg_tables where tablename like 'sql%' order by tablename;
+--clean up
+reset force_parallel_mode;
+reset parallel_setup_cost;
+reset parallel_tuple_cost;
+reset max_parallel_workers_per_gather;
+reset min_parallel_table_scan_size;
+reset parallel_leader_participation;
+reset enable_hashjoin;
+reset enable_mergejoin;

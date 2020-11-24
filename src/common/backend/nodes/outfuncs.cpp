@@ -908,6 +908,7 @@ static void _outGather(StringInfo str, Gather *node)
     _outPlanInfo(str, (Plan *)node);
 
     WRITE_INT_FIELD(num_workers);
+    WRITE_INT_FIELD(rescan_param);
     WRITE_BOOL_FIELD(single_copy);
 }
 
@@ -1737,6 +1738,7 @@ static void _outHash(StringInfo str, Hash* node)
 
     WRITE_INT_FIELD(skewColumn);
     WRITE_BOOL_FIELD(skewInherit);
+    WRITE_FLOAT_FIELD(rows_total, "%.0f");
     WRITE_OID_FIELD(skewColType);
     WRITE_INT_FIELD(skewColTypmod);
     WRITE_TYPEINFO_FIELD(skewColType);

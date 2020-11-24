@@ -1775,34 +1775,30 @@ WARNING:  unused hint: IndexOnlyScan(hint_t1 hintt1_index)
 explain (costs off) select a from  hint_t1 where a = 10;
                   QUERY PLAN                   
 -----------------------------------------------
- [Bypass]
  Index Only Scan using hintt2_index on hint_t1
    Index Cond: (a = 10)
-(3 rows)
+(2 rows)
 
 explain (costs off) select /*+ indexonlyscan(hint_t1)*/ a from  hint_t1 where a = 10;
                   QUERY PLAN                   
 -----------------------------------------------
- [Bypass]
  Index Only Scan using hintt2_index on hint_t1
    Index Cond: (a = 10)
-(3 rows)
+(2 rows)
 
 explain (costs off) select /*+ indexonlyscan(hint_t1 hintt1_index)*/ a from  hint_t1 where a = 10;
                   QUERY PLAN                   
 -----------------------------------------------
- [Bypass]
  Index Only Scan using hintt1_index on hint_t1
    Index Cond: (a = 10)
-(3 rows)
+(2 rows)
 
 explain (costs off) select /*+ indexonlyscan(hint_t1 hintt2_index)*/ a from  hint_t1 where a = 10;
                   QUERY PLAN                   
 -----------------------------------------------
- [Bypass]
  Index Only Scan using hintt2_index on hint_t1
    Index Cond: (a = 10)
-(3 rows)
+(2 rows)
 
 create view hint_view1 as select /*+ tablescan(hint_t1)*/ * from  hint_t1 where a = 10 and b = 10;
 create view hint_view2 as select /*+ indexscan(hint_t1)*/ * from  hint_t1 where a = 10 and b = 10;
@@ -1840,10 +1836,9 @@ explain (costs off) select * from hint_view3;
 explain (costs off) select * from hint_view4;
                   QUERY PLAN                   
 -----------------------------------------------
- [Bypass]
  Index Only Scan using hintt1_index on hint_t1
    Index Cond: (a = 10)
-(3 rows)
+(2 rows)
 
 explain (costs off)select /*+ tablescan(t1) tablescan(t1) indexscan(t1) indexscan(t1) indexscan(t1 hintt1_index) indexscan(t1 hintt1_index)*/
 * from hint_t1 as t1;

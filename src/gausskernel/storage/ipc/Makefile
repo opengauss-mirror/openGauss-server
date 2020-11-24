@@ -16,7 +16,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS = ipc.o ipci.o pmsignal.o procarray.o procsignal.o shmem.o shmqueue.o \
+OBJS = ipc.o ipci.o pmsignal.o pg_barrier.o procarray.o procsignal.o shmem.o shmqueue.o \
 	sinval.o sinvaladt.o standby.o shm_mq.o shm_toc.o dsm.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

@@ -3890,6 +3890,8 @@ void exec_bind_message(StringInfo input_message)
     /* set unique sql id to current context */
     SetUniqueSQLIdFromCachedPlanSource(psrc);
 
+    OpFusion::clearForCplan((OpFusion*)psrc->opFusionObj, psrc);
+
     if (psrc->opFusionObj != NULL) {
         (void)RevalidateCachedQuery(psrc);
 
@@ -4265,7 +4267,7 @@ void exec_bind_message(StringInfo input_message)
      */
     PortalDefineQuery(portal, saved_stmt_name, query_string, psrc->commandTag, cplan->stmt_list, cplan);
 
-    if (IS_PGXC_DATANODE && psrc->is_checked_opfusion == false) {
+    if (IS_PGXC_DATANODE && psrc->cplan == NULL && psrc->is_checked_opfusion == false) {
         psrc->opFusionObj =
             OpFusion::FusionFactory(OpFusion::getFusionType(cplan, params, NULL), psrc->context, psrc, NULL, params);
         psrc->is_checked_opfusion = true;
@@ -9695,6 +9697,7 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
 
     DestReceiver* receiver = NULL;
     bool completed = false;
+    OpFusion::clearForCplan((OpFusion*)psrc->opFusionObj, psrc);
 
     if (psrc->opFusionObj != NULL) {
         ((OpFusion*)psrc->opFusionObj)->bindClearPosition();
@@ -9745,7 +9748,7 @@ static void exec_one_in_batch(CachedPlanSource* psrc, ParamListInfo params, int 
         JitResetScan(psrc->mot_jit_context);
     }
 
-    if (IS_PGXC_DATANODE && psrc->is_checked_opfusion == false) {
+    if (IS_PGXC_DATANODE && psrc->cplan == NULL && psrc->is_checked_opfusion == false) {
         psrc->opFusionObj =
             OpFusion::FusionFactory(OpFusion::getFusionType(cplan, params, NULL), psrc->context, psrc, NULL, params);
         psrc->is_checked_opfusion = true;

@@ -156,7 +156,9 @@ static const char *BuiltinTrancheNames[] = {
     /* LWTRANCHE_GTT_CTL */
     "GlobalTempTableControl",
     "PLdebugger",
-    "parallel_append"
+    "SharedTupleStore",
+    "parallel_append",
+    "ParallelHashJoinLock"
 };
 
 static void RegisterLWLockTranches(void);

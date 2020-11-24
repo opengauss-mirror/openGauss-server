@@ -1656,8 +1656,8 @@ Path* create_seqscan_path(PlannerInfo* root, RelOptInfo* rel, Relids required_ou
     pathnode->parallel_workers = parallel_workers;
 
 #ifdef STREAMPLAN
-    /* 
-     * We need to set locator_type for parallel query, cause we may send 
+    /*
+     * We need to set locator_type for parallel query, cause we may send
      * this value to bg worker. If not, locator_type is the initial value '\0',
      * which make the later serialized plan truncated.
      */
@@ -2024,8 +2024,8 @@ IndexPath* create_index_path(PlannerInfo* root, IndexOptInfo* index, List* index
     pathnode->indexorderbycols = indexorderbycols;
     pathnode->indexscandir = indexscandir;
 #ifdef STREAMPLAN
-    /* 
-     * We need to set locator_type for parallel query, cause we may send 
+    /*
+     * We need to set locator_type for parallel query, cause we may send
      * this value to bg worker. If not, locator_type is the initial value '\0',
      * which make the later serialized plan truncated.
      */
@@ -3861,7 +3861,7 @@ MergePath* create_mergejoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinTyp
  *		(this should be a subset of the restrict_clauses list)
  */
 HashPath* create_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype, JoinCostWorkspace* workspace,
-    SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, Path* outer_path, Path* inner_path,
+    SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, Path* outer_path, Path* inner_path, bool parallel_hash,
     List* restrict_clauses, Relids required_outer, List* hashclauses, int dop)
 {
     HashPath* pathnode = makeNode(HashPath);
@@ -3872,9 +3872,10 @@ HashPath* create_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType 
     pathnode->jpath.path.param_info =
         get_joinrel_parampathinfo(root, joinrel, outer_path, inner_path, sjinfo, required_outer, &restrict_clauses);
 
-    pathnode->jpath.path.parallel_aware = false;
+    pathnode->jpath.path.parallel_aware = joinrel->consider_parallel && parallel_hash;
     pathnode->jpath.path.parallel_safe =
         joinrel->consider_parallel && outer_path->parallel_safe && inner_path->parallel_safe;
+
     /* This is a foolish way to estimate parallel_workers, but for now... */
     pathnode->jpath.path.parallel_workers = outer_path->parallel_workers;
 
@@ -5878,8 +5879,16 @@ static JoinPath* add_join_redistribute_path(PlannerInfo* root, RelOptInfo* joinr
 
     /* Create join path. */
     if (nodetag == T_HashJoin) {
-        initial_cost_hashjoin(
-            root, workspace, jointype, hashclauses, stream_path_outer, stream_path_inner, sjinfo, semifactors, joinDop);
+        initial_cost_hashjoin(root,
+            workspace,
+            jointype,
+            hashclauses,
+            stream_path_outer,
+            stream_path_inner,
+            sjinfo,
+            semifactors,
+            joinDop,
+            true);
 
         joinpath = (JoinPath*)create_hashjoin_path(root,
             joinrel,
@@ -5889,6 +5898,7 @@ static JoinPath* add_join_redistribute_path(PlannerInfo* root, RelOptInfo* joinr
             semifactors,
             stream_path_outer,
             stream_path_inner,
+            true,
             restrictlist,
             required_outer,
             hashclauses,
@@ -5995,7 +6005,7 @@ static void add_hashjoin_broadcast_path(PlannerInfo* root, RelOptInfo* joinrel, 
     new_inner_path = stream_outer ? other_side : streamed_path;
 
     initial_cost_hashjoin(
-        root, workspace, jointype, hashclauses, new_outer_path, new_inner_path, sjinfo, semifactors, dop);
+        root, workspace, jointype, hashclauses, new_outer_path, new_inner_path, sjinfo, semifactors, dop, false);
 
     joinpath = (JoinPath*)create_hashjoin_path(root,
         joinrel,
@@ -6005,6 +6015,7 @@ static void add_hashjoin_broadcast_path(PlannerInfo* root, RelOptInfo* joinrel, 
         semifactors,
         new_outer_path,
         new_inner_path,
+        false,
         restrictlist,
         required_outer,
         hashclauses,
@@ -6661,8 +6672,16 @@ void add_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype
              */
             if (!parallel_enable(inner_path_t, outer_path_t)) {
                 if (outer_path != outer_path_t || inner_path != inner_path_t) {
-                    initial_cost_hashjoin(
-                        root, workspace, jointype, hashclauses, outer_path_t, inner_path_t, sjinfo, semifactors, 1);
+                    initial_cost_hashjoin(root,
+                        workspace,
+                        jointype,
+                        hashclauses,
+                        outer_path_t,
+                        inner_path_t,
+                        sjinfo,
+                        semifactors,
+                        1,
+                        false);
                 }
 
                 joinpath = (JoinPath*)create_hashjoin_path(root,
@@ -6673,6 +6692,7 @@ void add_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype
                     semifactors,
                     outer_path_t,
                     inner_path_t,
+                    false,
                     restrictlist,
                     required_outer,
                     hashclauses);
@@ -6748,8 +6768,16 @@ void add_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype
                     true,
                     skew_stream,
                     target_distribution);
-                initial_cost_hashjoin(
-                    root, workspace, jointype, hashclauses, outer_path, stream_path_inner, sjinfo, semifactors, 1);
+                initial_cost_hashjoin(root,
+                    workspace,
+                    jointype,
+                    hashclauses,
+                    outer_path,
+                    stream_path_inner,
+                    sjinfo,
+                    semifactors,
+                    1,
+                    false);
 
                 joinpath = (JoinPath*)create_hashjoin_path(root,
                     joinrel,
@@ -6759,6 +6787,7 @@ void add_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype
                     semifactors,
                     outer_path,
                     (Path*)stream_path_inner,
+                    false,
                     restrictlist,
                     required_outer,
                     hashclauses);
@@ -6898,8 +6927,16 @@ void add_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype
                         skew_stream,
                         target_distribution);
 
-                    initial_cost_hashjoin(
-                        root, workspace, jointype, hashclauses, stream_path_outer, inner_path, sjinfo, semifactors, 1);
+                    initial_cost_hashjoin(root,
+                        workspace,
+                        jointype,
+                        hashclauses,
+                        stream_path_outer,
+                        inner_path,
+                        sjinfo,
+                        semifactors,
+                        1,
+                        false);
 
                     joinpath = (JoinPath*)create_hashjoin_path(root,
                         joinrel,
@@ -6909,6 +6946,7 @@ void add_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype
                         semifactors,
                         (Path*)stream_path_outer,
                         inner_path,
+                        false,
                         restrictlist,
                         required_outer,
                         hashclauses);
@@ -7112,7 +7150,8 @@ void add_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype
                         stream_path_inner,
                         sjinfo,
                         semifactors,
-                        1);
+                        1,
+                        false);
 
                     joinpath = (JoinPath*)create_hashjoin_path(root,
                         joinrel,
@@ -7122,6 +7161,7 @@ void add_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype
                         semifactors,
                         (Path*)stream_path_outer,
                         (Path*)stream_path_inner,
+                        false,
                         restrictlist,
                         required_outer,
                         hashclauses);
@@ -7281,7 +7321,8 @@ void add_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype
                             stream_path_inner,
                             sjinfo,
                             semifactors,
-                            1);
+                            1,
+                            false);
 
                         joinpath = (JoinPath*)create_hashjoin_path(root,
                             joinrel,
@@ -7291,6 +7332,7 @@ void add_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype
                             semifactors,
                             outer_path,
                             (Path*)stream_path_inner,
+                            false,
                             restrictlist,
                             required_outer,
                             hashclauses);
@@ -7352,7 +7394,8 @@ void add_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype
                             inner_path,
                             sjinfo,
                             semifactors,
-                            1);
+                            1,
+                            false);
 
                         joinpath = (JoinPath*)create_hashjoin_path(root,
                             joinrel,
@@ -7362,6 +7405,7 @@ void add_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype
                             semifactors,
                             (Path*)stream_path_outer,
                             inner_path,
+                            false,
                             restrictlist,
                             required_outer,
                             hashclauses);
@@ -7492,6 +7536,7 @@ void add_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype
                     semifactors,
                     outer_path,
                     inner_path,
+                    false,
                     restrictlist,
                     required_outer,
                     hashclauses);

@@ -29,10 +29,12 @@ test: misc
 test: stats
 test: alter_system_set
 
+# parallel query
+test: parallel_query parallel_nested_loop parallel_hashjoin parallel_append parallel_create_index
+
 #dispatch from 13
 test: function
 test: aggregates_part1 aggregates_part2 aggregates_part3 count_distinct_part1 count_distinct_part2 count_distinct_part3 count_distinct_part4
-
 
 test: hw_dfx_thread_status
 
@@ -594,9 +596,6 @@ test: create_procedure create_function pg_compatibility postgres_fdw
 
 # autonomous transaction Test
 #test: autonomous_transaction
-
-# parallel query
-test: parallel_query parallel_nested_loop parallel_hashjoin parallel_append parallel_create_index
 
 # gs_basebackup
 test: gs_basebackup

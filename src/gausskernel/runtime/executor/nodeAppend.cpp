@@ -278,6 +278,20 @@ void ExecAppendInitializeDSM(AppendState *node, ParallelContext *pcxt, int nodei
 }
 
 /* ----------------------------------------------------------------
+ *		ExecAppendReInitializeDSM
+ *
+ *		Reset shared state before beginning a fresh scan.
+ * ----------------------------------------------------------------
+ */
+void ExecAppendReInitializeDSM(AppendState* node, ParallelContext* pcxt)
+{
+    ParallelAppendState* pstate = node->as_pstate;
+    pstate->pa_next_plan = 0;
+    error_t rc = memset_s(pstate->pa_finished, sizeof(bool) * node->as_nplans, 0, sizeof(bool) * node->as_nplans);
+    securec_check(rc, "\0", "\0");
+}
+
+/* ----------------------------------------------------------------
  *     ExecAppendInitializeWorker
  *
  *     Copy relevant information from TOC into planstate, and initialize

@@ -610,6 +610,7 @@ static void ExplainOneQuery(
     }
 
     u_sess->exec_cxt.remotequery_list = NIL;
+    es->is_explain_gplan = false;
     /* planner will not cope with utility statements */
     if (query->commandType == CMD_UTILITY) {
         if (IsA(query->utilityStmt, CreateTableAsStmt)) {
@@ -1054,6 +1055,8 @@ void ExplainOnePlan(
     if (IS_PGXC_DATANODE && u_sess->attr.attr_sql.enable_opfusion == true &&
         es->format == EXPLAIN_FORMAT_TEXT) {
         FusionType type = OpFusion::getFusionType(NULL, NULL, list_make1(queryDesc->plannedstmt));
+        if (!es->is_explain_gplan)
+            type = NOBYPASS_NO_CPLAN;
         if (type < BYPASS_OK && type > NONE_FUSION) {
             appendStringInfo(es->str, "[Bypass]\n");
         } else if (u_sess->attr.attr_sql.opfusion_debug_mode == BYPASS_LOG) {
@@ -1494,6 +1497,13 @@ static void show_pruning_info(PlanState* planstate, ExplainState* es, bool is_pr
                 appendStringInfo(es->str, "NONE");
             else
                 appendStringInfo(es->planinfo->m_detailInfo->info_str, "NONE");
+        } else if (scanplan->pruningInfo->paramArg != NULL) {
+            if (is_pretty == false) {
+                appendStringInfo(es->str, "$%d", scanplan->pruningInfo->paramArg->paramid);
+            } else {
+                appendStringInfo(es->planinfo->m_detailInfo->info_str, "$%d",
+                    scanplan->pruningInfo->paramArg->paramid);
+            }
         } else {
             ListCell* cell = NULL;
             List* part_seqs = scanplan->pruningInfo->ls_rangeSelectedPartitions;
@@ -1583,6 +1593,12 @@ static void show_pruning_info(PlanState* planstate, ExplainState* es, bool is_pr
     } else {
         if (scanplan->itrs <= 0) {
             ExplainPropertyText("Selected Partitions", "NONE", es);
+        } else if (scanplan->pruningInfo->paramArg != NULL) {
+            StringInfo strif = makeStringInfo();
+            appendStringInfo(strif, "$%d", scanplan->pruningInfo->paramArg->paramid);
+            ExplainPropertyText("Selected Partitions", strif->data, es);
+            pfree(strif->data);
+            pfree(strif);
         } else {
             int i = 0;
             StringInfo strif;
@@ -2776,6 +2792,58 @@ static void ExplainNode(
 
         default:
             break;
+    }
+
+    /* Show worker detail */
+    if (es->analyze && es->verbose && planstate->worker_instrument) {
+        WorkerInstrumentation* w = planstate->worker_instrument;
+        bool openedGroup = false;
+        int n;
+
+        for (n = 0; n < w->num_workers; ++n) {
+            Instrumentation* instrument = &w->instrument[n];
+            double nloops = instrument->nloops;
+            double startup_sec;
+            double total_sec;
+            double rows;
+
+            if (nloops <= 0) {
+                continue;
+            }
+            startup_sec = 1000.0 * instrument->startup / nloops;
+            total_sec = 1000.0 * instrument->total / nloops;
+            rows = instrument->ntuples / nloops;
+
+            if (es->format == EXPLAIN_FORMAT_TEXT) {
+                appendStringInfoSpaces(es->str, es->indent * 2);
+                appendStringInfo(es->str, "Worker %d: ", n);
+                if (es->timing) {
+                    appendStringInfo(
+                        es->str, "actual time=%.3f..%.3f rows=%.0f loops=%.0f\n", startup_sec, total_sec, rows, nloops);
+                } else {
+                    appendStringInfo(es->str, "actual rows=%.0f loops=%.0f\n", rows, nloops);
+                }
+            } else {
+                if (!openedGroup) {
+                    ExplainOpenGroup("Workers", "Workers", false, es);
+                    openedGroup = true;
+                }
+                ExplainOpenGroup("Worker", NULL, true, es);
+                ExplainPropertyInteger("Worker Number", n, es);
+
+                if (es->timing) {
+                    ExplainPropertyFloat("Actual Startup Time", startup_sec, 3, es);
+                    ExplainPropertyFloat("Actual Total Time", total_sec, 3, es);
+                }
+                ExplainPropertyFloat("Actual Rows", rows, 0, es);
+                ExplainPropertyFloat("Actual Loops", nloops, 0, es);
+                ExplainCloseGroup("Worker", NULL, true, es);
+            }
+        }
+
+        if (openedGroup) {
+            ExplainCloseGroup("Workers", "Workers", false, es);
+        }
     }
 
 runnext:
@@ -4528,18 +4596,46 @@ static void show_hash_info(HashState* hashstate, ExplainState* es)
                 }
             }
         }
-    } else if (hashstate->ps.instrument) {
-        SortHashInfo hashinfo = hashstate->ps.instrument->sorthashinfo;
-        spacePeakKb = (hashinfo.spacePeak + BYTE_PER_KB - 1) / BYTE_PER_KB;
-        nbatch = hashinfo.nbatch;
-        nbatch_original = hashinfo.nbatch_original;
-        nbuckets = hashinfo.nbuckets;
+    } else {
+        Instrumentation* instrument = NULL;
+        /*
+         * In a parallel query, the leader process may or may not have run the
+         * hash join, and even if it did it may not have built a hash table due to
+         * timing (if it started late it might have seen no tuples in the outer
+         * relation and skipped building the hash table).  Therefore we have to be
+         * prepared to get instrumentation data from a worker if there is no hash
+         * table.
+         */
+        if (hashstate->hashtable) {
+            instrument = (Instrumentation*)palloc(sizeof(Instrumentation));
+            ExecHashGetInstrumentation(instrument, hashstate->hashtable);
+        } else if (hashstate->shared_info) {
+            SharedHashInfo* shared_info = hashstate->shared_info;
+            int i;
 
-        /* wlm_statistics_plan_max_digit: this variable is used to judge, isn't it a active sql */
-        if (es->wlm_statistics_plan_max_digit == NULL) {
-            if (es->format == EXPLAIN_FORMAT_TEXT)
-                appendStringInfoSpaces(es->str, es->indent * 2);
-            show_datanode_hash_info<false>(es, nbatch, nbatch_original, nbuckets, spacePeakKb);
+            /* Find the first worker that built a hash table. */
+            for (i = 0; i < shared_info->num_workers; ++i) {
+                if (shared_info->instrument[i].sorthashinfo.nbatch > 0) {
+                    instrument = &shared_info->instrument[i];
+                    break;
+                }
+            }
+        } else if  (hashstate->ps.instrument) {
+            instrument = hashstate->ps.instrument;
+        }
+        if (instrument) {
+            SortHashInfo hashinfo = instrument->sorthashinfo;
+            spacePeakKb = (hashinfo.spacePeak + BYTE_PER_KB - 1) / BYTE_PER_KB;
+            nbatch = hashinfo.nbatch;
+            nbatch_original = hashinfo.nbatch_original;
+            nbuckets = hashinfo.nbuckets;
+
+            /* wlm_statistics_plan_max_digit: this variable is used to judge, isn't it a active sql */
+            if (es->wlm_statistics_plan_max_digit == NULL) {
+                if (es->format == EXPLAIN_FORMAT_TEXT)
+                    appendStringInfoSpaces(es->str, es->indent * 2);
+                show_datanode_hash_info<false>(es, nbatch, nbatch_original, nbuckets, spacePeakKb);
+            }
         }
     }
 }
@@ -6475,9 +6571,9 @@ static void show_time(ExplainState* es, const Instrumentation* instrument, int i
 {
     if (instrument != NULL && instrument->nloops > 0) {
         double nloops = instrument->nloops;
-        const double startup_sec = 1000.0 * instrument->startup;
-        const double total_sec = 1000.0 * instrument->total;
-        double rows = instrument->ntuples;
+        const double startup_sec = 1000.0 * instrument->startup / nloops;
+        const double total_sec = 1000.0 * instrument->total / nloops;
+        double rows = instrument->ntuples / nloops;
         if (es->format == EXPLAIN_FORMAT_TEXT) {
             if (is_detail == false)
                 appendStringInfoSpaces(es->str, 1);

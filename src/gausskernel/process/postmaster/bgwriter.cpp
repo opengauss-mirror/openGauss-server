@@ -790,6 +790,9 @@ void incre_ckpt_background_writer_main(void)
 
     dirty_buf_list = g_instance.bgwriter_cxt.bgwriter_procs[thread_id].dirty_buf_list;
 
+    pgstat_report_appname("IncrBgWriter");
+    pgstat_report_activity(STATE_IDLE, NULL);
+
 	/* Loop forever */
     for (;;) {
         int rc;
@@ -823,6 +826,7 @@ void incre_ckpt_background_writer_main(void)
             }
         }
 
+        pgstat_report_activity(STATE_IDLE, NULL);
         rc = WaitLatch(&t_thrd.proc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
             get_bgwriter_sleep_time());
         if (rc & WL_POSTMASTER_DEATH) {
@@ -832,6 +836,7 @@ void incre_ckpt_background_writer_main(void)
         /* Clear any already-pending wakeups */
         ResetLatch(&t_thrd.proc->procLatch);
 
+        pgstat_report_activity(STATE_RUNNING, NULL);
         /*
          * When the primary instance do full checkpoint, the first thread remain scan the
          * buffer pool to maintain the candidate buffer list, other threads scan the dirty
