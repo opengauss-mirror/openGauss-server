@@ -28,5 +28,6 @@ extern void StoreIndexTuple(TupleTableSlot* slot, IndexTuple itup, TupleDesc itu
 /* Support functions for parallel index-only scans */
 extern void ExecIndexOnlyScanEstimate(IndexOnlyScanState *node, ParallelContext *pcxt);
 extern void ExecIndexOnlyScanInitializeDSM(IndexOnlyScanState *node, ParallelContext *pcxt, int nodeid);
+extern void ExecIndexOnlyScanReInitializeDSM(IndexOnlyScanState *node, ParallelContext *pcxt);
 extern void ExecIndexOnlyScanInitializeWorker(IndexOnlyScanState *node, void *context);
 #endif /* NODEINDEXONLYSCAN_H */

@@ -478,6 +478,11 @@ static bool ExecParallelReInitializeDSM(PlanState* planstate, ParallelContext* p
                 ExecIndexScanReInitializeDSM((IndexScanState*)planstate, pcxt);
             }
             break;
+        case T_IndexOnlyScanState:
+            if (planstate->plan->parallel_aware) {
+                ExecIndexOnlyScanReInitializeDSM((IndexOnlyScanState*)planstate, pcxt);
+            }
+            break;
         case T_AppendState:
             if (planstate->plan->parallel_aware) {
                 ExecAppendReInitializeDSM((AppendState*)planstate, pcxt);
