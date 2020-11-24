@@ -27,4 +27,4 @@ test: upsert_trigger_test upsert_explain
 test: upsert_clean
 
 # test parallel query
-test: parallel_query parallel_append
+test: parallel_query parallel_nested_loop parallel_hashjoin parallel_append parallel_create_index

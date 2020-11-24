@@ -372,16 +372,19 @@ BitmapIndexScanState* ExecInitBitmapIndexScan(BitmapIndexScan* node, EState* est
             /* Initialize table partition and index partition */
             ExecInitPartitionForBitmapIndexScan(indexstate, estate, currentrel);
 
-            /* get the first index partition */
-            currentindex = (Partition)list_nth(indexstate->biss_IndexPartitionList, 0);
-            indexstate->biss_CurrentIndexPartition = partitionGetRelation(indexstate->biss_RelationDesc, currentindex);
+            if (indexstate->biss_IndexPartitionList != NIL) {
+                /* get the first index partition */
+                currentindex = (Partition)list_nth(indexstate->biss_IndexPartitionList, 0);
+                indexstate->biss_CurrentIndexPartition = partitionGetRelation(indexstate->biss_RelationDesc,
+                    currentindex);
 
-            ExecCloseScanRelation(currentrel);
+                ExecCloseScanRelation(currentrel);
 
-            indexstate->biss_ScanDesc = abs_idx_beginscan_bitmap(indexstate->biss_CurrentIndexPartition,
-                estate->es_snapshot,
-                indexstate->biss_NumScanKeys,
-                (ScanState*)indexstate);
+                indexstate->biss_ScanDesc = abs_idx_beginscan_bitmap(indexstate->biss_CurrentIndexPartition,
+                    estate->es_snapshot,
+                    indexstate->biss_NumScanKeys,
+                    (ScanState*)indexstate);
+            }
         }
     } else {
         /*
@@ -465,6 +468,10 @@ static void ExecInitNextPartitionForBitmapIndexScan(BitmapIndexScanState* node)
 void ExecInitPartitionForBitmapIndexScan(BitmapIndexScanState* indexstate, EState* estate, Relation rel)
 {
     BitmapIndexScan* plan = NULL;
+    Partition tablePartition = NULL;
+    List* partitionIndexOidList = NIL;
+    Oid tablepartitionid = InvalidOid;
+    Oid indexpartitionid = InvalidOid;
 
     plan = (BitmapIndexScan*)indexstate->ss.ps.plan;
 
@@ -479,17 +486,48 @@ void ExecInitPartitionForBitmapIndexScan(BitmapIndexScanState* indexstate, EStat
         ListCell* cell = NULL;
         List* part_seqs = plan->scan.pruningInfo->ls_rangeSelectedPartitions;
 
-        Assert(plan->scan.itrs == plan->scan.pruningInfo->ls_rangeSelectedPartitions->length);
         relistarget = ExecRelationIsTargetRelation(estate, plan->scan.scanrelid);
         lock = (relistarget ? RowExclusiveLock : AccessShareLock);
         indexstate->lockMode = lock;
 
+        if (plan->scan.pruningInfo->paramArg != NULL) {
+            Param *paramArg = plan->scan.pruningInfo->paramArg;
+            tablepartitionid = getPartitionOidByParam(rel, paramArg,
+                &(estate->es_param_list_info->params[paramArg->paramid - 1]));
+            if (OidIsValid(tablepartitionid)) {
+                tablePartition = partitionOpen(rel, tablepartitionid, lock);
+
+                partitionIndexOidList = PartitionGetPartIndexList(tablePartition);
+                Assert(PointerIsValid(partitionIndexOidList));
+                if (!PointerIsValid(partitionIndexOidList)) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                            errmodule(MOD_EXECUTOR),
+                            errmsg("no local indexes found for partition %s BitmapIndexScan",
+                                PartitionGetPartitionName(tablePartition))));
+                }
+                indexpartitionid = searchPartitionIndexOid(indexid, partitionIndexOidList);
+                list_free_ext(partitionIndexOidList);
+                partitionClose(rel, tablePartition, NoLock);
+
+                indexpartition = partitionOpen(indexstate->biss_RelationDesc, indexpartitionid, lock);
+                if (indexpartition->pd_part->indisusable == false) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_INDEX_CORRUPTED),
+                            errmodule(MOD_EXECUTOR),
+                            errmsg("can't initialize bitmap index scans using unusable local index \"%s\" for partition",
+                                PartitionGetPartitionName(indexpartition))));
+                }
+                /* add index partition to list for the following scan */
+                indexstate->biss_IndexPartitionList = lappend(indexstate->biss_IndexPartitionList, indexpartition);
+            }
+            return;
+        }
+
+        Assert(plan->scan.itrs == plan->scan.pruningInfo->ls_rangeSelectedPartitions->length);
+
         foreach (cell, part_seqs) {
-            Oid tablepartitionid = InvalidOid;
             int partSeq = lfirst_int(cell);
-            Oid indexpartitionid = InvalidOid;
-            Partition tablePartition = NULL;
-            List* partitionIndexOidList = NIL;
 
             /* get index partition list for the special index */
             tablepartitionid = getPartitionOidFromSequence(rel, partSeq);

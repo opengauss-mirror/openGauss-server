@@ -202,8 +202,10 @@ typedef struct knl_session_attr_sql {
     double table_skewness_warning_threshold;
     bool enable_opfusion;
     bool enable_beta_opfusion;
+    bool enable_partition_opfusion;
     bool enable_beta_nestloop_fusion;
     bool parallel_leader_participation;
+    bool enable_parallel_hash;
     int opfusion_debug_mode;
     int single_shard_stmt;
     int force_parallel_mode;

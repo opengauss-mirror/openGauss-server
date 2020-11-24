@@ -2039,22 +2039,28 @@ typedef struct ParallelAppendState ParallelAppendState;
 /* Info need to pass from leader to worker */
 struct ParallelHeapScanDescData;
 struct ParallelIndexScanDescData;
+struct ParallelHashJoinState;
+struct SharedHashInfo;
 typedef uint64 XLogRecPtr;
 typedef struct ParallelQueryInfo {
-    struct SharedExecutorInstrumentation *instrumentation;
-    BufferUsage *bufUsage;
-    char *tupleQueue;
-    char *pstmt_space;
-    char *param_space;
+    struct SharedExecutorInstrumentation* instrumentation;
+    BufferUsage* bufUsage;
+    char* tupleQueue;
+    char* pstmt_space;
+    char* param_space;
     Size param_len;
     int64 tuples_needed; /* tuple bound, see ExecSetTupleBound */
     int eflags;
     int pscan_num;
-    ParallelHeapScanDescData **pscan;
-    int pappend_num;
-    ParallelAppendState **pappend;
+    ParallelHeapScanDescData** pscan;
     int piscan_num;
-    ParallelIndexScanDescData **piscan;
+    ParallelIndexScanDescData** piscan;
+    int pappend_num;
+    ParallelAppendState** pappend;
+    int jstate_num;
+    ParallelHashJoinState** jstate;
+    int hash_num;
+    SharedHashInfo** shared_info;
 } ParallelQueryInfo;
 
 struct BTShared;

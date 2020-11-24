@@ -68,6 +68,10 @@ public:
 
     Relation m_rel;
 
+    Relation m_parentRel;
+
+    Partition m_partRel;
+
     TupleTableSlot* m_reslot;
 
     TupleDesc m_tupDesc;

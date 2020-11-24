@@ -588,21 +588,24 @@ IndexOnlyScanState* ExecInitIndexOnlyScan(IndexOnlyScan* node, EState* estate, i
             /* Initialize table partition list and index partition list for following scan*/
             ExecInitPartitionForIndexOnlyScan(indexstate, estate);
 
-            /* construct a dummy table relation with the first table partition for following scan */
-            currentpartition = (Partition)list_nth(indexstate->ss.partitions, 0);
-            indexstate->ss.ss_currentPartition =
-                partitionGetRelation(indexstate->ss.ss_currentRelation, currentpartition);
+            if (indexstate->ss.partitions != NIL) {
+                /* construct a dummy table relation with the first table partition for following scan */
+                currentpartition = (Partition)list_nth(indexstate->ss.partitions, 0);
+                indexstate->ss.ss_currentPartition =
+                    partitionGetRelation(indexstate->ss.ss_currentRelation, currentpartition);
 
-            /* construct a dummy index relation with the first table partition for following scan */
-            currentindex = (Partition)list_nth(indexstate->ioss_IndexPartitionList, 0);
-            indexstate->ioss_CurrentIndexPartition = partitionGetRelation(indexstate->ioss_RelationDesc, currentindex);
+                /* construct a dummy index relation with the first table partition for following scan */
+                currentindex = (Partition)list_nth(indexstate->ioss_IndexPartitionList, 0);
+                indexstate->ioss_CurrentIndexPartition = partitionGetRelation(indexstate->ioss_RelationDesc,
+                    currentindex);
 
-            indexstate->ioss_ScanDesc = abs_idx_beginscan(indexstate->ss.ss_currentPartition,
-                indexstate->ioss_CurrentIndexPartition,
-                estate->es_snapshot,
-                indexstate->ioss_NumScanKeys,
-                indexstate->ioss_NumOrderByKeys,
-                (ScanState*)indexstate);
+                indexstate->ioss_ScanDesc = abs_idx_beginscan(indexstate->ss.ss_currentPartition,
+                    indexstate->ioss_CurrentIndexPartition,
+                    estate->es_snapshot,
+                    indexstate->ioss_NumScanKeys,
+                    indexstate->ioss_NumOrderByKeys,
+                    (ScanState*)indexstate);
+            }
         }
     } else {
         /*
@@ -743,7 +746,6 @@ void ExecInitPartitionForIndexOnlyScan(IndexOnlyScanState* indexstate, EState* e
         ListCell* cell = NULL;
         List* part_seqs = plan->scan.pruningInfo->ls_rangeSelectedPartitions;
 
-        Assert(plan->scan.itrs == plan->scan.pruningInfo->ls_rangeSelectedPartitions->length);
         /*
          * get relation's lockmode that hangs on whether
          * it's one of the target relations of the query
@@ -753,6 +755,38 @@ void ExecInitPartitionForIndexOnlyScan(IndexOnlyScanState* indexstate, EState* e
         indexstate->ss.lockMode = lock;
         indexstate->lockMode = lock;
 
+        if (plan->scan.pruningInfo->paramArg != NULL) {
+            Param *paramArg = plan->scan.pruningInfo->paramArg;
+            Oid tablepartitionid = getPartitionOidByParam(currentRelation, paramArg,
+                &(estate->es_param_list_info->params[paramArg->paramid - 1]));
+            if (OidIsValid(tablepartitionid)) {
+                List *partitionIndexOidList = NIL;
+                tablepartition = partitionOpen(currentRelation, tablepartitionid, lock);
+                indexstate->ss.partitions = lappend(indexstate->ss.partitions, tablepartition);
+                partitionIndexOidList = PartitionGetPartIndexList(tablepartition);
+
+                Assert(PointerIsValid(partitionIndexOidList));
+                if (!PointerIsValid(partitionIndexOidList)) {
+                    ereport(ERROR,
+                        (errcode(ERRCODE_WRONG_OBJECT_TYPE),
+                            errmsg("no local indexes found for partition %s",
+                                PartitionGetPartitionName(tablepartition))));
+                }
+
+                Oid indexpartitionid = searchPartitionIndexOid(indexid, partitionIndexOidList);
+                list_free(partitionIndexOidList);
+                indexpartition = partitionOpen(indexstate->ioss_RelationDesc, indexpartitionid, lock);
+                if (indexpartition->pd_part->indisusable == false) {
+                    elog(ERROR, "can'nt initialize index-only scans using unusable local index \"%s\"",
+                        PartitionGetPartitionName(indexpartition));
+                }
+
+                indexstate->ioss_IndexPartitionList = lappend(indexstate->ioss_IndexPartitionList, indexpartition);
+            }
+            return;
+        }
+
+        Assert(plan->scan.itrs == plan->scan.pruningInfo->ls_rangeSelectedPartitions->length);
         foreach (cell, part_seqs) {
             Oid indexpartitionid = InvalidOid;
             List* partitionIndexOidList = NIL;

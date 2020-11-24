@@ -25,6 +25,7 @@ extern void ExecIndexRestrPos(IndexScanState* node);
 extern void ExecReScanIndexScan(IndexScanState* node);
 extern void ExecIndexScanEstimate(IndexScanState *node, ParallelContext *pcxt);
 extern void ExecIndexScanInitializeDSM(IndexScanState *node, ParallelContext *pcxt, int nodeid);
+extern void ExecIndexScanReInitializeDSM(IndexScanState *node, ParallelContext *pcxt);
 extern void ExecIndexScanInitializeWorker(IndexScanState *node, void *context);
 
 /*

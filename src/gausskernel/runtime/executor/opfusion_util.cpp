@@ -215,6 +215,36 @@ const char *getBypassReason(FusionType result)
             break;
         }
 
+        case NOBYPASS_ZERO_PARTITION: {
+            return "Bypass not support query in zero partition";
+            break;
+        }
+
+        case NOBYPASS_MULTI_PARTITION: {
+            return "Bypass not support query in multiple partitions";
+            break;
+        }
+
+        case NOBYPASS_EXP_NOT_SUPPORT_IN_PARTITION: {
+            return "Bypass not executed because the expression of query is not support in partition table";
+            break;
+        }
+
+        case NO_BYPASS_PARTITIONKEY_IS_NULL: {
+            return "Bypass not executed because the partition key is null";
+            break;
+        }
+
+        case NOBYPASS_NO_UPDATE_PARTITIONKEY: {
+            return "Bypass not support update the partition key";
+            break;
+        }
+
+        case NOBYPASS_NO_INCLUDING_PARTITIONKEY: {
+            return "Bypass not executed because the partition key is not in the parameters";
+            break;
+        }
+
         default: {
             Assert(0);
             ereport(ERROR,
@@ -617,6 +647,26 @@ FusionType checkFusionNestLoop(NestLoop *node, ParamListInfo params)
     return NESTLOOP_INDEX_FUSION;
 }
 
+template <bool isonlyindex> FusionType checkFusionPartitionNumber(Node *node, FusionType ftype)
+{
+    if (isonlyindex) {
+        IndexOnlyScan* scan = (IndexOnlyScan *)node;
+        if (scan->scan.itrs == 0) {
+            return NOBYPASS_ZERO_PARTITION;
+        } else if (scan->scan.itrs > 1) {
+            return NOBYPASS_MULTI_PARTITION;
+        }
+    } else {
+        IndexScan* scan = (IndexScan *)node;
+        if (scan->scan.itrs == 0) {
+            return NOBYPASS_ZERO_PARTITION;
+        } else if (scan->scan.itrs > 1) {
+            return NOBYPASS_MULTI_PARTITION;
+        }
+    }
+    return ftype;
+}
+
 FusionType getSelectFusionType(List *stmt_list, ParamListInfo params)
 {
     FusionType ftype = SELECT_FUSION;
@@ -702,7 +752,13 @@ FusionType getSelectFusionType(List *stmt_list, ParamListInfo params)
             top_plan = top_plan->lefttree;
         }
 #endif
-
+    if (IsA(top_plan, PartIterator)) {
+        if (u_sess->attr.attr_sql.enable_partition_opfusion) {
+            top_plan = top_plan->lefttree;
+        } else {
+            return NONE_FUSION;
+        }
+    }
     /* check for indexscan or indexonlyscan */
     if ((IsA(top_plan, IndexScan) || IsA(top_plan, IndexOnlyScan)) && top_plan->lefttree == NULL) {
         FusionType ttype;
@@ -717,6 +773,18 @@ FusionType getSelectFusionType(List *stmt_list, ParamListInfo params)
         }
     } else {
         return NOBYPASS_NO_INDEXSCAN;
+    }
+    /* check for the number of partitions */
+    if (IsA(top_plan, IndexScan)) {
+        IndexScan* scan = (IndexScan *)top_plan;
+        if (scan->scan.isPartTbl == true) {
+            ftype = checkFusionPartitionNumber<false>((Node *)scan, ftype);
+        }
+    } else {
+        IndexOnlyScan* scan = (IndexOnlyScan *)top_plan;
+        if (scan->scan.isPartTbl == true) {
+            ftype = checkFusionPartitionNumber<true>((Node *)scan, ftype);
+        }
     }
 
     return ftype;
@@ -741,8 +809,8 @@ FusionType checkTargetlist(List *targetList, FusionType ftype)
 bool checkDMLRelation(Relation rel, PlannedStmt *plannedstmt)
 {
     if (rel->rd_rel->relkind != RELKIND_RELATION || rel->rd_rel->relhasrules || rel->rd_rel->relhastriggers ||
-        rel->rd_rel->relhasoids || rel->rd_rel->relhassubclass || RelationIsPartitioned(rel) ||
-        RelationIsColStore(rel) || RelationInRedistribute(rel) || plannedstmt->hasReturning) {
+        rel->rd_rel->relhasoids || rel->rd_rel->relhassubclass || RelationIsColStore(rel) ||
+        RelationInRedistribute(rel) || plannedstmt->hasReturning) {
         return true;
     }
     return false;
@@ -782,6 +850,10 @@ FusionType getInsertFusionType(List *stmt_list, ParamListInfo params)
     Index res_rel_idx = linitial_int(plannedstmt->resultRelations);
     Oid relid = getrelid(res_rel_idx, plannedstmt->rtable);
     Relation rel = heap_open(relid, AccessShareLock);
+    if (RelationIsPartitioned(rel) && !u_sess->attr.attr_sql.enable_partition_opfusion) {
+        heap_close(rel, AccessShareLock);
+        return NONE_FUSION;
+    }
 
     for (int i = 0; i < rel->rd_att->natts; i++) {
         if (rel->rd_att->attrs[i]->attisdropped) {
@@ -835,13 +907,21 @@ FusionType getUpdateFusionType(List *stmt_list, ParamListInfo params)
     if (list_length(node->plans) != 1) {
         return NOBYPASS_NO_SIMPLE_PLAN;
     }
+    Plan *updatePlan = (Plan *)linitial(node->plans);
+    if (IsA(updatePlan, PartIterator)) {
+        if (u_sess->attr.attr_sql.enable_partition_opfusion) {
+            updatePlan = updatePlan->lefttree;
+        } else {
+            return NONE_FUSION;
+        }
+    }
 
-    if (!IsA(linitial(node->plans), IndexScan)) {
+    if (!IsA(updatePlan, IndexScan)) {
         return NOBYPASS_NO_INDEXSCAN;
     }
 
     /* check index scan */
-    FusionType ttype = checkFusionIndexScan<true, false>((Node *)linitial(node->plans), params);
+    FusionType ttype = checkFusionIndexScan<true, false>((Node *)updatePlan, params);
     /* check failed */
     if (ttype > BYPASS_OK) {
         return ttype;
@@ -855,12 +935,25 @@ FusionType getUpdateFusionType(List *stmt_list, ParamListInfo params)
         heap_close(rel, AccessShareLock);
         return NOBYPASS_DML_RELATION_NOT_SUPPORT;
     }
+    IndexScan *indexscan = (IndexScan *)updatePlan;
+    if (RELATION_IS_PARTITIONED(rel) && !(indexscan->scan.isPartTbl)) {
+        heap_close(rel, AccessShareLock);
+        return NOBYPASS_DML_RELATION_NOT_SUPPORT;
+    }
     heap_close(rel, AccessShareLock);
 
     /* check target list */
-    IndexScan *indexscan = (IndexScan *)linitial(node->plans);
+    if (node->partKeyUpdated == true) {
+        return NOBYPASS_NO_UPDATE_PARTITIONKEY;
+    }
     List *targetlist = indexscan->scan.plan.targetlist;
-    return checkTargetlist(targetlist, ftype);
+    ftype = checkTargetlist(targetlist, ftype);
+
+    /* check the number of partitions */
+    if (indexscan->scan.isPartTbl) {
+        ftype = checkFusionPartitionNumber<false>((Node *)indexscan, ftype);
+    }
+    return ftype;
 }
 
 FusionType getDeleteFusionType(List *stmt_list, ParamListInfo params)
@@ -883,18 +976,26 @@ FusionType getDeleteFusionType(List *stmt_list, ParamListInfo params)
     if (list_length(node->plans) != 1) {
         return NOBYPASS_NO_SIMPLE_PLAN;
     }
-
-    if (!IsA(linitial(node->plans), IndexScan)) {
+    Plan *deletePlan = (Plan *)linitial(node->plans);
+    if (IsA(deletePlan, PartIterator)) {
+        if (u_sess->attr.attr_sql.enable_partition_opfusion) {
+            deletePlan = deletePlan->lefttree;
+        } else {
+            return NONE_FUSION;
+        }
+    }
+    if (!IsA(deletePlan, IndexScan)) {
         return NOBYPASS_NO_INDEXSCAN;
     }
     /* check index scan */
-    FusionType ttype = checkFusionIndexScan<true, false>((Node *)linitial(node->plans), params);
+    FusionType ttype = checkFusionIndexScan<true, false>((Node *)deletePlan, params);
     /* check failed */
     if (ttype > BYPASS_OK) {
         return ttype;
     }
 
     /* check relation */
+    IndexScan* indexscan = (IndexScan *)deletePlan;
     Index res_rel_idx = linitial_int(plannedstmt->resultRelations);
     Oid relid = getrelid(res_rel_idx, plannedstmt->rtable);
     Relation rel = heap_open(relid, AccessShareLock);
@@ -903,6 +1004,11 @@ FusionType getDeleteFusionType(List *stmt_list, ParamListInfo params)
         return NOBYPASS_DML_RELATION_NOT_SUPPORT;
     }
     heap_close(rel, AccessShareLock);
+
+    /* check the number of partitions */
+    if (indexscan->scan.isPartTbl) {
+        ftype = checkFusionPartitionNumber<false>((Node *)indexscan, ftype);
+    }
 
     return ftype;
 }
