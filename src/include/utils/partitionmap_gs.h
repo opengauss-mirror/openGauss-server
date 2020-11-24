@@ -345,6 +345,7 @@ typedef struct PruningResult {
                         /*if interval partitions is empty, intervalOffset=-1*/
     Bitmapset* intervalSelectedPartitions;
     List* ls_rangeSelectedPartitions;
+    Param* paramArg;
 } PruningResult;
 
 extern Oid partIDGetPartOid(Relation relation, PartitionIdentifier* partID);
@@ -363,5 +364,6 @@ extern Oid GetNeedDegradToRangePartOid(Relation rel, Oid partOid);
 extern RangeElement* CopyRangeElementsWithoutBoundary(const RangeElement* src, int elementNum);
 extern char* ReadIntervalStr(HeapTuple tuple, TupleDesc tupleDesc);
 extern oidvector* ReadIntervalTablespace(HeapTuple tuple, TupleDesc tupleDesc);
+extern void get_typlenbyval(Oid typid, int16 *typlen, bool *typbyval);
 int ValueCmpLowBoudary(Const** partKeyValue, const RangeElement* partition, Interval* intervalValue);
 #endif /* PARTITIONMAP_GS_H_ */

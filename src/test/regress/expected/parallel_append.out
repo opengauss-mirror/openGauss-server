@@ -26,126 +26,122 @@ set enable_parallel_append to on;
 -------------------------------------------
 -- 1. union && union all
 -------------------------------------------
-explain select * from a union select * from b;
---?.*QUERY PLAN.*
---?-------------.*
---? HashAggregate  (cost=.* rows=10 width=12)
+explain (costs off) select * from a union select * from b;
+                QUERY PLAN                
+------------------------------------------
+ HashAggregate
    Group By Key: a.a1, a.a2, a.a3
---?   ->  Append  (cost=.* rows=10 width=12)
---?         ->  Gather  (cost=.* rows=5 width=12)
+   ->  Append
+         ->  Gather
                Number of Workers: 1
---?               ->  Parallel Seq Scan on a  (cost=.* rows=3 width=12)
---?         ->  Gather  (cost=.* rows=5 width=12)
+               ->  Parallel Seq Scan on a
+         ->  Gather
                Number of Workers: 1
---?               ->  Parallel Seq Scan on b  (cost=.* rows=3 width=12)
+               ->  Parallel Seq Scan on b
 (9 rows)
 
-explain select * from a union all select * from b;
---?.*QUERY PLAN.*
---?-----------.*
---? Gather  (cost=.* rows=10 width=12)
+explain (costs off) select * from a union all select * from b;
+             QUERY PLAN             
+------------------------------------
+ Gather
    Number of Workers: 2
---?   ->  Parallel Append  (cost=.* rows=4 width=12)
---?         ->  Parallel Seq Scan on a  (cost=.* rows=3 width=12)
---?         ->  Parallel Seq Scan on b  (cost=.* rows=3 width=12)
+   ->  Parallel Append
+         ->  Parallel Seq Scan on a
+         ->  Parallel Seq Scan on b
 (5 rows)
 
-explain select * from a where a1 > 4 union select * from b where b1 < 6;
---?.*QUERY PLAN.*
---?---------.*
---? HashAggregate  (cost=.* rows=3 width=12)
+explain (costs off) select * from a where a1 > 4 union select * from b where b1 < 6;
+                QUERY PLAN                
+------------------------------------------
+ HashAggregate
    Group By Key: a.a1, a.a2, a.a3
---?   ->  Append  (cost=.* rows=3 width=12)
---?         ->  Gather  (cost=.* rows=1 width=12)
+   ->  Append
+         ->  Gather
                Number of Workers: 1
---?               ->  Parallel Seq Scan on a  (cost=.* rows=1 width=12)
+               ->  Parallel Seq Scan on a
                      Filter: (a1 > 4)
---?         ->  Gather  (cost=.* rows=2 width=12)
+         ->  Gather
                Number of Workers: 1
---?               ->  Parallel Seq Scan on b  (cost=.* rows=1 width=12)
+               ->  Parallel Seq Scan on b
                      Filter: (b1 < 6)
 (11 rows)
 
-explain select * from a where a1 > 4 union all select * from b where b1 < 6;
---?.*QUERY PLAN.*
---?--------.*
---? Result  (cost=.* rows=3 width=12)
---?   ->  Append  (cost=.* rows=3 width=12)
---?         ->  Gather  (cost=.* rows=1 width=12)
+explain (costs off) select * from a where a1 > 4 union all select * from b where b1 < 6;
+                QUERY PLAN                
+------------------------------------------
+ Result
+   ->  Append
+         ->  Gather
                Number of Workers: 1
---?               ->  Parallel Seq Scan on a  (cost=.* rows=1 width=12)
+               ->  Parallel Seq Scan on a
                      Filter: (a1 > 4)
---?         ->  Gather  (cost=.* rows=2 width=12)
+         ->  Gather
                Number of Workers: 1
---?               ->  Parallel Seq Scan on b  (cost=.* rows=1 width=12)
+               ->  Parallel Seq Scan on b
                      Filter: (b1 < 6)
 (10 rows)
 
-explain select * from c where c1 in (select a1 from a union select b1 from b);
---?.*QUERY PLAN.*
---?-------.*
---? Hash Join  (cost=.* rows=5 width=12)
+explain (costs off) select * from c where c1 in (select a1 from a union select b1 from b);
+           QUERY PLAN            
+---------------------------------
+ Hash Join
    Hash Cond: (a.a1 = c.c1)
---?   ->  HashAggregate  (cost=.* rows=10 width=4)
+   ->  HashAggregate
          Group By Key: a.a1
---?         ->  Append  (cost=.* rows=10 width=4)
---?               ->  Seq Scan on a  (cost=.* rows=5 width=4)
---?               ->  Seq Scan on b  (cost=.* rows=5 width=4)
---?   ->  Hash  (cost=.* rows=5 width=12)
---?         ->  Seq Scan on c  (cost=.* rows=5 width=12)
+         ->  Append
+               ->  Seq Scan on a
+               ->  Seq Scan on b
+   ->  Hash
+         ->  Seq Scan on c
 (9 rows)
 
-explain select * from (select * from a union all select * from b) as ta, c where ta.a1 = c.c1;
---?.*QUERY PLAN.*
---?------.*
---? Hash Join  (cost=.* rows=5 width=24)
-   Hash Cond: (a.a1 = c.c1)
---?   ->  Gather  (cost=.* rows=10 width=12)
-         Number of Workers: 2
---?         ->  Parallel Append  (cost=.* rows=4 width=12)
---?               ->  Parallel Seq Scan on a  (cost=.* rows=3 width=12)
---?               ->  Parallel Seq Scan on b  (cost=.* rows=3 width=12)
---?   ->  Hash  (cost=.* rows=5 width=12)
---?         ->  Gather  (cost=.* rows=5 width=12)
-               Number of Workers: 1
---?               ->  Parallel Seq Scan on c  (cost=.* rows=3 width=12)
+explain (costs off) select * from (select * from a union all select * from b) as ta, c where ta.a1 = c.c1;
+                QUERY PLAN                
+------------------------------------------
+ Gather
+   Number of Workers: 2
+   ->  Parallel Hash Join
+         Hash Cond: (a.a1 = c.c1)
+         ->  Parallel Append
+               ->  Parallel Seq Scan on a
+               ->  Parallel Seq Scan on b
+         ->  Parallel Hash
+               ->  Parallel Seq Scan on c
+(9 rows)
+
+explain (costs off) select * from d left outer join (select * from a union all select * from b) as t on d.d1=t.a1 order by 1,2,3,4,5,6;
+                      QUERY PLAN                      
+------------------------------------------------------
+ Sort
+   Sort Key: d.d1, d.d2, d.d3, a.a1, a.a2, a.a3
+   ->  Gather
+         Number of Workers: 1
+         ->  Parallel Hash Left Join
+               Hash Cond: (d.d1 = a.a1)
+               ->  Parallel Seq Scan on d
+               ->  Parallel Hash
+                     ->  Parallel Append
+                           ->  Parallel Seq Scan on a
+                           ->  Parallel Seq Scan on b
 (11 rows)
 
-explain select * from d left outer join (select * from a union all select * from b) as t on d.d1=t.a1;
---?.*QUERY PLAN.*
---?-----.*
---? Hash Right Join  (cost=.* rows=10 width=24)
-   Hash Cond: (a.a1 = d.d1)
---?   ->  Gather  (cost=.* rows=10 width=12)
-         Number of Workers: 2
---?         ->  Parallel Append  (cost=.* rows=4 width=12)
---?               ->  Parallel Seq Scan on a  (cost=.* rows=3 width=12)
---?               ->  Parallel Seq Scan on b  (cost=.* rows=3 width=12)
---?   ->  Hash  (cost=.* rows=10 width=12)
---?         ->  Gather  (cost=.* rows=10 width=12)
-               Number of Workers: 1
---?               ->  Parallel Seq Scan on d  (cost=.* rows=6 width=12)
-(11 rows)
-
-explain select d.d1, sum(d.d2), sum(t.a2) from (select * from a union all select * from b) t, d where t.a1=d1 group by d.d1 order by 1,2;
---?.*QUERY PLAN.*
---?-------.*
---? Sort  (cost=.* rows=5 width=28)
+explain (costs off) select d.d1, sum(d.d2), sum(t.a2) from (select * from a union all select * from b) t, d where t.a1=d1 group by d.d1 order by 1,2;
+                         QUERY PLAN                         
+------------------------------------------------------------
+ Sort
    Sort Key: d.d1, (sum(d.d2))
---?   ->  HashAggregate  (cost=.* rows=5 width=28)
+   ->  HashAggregate
          Group By Key: d.d1
---?         ->  Hash Join  (cost=.* rows=10 width=12)
-               Hash Cond: (a.a1 = d.d1)
---?               ->  Gather  (cost=.* rows=10 width=8)
-                     Number of Workers: 2
---?                     ->  Parallel Append  (cost=.* rows=4 width=8)
---?                           ->  Parallel Seq Scan on a  (cost=.* rows=3 width=8)
---?                           ->  Parallel Seq Scan on b  (cost=.* rows=3 width=8)
---?               ->  Hash  (cost=.* rows=10 width=8)
---?                     ->  Gather  (cost=.* rows=10 width=8)
-                           Number of Workers: 1
---?                           ->  Parallel Seq Scan on d  (cost=.* rows=6 width=8)
-(15 rows)
+         ->  Gather
+               Number of Workers: 1
+               ->  Parallel Hash Join
+                     Hash Cond: (d.d1 = a.a1)
+                     ->  Parallel Seq Scan on d
+                     ->  Parallel Hash
+                           ->  Parallel Append
+                                 ->  Parallel Seq Scan on a
+                                 ->  Parallel Seq Scan on b
+(13 rows)
 
 select * from a union select * from b;
  a1 | a2 | a3 
@@ -204,23 +200,23 @@ select * from (select * from a union all select * from b) as ta, c where ta.a1 =
   8 |  8 |  8 |  8 |  8 |  8
 (2 rows)
 
-select * from d left outer join (select * from a union all select * from b) as t on d.d1=t.a1;
+select * from d left outer join (select * from a union all select * from b) as t on d.d1=t.a1 order by 1,2,3,4,5,6;
  d1 | d2 | d3 | a1 | a2 | a3 
 ----+----+----+----+----+----
-  4 |  6 |  8 |  4 |  4 |  4
-  4 |  5 |  6 |  4 |  4 |  4
-  5 |  7 | 10 |  5 |  5 |  5
-  5 |  6 |  7 |  5 |  5 |  5
-  1 |  3 |  2 |  1 |  1 |  1
   1 |  2 |  3 |  1 |  1 |  1
-  2 |  4 |  4 |  2 |  2 |  2
+  1 |  3 |  2 |  1 |  1 |  1
   2 |  3 |  4 |  2 |  2 |  2
-  3 |  5 |  6 |  3 |  3 |  3
+  2 |  4 |  4 |  2 |  2 |  2
   3 |  4 |  5 |  3 |  3 |  3
-  4 |  6 |  8 |  4 |  4 |  4
+  3 |  5 |  6 |  3 |  3 |  3
   4 |  5 |  6 |  4 |  4 |  4
-  5 |  7 | 10 |  5 |  5 |  5
+  4 |  5 |  6 |  4 |  4 |  4
+  4 |  6 |  8 |  4 |  4 |  4
+  4 |  6 |  8 |  4 |  4 |  4
   5 |  6 |  7 |  5 |  5 |  5
+  5 |  6 |  7 |  5 |  5 |  5
+  5 |  7 | 10 |  5 |  5 |  5
+  5 |  7 | 10 |  5 |  5 |  5
 (14 rows)
 
 select d.d1, sum(d.d2), sum(t.a2) from (select * from a union all select * from b) t, d where t.a1=d1 group by d.d1 order by 1,2;
@@ -236,42 +232,38 @@ select d.d1, sum(d.d2), sum(t.a2) from (select * from a union all select * from 
 -- set parallel_workers of table a to 0, subplan of seqscan on a should not be paralleled
 alter table a set (parallel_workers=0);
 explain (costs off) select * from d left outer join (select * from a union all select * from b) as t on d.d1=t.a1 order by 1,2,3,4,5,6;
-                   QUERY PLAN                   
-------------------------------------------------
- Sort
-   Sort Key: d.d1, d.d2, d.d3, a.a1, a.a2, a.a3
-   ->  Hash Right Join
-         Hash Cond: (a.a1 = d.d1)
-         ->  Gather
-               Number of Workers: 2
-               ->  Parallel Append
-                     ->  Seq Scan on a
-                     ->  Parallel Seq Scan on b
-         ->  Hash
-               ->  Gather
-                     Number of Workers: 1
-                     ->  Parallel Seq Scan on d
-(13 rows)
-
-explain (costs off) select d.d1, sum(d.d2), sum(t.a2) from (select * from a union all select * from b) t, d where t.a1=d1 group by d.d1 order by 1,2;
                       QUERY PLAN                      
 ------------------------------------------------------
+ Sort
+   Sort Key: d.d1, d.d2, d.d3, a.a1, a.a2, a.a3
+   ->  Gather
+         Number of Workers: 1
+         ->  Parallel Hash Left Join
+               Hash Cond: (d.d1 = a.a1)
+               ->  Parallel Seq Scan on d
+               ->  Parallel Hash
+                     ->  Parallel Append
+                           ->  Seq Scan on a
+                           ->  Parallel Seq Scan on b
+(11 rows)
+
+explain (costs off) select d.d1, sum(d.d2), sum(t.a2) from (select * from a union all select * from b) t, d where t.a1=d1 group by d.d1 order by 1,2;
+                         QUERY PLAN                         
+------------------------------------------------------------
  Sort
    Sort Key: d.d1, (sum(d.d2))
    ->  HashAggregate
          Group By Key: d.d1
-         ->  Hash Join
-               Hash Cond: (a.a1 = d.d1)
-               ->  Gather
-                     Number of Workers: 2
-                     ->  Parallel Append
-                           ->  Seq Scan on a
-                           ->  Parallel Seq Scan on b
-               ->  Hash
-                     ->  Gather
-                           Number of Workers: 1
-                           ->  Parallel Seq Scan on d
-(15 rows)
+         ->  Gather
+               Number of Workers: 1
+               ->  Parallel Hash Join
+                     Hash Cond: (d.d1 = a.a1)
+                     ->  Parallel Seq Scan on d
+                     ->  Parallel Hash
+                           ->  Parallel Append
+                                 ->  Seq Scan on a
+                                 ->  Parallel Seq Scan on b
+(13 rows)
 
 select * from d left outer join (select * from a union all select * from b) as t on d.d1=t.a1 order by 1,2,3,4,5,6;
  d1 | d2 | d3 | a1 | a2 | a3 
@@ -321,35 +313,35 @@ select * from c except all select * from b where b1 >4;
   9 |  9 |  9
 (3 rows)
 
-explain select * from c except select * from b where b1 >4;
---?.*QUERY PLAN.*
---?------.*
---? HashSetOp Except  (cost=.* rows=5 width=12)
---?   ->  Append  (cost=.* rows=10 width=12)
---?         ->  Subquery Scan on "*SELECT* 1"  (cost=.* rows=5 width=12)
---?               ->  Gather  (cost=.* rows=5 width=12)
+explain (costs off) select * from c except select * from b where b1 >4;
+                   QUERY PLAN                   
+------------------------------------------------
+ HashSetOp Except
+   ->  Append
+         ->  Subquery Scan on "*SELECT* 1"
+               ->  Gather
                      Number of Workers: 1
---?                     ->  Parallel Seq Scan on c  (cost=.* rows=3 width=12)
---?         ->  Subquery Scan on "*SELECT* 2"  (cost=.* rows=5 width=12)
---?               ->  Gather  (cost=.* rows=5 width=12)
+                     ->  Parallel Seq Scan on c
+         ->  Subquery Scan on "*SELECT* 2"
+               ->  Gather
                      Number of Workers: 1
---?                     ->  Parallel Seq Scan on b  (cost=.* rows=3 width=12)
+                     ->  Parallel Seq Scan on b
                            Filter: (b1 > 4)
 (11 rows)
 
-explain select * from c except all select * from b where b1 >4;
---?.*QUERY PLAN.*
---?--------.*
---? HashSetOp Except All  (cost=.* rows=5 width=12)
---?   ->  Append  (cost=.* rows=10 width=12)
---?         ->  Subquery Scan on "*SELECT* 1"  (cost=.* rows=5 width=12)
---?               ->  Gather  (cost=.* rows=5 width=12)
+explain (costs off) select * from c except all select * from b where b1 >4;
+                   QUERY PLAN                   
+------------------------------------------------
+ HashSetOp Except All
+   ->  Append
+         ->  Subquery Scan on "*SELECT* 1"
+               ->  Gather
                      Number of Workers: 1
---?                     ->  Parallel Seq Scan on c  (cost=.* rows=3 width=12)
---?         ->  Subquery Scan on "*SELECT* 2"  (cost=.* rows=5 width=12)
---?               ->  Gather  (cost=.* rows=5 width=12)
+                     ->  Parallel Seq Scan on c
+         ->  Subquery Scan on "*SELECT* 2"
+               ->  Gather
                      Number of Workers: 1
---?                     ->  Parallel Seq Scan on b  (cost=.* rows=3 width=12)
+                     ->  Parallel Seq Scan on b
                            Filter: (b1 > 4)
 (11 rows)
 
@@ -372,35 +364,35 @@ select * from e intersect all select * from c where c1 != 8;
   0 |  0 |  0
 (3 rows)
 
-explain select * from e intersect select * from c;
---?.*QUERY PLAN.*
---?----------.*
---? HashSetOp Intersect  (cost=.* rows=5 width=12)
---?   ->  Append  (cost=.* rows=12 width=12)
---?         ->  Subquery Scan on "*SELECT* 2"  (cost=.* rows=5 width=12)
---?               ->  Gather  (cost=.* rows=5 width=12)
+explain (costs off) select * from e intersect select * from c;
+                   QUERY PLAN                   
+------------------------------------------------
+ HashSetOp Intersect
+   ->  Append
+         ->  Subquery Scan on "*SELECT* 2"
+               ->  Gather
                      Number of Workers: 1
---?                     ->  Parallel Seq Scan on c  (cost=.* rows=3 width=12)
---?         ->  Subquery Scan on "*SELECT* 1"  (cost=.* rows=7 width=12)
---?               ->  Gather  (cost=.* rows=7 width=12)
+                     ->  Parallel Seq Scan on c
+         ->  Subquery Scan on "*SELECT* 1"
+               ->  Gather
                      Number of Workers: 1
---?                     ->  Parallel Seq Scan on e  (cost=.* rows=4 width=12)
+                     ->  Parallel Seq Scan on e
 (10 rows)
 
-explain select * from e intersect all select * from c where c1 != 8;
---?.*QUERY PLAN.*
---?---------.*
---? HashSetOp Intersect All  (cost=.* rows=4 width=12)
---?   ->  Append  (cost=.* rows=11 width=12)
---?         ->  Subquery Scan on "*SELECT* 2"  (cost=.* rows=4 width=12)
---?               ->  Gather  (cost=.* rows=4 width=12)
+explain (costs off) select * from e intersect all select * from c where c1 != 8;
+                   QUERY PLAN                   
+------------------------------------------------
+ HashSetOp Intersect All
+   ->  Append
+         ->  Subquery Scan on "*SELECT* 2"
+               ->  Gather
                      Number of Workers: 1
---?                     ->  Parallel Seq Scan on c  (cost=.* rows=2 width=12)
+                     ->  Parallel Seq Scan on c
                            Filter: (c1 <> 8)
---?         ->  Subquery Scan on "*SELECT* 1"  (cost=.* rows=7 width=12)
---?               ->  Gather  (cost=.* rows=7 width=12)
+         ->  Subquery Scan on "*SELECT* 1"
+               ->  Gather
                      Number of Workers: 1
---?                     ->  Parallel Seq Scan on e  (cost=.* rows=4 width=12)
+                     ->  Parallel Seq Scan on e
 (11 rows)
 
 --------------------------------------
@@ -505,134 +497,132 @@ select * from (select * from a union all select * from b)as x, (select * from d 
   8 |  8 |  8 |  8 |  8 |  8
 (20 rows)
 
-explain select * from e intersect (select * from a except select * from b union select * from c);
---?.*QUERY PLAN.*
---?------.*
---? HashSetOp Intersect  (cost=.* rows=7 width=12)
---?   ->  Append  (cost=.* rows=17 width=12)
---?         ->  Subquery Scan on "*SELECT* 1"  (cost=.* rows=7 width=12)
---?               ->  Gather  (cost=.* rows=7 width=12)
+explain (costs off) select * from e intersect (select * from a except select * from b union select * from c);
+                                     QUERY PLAN                                      
+-------------------------------------------------------------------------------------
+ HashSetOp Intersect
+   ->  Append
+         ->  Subquery Scan on "*SELECT* 1"
+               ->  Gather
                      Number of Workers: 1
---?                     ->  Parallel Seq Scan on e  (cost=.* rows=4 width=12)
---?         ->  Result  (cost=.* rows=10 width=12)
---?               ->  HashAggregate  (cost=.* rows=10 width=12)
+                     ->  Parallel Seq Scan on e
+         ->  Result
+               ->  HashAggregate
                      Group By Key: "*SELECT* 2".a1, "*SELECT* 2".a2, "*SELECT* 2".a3
---?                     ->  Append  (cost=.* rows=10 width=12)
---?                           ->  Result  (cost=.* rows=5 width=12)
---?                                 ->  HashSetOp Except  (cost=.* rows=5 width=12)
---?                                       ->  Append  (cost=.* rows=10 width=12)
---?                                             ->  Subquery Scan on "*SELECT* 2"  (cost=.* rows=5 width=12)
---?                                                   ->  Gather  (cost=.* rows=5 width=12)
+                     ->  Append
+                           ->  Result
+                                 ->  HashSetOp Except
+                                       ->  Append
+                                             ->  Subquery Scan on "*SELECT* 2"
+                                                   ->  Gather
                                                          Number of Workers: 1
---?                                                         ->  Parallel Seq Scan on a  (cost=.* rows=3 width=12)
---?                                             ->  Subquery Scan on "*SELECT* 3"  (cost=.* rows=5 width=12)
---?                                                   ->  Gather  (cost=.* rows=5 width=12)
+                                                         ->  Parallel Seq Scan on a
+                                             ->  Subquery Scan on "*SELECT* 3"
+                                                   ->  Gather
                                                          Number of Workers: 1
---?                                                         ->  Parallel Seq Scan on b  (cost=.* rows=3 width=12)
---?                           ->  Gather  (cost=.* rows=5 width=12)
+                                                         ->  Parallel Seq Scan on b
+                           ->  Gather
                                  Number of Workers: 1
---?                                 ->  Parallel Seq Scan on c  (cost=.* rows=3 width=12)
+                                 ->  Parallel Seq Scan on c
 (24 rows)
 
-explain select d2 from d except all (select d2 from d except select c1 from c) union all select e1 from e;
---?.*QUERY PLAN.*
---?-------------.*
---? Append  (cost=.* rows=17 width=4)
---?   ->  Result  (cost=.* rows=10 width=4)
---?         ->  HashSetOp Except All  (cost=.* rows=10 width=4)
---?               ->  Append  (cost=.* rows=16 width=4)
---?                     ->  Subquery Scan on "*SELECT* 1"  (cost=.* rows=10 width=4)
---?                           ->  Gather  (cost=.* rows=10 width=4)
+explain (costs off) select d2 from d except all (select d2 from d except select c1 from c) union all select e1 from e;
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Append
+   ->  Result
+         ->  HashSetOp Except All
+               ->  Append
+                     ->  Subquery Scan on "*SELECT* 1"
+                           ->  Gather
                                  Number of Workers: 1
---?                                 ->  Parallel Seq Scan on d  (cost=.* rows=6 width=4)
---?                     ->  Result  (cost=.* rows=6 width=4)
---?                           ->  HashSetOp Except  (cost=.* rows=6 width=4)
---?                                 ->  Append  (cost=.* rows=15 width=4)
---?                                       ->  Subquery Scan on "*SELECT* 2"  (cost=.* rows=10 width=4)
---?                                             ->  Gather  (cost=.* rows=10 width=4)
+                                 ->  Parallel Seq Scan on d
+                     ->  Result
+                           ->  HashSetOp Except
+                                 ->  Append
+                                       ->  Subquery Scan on "*SELECT* 2"
+                                             ->  Gather
                                                    Number of Workers: 1
---?                                                   ->  Parallel Seq Scan on d  (cost=.* rows=6 width=4)
---?                                       ->  Subquery Scan on "*SELECT* 3"  (cost=.* rows=5 width=4)
---?                                             ->  Gather  (cost=.* rows=5 width=4)
+                                                   ->  Parallel Seq Scan on d
+                                       ->  Subquery Scan on "*SELECT* 3"
+                                             ->  Gather
                                                    Number of Workers: 1
---?                                                   ->  Parallel Seq Scan on c  (cost=.* rows=3 width=4)
---?   ->  Gather  (cost=.* rows=7 width=4)
+                                                   ->  Parallel Seq Scan on c
+   ->  Gather
          Number of Workers: 1
---?         ->  Parallel Seq Scan on e  (cost=.* rows=4 width=4)
+         ->  Parallel Seq Scan on e
 (22 rows)
 
-explain select * from a union all (select * from b union select * from c where c1 < 5);
---?.*QUERY PLAN.*
---?------------.*
---? Append  (cost=.* rows=12 width=12)
---?   ->  Gather  (cost=.* rows=5 width=12)
+explain (costs off) select * from a union all (select * from b union select * from c where c1 < 5);
+                   QUERY PLAN                   
+------------------------------------------------
+ Append
+   ->  Gather
          Number of Workers: 1
---?         ->  Parallel Seq Scan on a  (cost=.* rows=3 width=12)
---?   ->  HashAggregate  (cost=.* rows=7 width=12)
+         ->  Parallel Seq Scan on a
+   ->  HashAggregate
          Group By Key: b.b1, b.b2, b.b3
---?         ->  Append  (cost=.* rows=7 width=12)
---?               ->  Gather  (cost=.* rows=5 width=12)
+         ->  Append
+               ->  Gather
                      Number of Workers: 1
---?                     ->  Parallel Seq Scan on b  (cost=.* rows=3 width=12)
---?               ->  Gather  (cost=.* rows=2 width=12)
+                     ->  Parallel Seq Scan on b
+               ->  Gather
                      Number of Workers: 1
---?                     ->  Parallel Seq Scan on c  (cost=.* rows=1 width=12)
+                     ->  Parallel Seq Scan on c
                            Filter: (c1 < 5)
 (14 rows)
 
-explain select * from a except select * from b union select * from c;
---?.*QUERY PLAN.*
---?-------------.*
---? HashAggregate  (cost=.* rows=10 width=12)
+explain (costs off) select * from a except select * from b union select * from c;
+                            QUERY PLAN                             
+-------------------------------------------------------------------
+ HashAggregate
    Group By Key: "*SELECT* 1".a1, "*SELECT* 1".a2, "*SELECT* 1".a3
---?   ->  Append  (cost=.* rows=10 width=12)
---?         ->  Result  (cost=.* rows=5 width=12)
---?               ->  HashSetOp Except  (cost=.* rows=5 width=12)
---?                     ->  Append  (cost=.* rows=10 width=12)
---?                           ->  Subquery Scan on "*SELECT* 1"  (cost=.* rows=5 width=12)
---?                                 ->  Gather  (cost=.* rows=5 width=12)
+   ->  Append
+         ->  Result
+               ->  HashSetOp Except
+                     ->  Append
+                           ->  Subquery Scan on "*SELECT* 1"
+                                 ->  Gather
                                        Number of Workers: 1
---?                                       ->  Parallel Seq Scan on a  (cost=.* rows=3 width=12)
---?                           ->  Subquery Scan on "*SELECT* 2"  (cost=.* rows=5 width=12)
---?                                 ->  Gather  (cost=.* rows=5 width=12)
+                                       ->  Parallel Seq Scan on a
+                           ->  Subquery Scan on "*SELECT* 2"
+                                 ->  Gather
                                        Number of Workers: 1
---?                                       ->  Parallel Seq Scan on b  (cost=.* rows=3 width=12)
---?         ->  Gather  (cost=.* rows=5 width=12)
+                                       ->  Parallel Seq Scan on b
+         ->  Gather
                Number of Workers: 1
---?               ->  Parallel Seq Scan on c  (cost=.* rows=3 width=12)
+               ->  Parallel Seq Scan on c
 (17 rows)
 
-explain select * from b union all (select * from (select * from a union all select * from b));
---?.*   QUERY PLAN.*
---?---------.*
---? Gather  (cost=.* rows=15 width=12)
+explain (costs off) select * from b union all (select * from (select * from a union all select * from b));
+             QUERY PLAN             
+------------------------------------
+ Gather
    Number of Workers: 2
---?   ->  Parallel Append  (cost=.* rows=6 width=12)
---?         ->  Parallel Seq Scan on b  (cost=.* rows=3 width=12)
---?         ->  Parallel Seq Scan on a  (cost=.* rows=3 width=12)
---?         ->  Parallel Seq Scan on b  (cost=.* rows=3 width=12)
+   ->  Parallel Append
+         ->  Parallel Seq Scan on b
+         ->  Parallel Seq Scan on a
+         ->  Parallel Seq Scan on b
 (6 rows)
 
-explain select * from (select * from a union all select * from b)as x, (select * from d union all select* from e)as y
+explain (costs off) select * from (select * from a union all select * from b)as x, (select * from d union all select* from e)as y
     where x.a1 = y.d1 order by 1, 2, 3, 4, 5, 6;
---?.*  QUERY PLAN.*
---?--------.*
---? Sort  (cost=.* rows=10 width=24)
+                      QUERY PLAN                      
+------------------------------------------------------
+ Sort
    Sort Key: a.a1, a.a2, a.a3, d.d2, d.d3
---?   ->  Hash Join  (cost=.* rows=10 width=24)
-         Hash Cond: (d.d1 = a.a1)
---?         ->  Gather  (cost=.* rows=17 width=12)
-               Number of Workers: 2
---?               ->  Parallel Append  (cost=.* rows=7 width=12)
---?                     ->  Parallel Seq Scan on d  (cost=.* rows=6 width=12)
---?                     ->  Parallel Seq Scan on e  (cost=.* rows=4 width=12)
---?         ->  Hash  (cost=.* rows=10 width=12)
---?               ->  Gather  (cost=.* rows=10 width=12)
-                     Number of Workers: 2
---?                     ->  Parallel Append  (cost=.* rows=4 width=12)
---?                           ->  Parallel Seq Scan on a  (cost=.* rows=3 width=12)
---?                           ->  Parallel Seq Scan on b  (cost=.* rows=3 width=12)
-(15 rows)
+   ->  Gather
+         Number of Workers: 2
+         ->  Parallel Hash Join
+               Hash Cond: (d.d1 = a.a1)
+               ->  Parallel Append
+                     ->  Parallel Seq Scan on d
+                     ->  Parallel Seq Scan on e
+               ->  Parallel Hash
+                     ->  Parallel Append
+                           ->  Parallel Seq Scan on a
+                           ->  Parallel Seq Scan on b
+(13 rows)
 
 ----------------------------------------
 -- clean up

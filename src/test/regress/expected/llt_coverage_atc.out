@@ -176,8 +176,8 @@ set enable_hashjoin=on;
 set enable_nestloop=off;
 set enable_mergejoin=off;
 explain (ANALYZE on, BUFFERS on, TIMING on, detail off, format text) select * from llt_show_datanode_buffers, llt_show_datanode_buffers_1 where llt_show_datanode_buffers.q2=llt_show_datanode_buffers_1.q1;
---? .*QUERY PLAN
---? .*
+--?.*
+--?.*
 --? Hash Join  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\) \(actual time=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* loops=[0-9]*\)
    Hash Cond: (llt_show_datanode_buffers_1.q1 = llt_show_datanode_buffers.q2)
 --?   (Buffers: shared hit=.* dirtied=.*)
@@ -450,8 +450,8 @@ explain (ANALYZE on, BUFFERS on, TIMING off, detail off, format JSON, cpu on) se
 (1 row)
 
 explain (ANALYZE on, BUFFERS on, TIMING on, detail on, format text) select * from llt_show_datanode_buffers, llt_show_datanode_buffers_1 where llt_show_datanode_buffers.q2=llt_show_datanode_buffers_1.q1;
---? .*QUERY PLAN
---? .*
+--?.*
+--?.*
 --? Hash Join  \(cost=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* width=[0-9]*\) \(actual time=[0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* rows=[0-9]* loops=[0-9]*\)
    Hash Cond: (llt_show_datanode_buffers_1.q1 = llt_show_datanode_buffers.q2)
 --?   (Buffers: shared hit=.* dirtied=.*)

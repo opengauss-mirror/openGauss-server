@@ -1158,6 +1158,19 @@ Oid getRangePartitionOid(Relation relation, Const** partKeyValue, int32* partSeq
     return result;
 }
 
+Oid getPartitionOidByParam(Relation relation, Param *paramArg, ParamExternData *prm)
+{
+    int16 typLen;
+    bool typByVal = false;
+
+    Assert(prm->ptype == paramArg->paramtype);
+    get_typlenbyval(paramArg->paramtype, &typLen, &typByVal);
+    Const *value = makeConst(paramArg->paramtype, paramArg->paramtypmod, paramArg->paramcollid,
+        (int)typLen, prm->value, prm->isnull, typByVal);
+
+    return getRangePartitionOid(relation, &value, NULL, true);
+}
+
 inline Const* CalcLowBoundary(const Const* upBoundary, Interval* intervalValue)
 {
     Assert(upBoundary->consttype == TIMESTAMPOID || upBoundary->consttype == TIMESTAMPTZOID ||

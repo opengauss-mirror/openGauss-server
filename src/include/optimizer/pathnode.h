@@ -99,7 +99,8 @@ extern MergePath* create_mergejoin_path(PlannerInfo* root, RelOptInfo* joinrel, 
 
 extern HashPath* create_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype,
     JoinCostWorkspace* workspace, SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, Path* outer_path,
-    Path* inner_path, List* restrict_clauses, Relids required_outer, List* hashclauses, int dop = 1);
+    Path* inner_path, bool parallel_hash, List* restrict_clauses, Relids required_outer, List* hashclauses,
+    int dop = 1);
 
 extern Path* reparameterize_path(PlannerInfo* root, Path* path, Relids required_outer, double loop_count);
 
