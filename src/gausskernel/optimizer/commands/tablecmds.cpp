@@ -10704,18 +10704,6 @@ enable_disable_constraint_primary(Form_pg_constraint con, bool isenable)
         //recreate index 
         AdaptMem mem_info;
 
-        //Oid heapPartOid = InvalidOid;
-        //TODO, ALTER TABLE ENABLE/DISABLE CONSTRAINT
-//         if (partition_name != NULL)
-//             indPartOid = partitionNameGetPartitionOid(indOid,
-//                 partition_name,
-//                 PART_OBJ_TYPE_INDEX_PARTITION,
-//                 AccessExclusiveLock,  // lock on index partition
-//                 false,
-//                 false,
-//                 PartitionNameCallbackForIndexPartition,
-//                 (void*)&heapPartOid,
-//                 ShareLock);  // lock on heap partition
         persistence = irel->rd_rel->relpersistence;
 
         //the index must be not used 
