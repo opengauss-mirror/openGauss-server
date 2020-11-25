@@ -4696,6 +4696,22 @@ static void init_configure_names_int()
 {
     struct config_int local_configure_names_int[] = {
         {
+	    {
+	        "config_sync_interval",
+		PGC_POSTMASTER,
+		WAL_SETTINGS,
+		gettext_noop("The synchronization time interval for the config file."),
+		NULL
+	    },
+	    &g_instance.attr.attr_common.config_sync_interval,
+	    3600000,
+	    0,
+	    INT_MAX,
+	    NULL,
+	    NULL,
+	    NULL
+	},
+        {
             {
                 "max_active_global_temporary_table",
                 PGC_USERSET,

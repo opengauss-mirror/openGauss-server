@@ -76,6 +76,7 @@ typedef struct knl_instance_attr_common {
     bool enable_alarm;
     char* Alarm_component;
     char* MOTConfigFileName;
+    int config_sync_interval;
 } knl_instance_attr_common;
 
 #endif /* SRC_INCLUDE_KNL_KNL_INSTANCE_ATTR_COMMON_H_ */
