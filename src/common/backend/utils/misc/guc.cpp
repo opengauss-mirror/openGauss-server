@@ -10868,7 +10868,7 @@ static void init_configure_names_string()
                 GUC_LIST_INPUT
             },
             &u_sess->attr.attr_storage.SyncRepStandbyNames,
-            "",
+            "*",
             check_synchronous_standby_names,
             assign_synchronous_standby_names,
             NULL
