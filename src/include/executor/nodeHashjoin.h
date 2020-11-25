@@ -14,6 +14,7 @@
 #ifndef NODEHASHJOIN_H
 #define NODEHASHJOIN_H
 
+#include "access/parallel.h"
 #include "nodes/execnodes.h"
 #include "storage/buffile.h"
 
@@ -24,5 +25,10 @@ extern void ExecReScanHashJoin(HashJoinState* node);
 extern void ExecHashJoinSaveTuple(MinimalTuple tuple, uint32 hashvalue, BufFile** fileptr);
 extern void ExecEarlyFreeHashJoin(HashJoinState* node);
 extern void ExecReSetHashJoin(HashJoinState* node);
+
+extern void ExecShutdownHashJoin(HashJoinState* node);
+extern void ExecHashJoinInitializeDSM(HashJoinState* state, ParallelContext* pcxt, int nodeid);
+extern void ExecHashJoinReInitializeDSM(HashJoinState* state, ParallelContext* pcxt);
+extern void ExecHashJoinInitializeWorker(HashJoinState* state, void* pwcxt);
 
 #endif /* NODEHASHJOIN_H */

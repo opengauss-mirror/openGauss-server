@@ -667,8 +667,8 @@ static void set_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, Index rti, Rang
         generate_gather_paths(root, rel);
     }
 
-    /* 
-     * Find the cheapest of the paths for this rel here because 
+    /*
+     * Find the cheapest of the paths for this rel here because
      * generate_gather_paths may delete a path that some paths have
      * a reference to.
      */
@@ -1783,7 +1783,7 @@ static void add_paths_to_append_rel(PlannerInfo *root, RelOptInfo *rel, List *li
 
             parallel_workers = Max(parallel_workers, path->parallel_workers);
         }
- 
+
         /*
          * Same formula here as above.  It's even more important in this
          * instance because the non-partial paths won't contribute anything to

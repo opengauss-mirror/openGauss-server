@@ -61,6 +61,7 @@ SELECT name, setting FROM pg_settings WHERE name LIKE 'enable%' ORDER BY name;
  enable_page_lsn_check             | on
  enable_parallel_append            | on
  enable_parallel_ddl               | on
+ enable_parallel_hash              | on
  enable_partitionwise              | off
  enable_pbe_optimization           | on
  enable_prevent_job_task_startup   | off
@@ -85,7 +86,7 @@ SELECT name, setting FROM pg_settings WHERE name LIKE 'enable%' ORDER BY name;
  enable_vector_engine              | on
  enable_wdr_snapshot               | off
  enable_xlog_prune                 | on
-(81 rows)
+(82 rows)
 
 CREATE TABLE foo2(fooid int, f2 int);
 INSERT INTO foo2 VALUES(1, 11);

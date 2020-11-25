@@ -3602,12 +3602,14 @@ MergeScanSelCache* cached_scansel(PlannerInfo* root, RestrictInfo* rinfo, PathKe
  * 'semifactors' contains valid data if jointype is SEMI or ANTI
  */
 void initial_cost_hashjoin(PlannerInfo* root, JoinCostWorkspace* workspace, JoinType jointype, List* hashclauses,
-    Path* outer_path, Path* inner_path, SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, int dop)
+    Path* outer_path, Path* inner_path, SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, int dop,
+    bool parallel_hash)
 {
     Cost startup_cost = 0;
     Cost run_cost = 0;
     double outer_path_rows = PATH_LOCAL_ROWS(outer_path) / dop;
     double inner_path_rows = PATH_LOCAL_ROWS(inner_path) / dop;
+    double inner_path_rows_total = inner_path_rows;
     int num_hashclauses = list_length(hashclauses);
     int numbuckets;
     int numbatches;
@@ -3616,6 +3618,7 @@ void initial_cost_hashjoin(PlannerInfo* root, JoinCostWorkspace* workspace, Join
     int outer_width; /* width of outer rel */
     double outerpages;
     double innerpages;
+    size_t space_allowed; /* unused */
 
     errno_t rc = 0;
 
@@ -3630,6 +3633,16 @@ void initial_cost_hashjoin(PlannerInfo* root, JoinCostWorkspace* workspace, Join
     /* cost of source data */
     startup_cost += outer_path->startup_cost;
     run_cost += outer_path->total_cost - outer_path->startup_cost;
+
+    /*
+     * If this is a parallel hash build, then the value we have for
+     * inner_rows_total currently refers only to the rows returned by each
+     * participant.  For shared hash table size estimation, we need the total
+     * number, so we need to undo the division.
+     */
+    if (u_sess->attr.attr_sql.enable_parallel_hash) {
+        inner_path_rows_total *= get_parallel_divisor(inner_path);
+    }
     /*
      * Sometimes, we suffers the case that small table with large cost join
      * with a large table. In such case, the cost mainly comes from large cost
@@ -3690,9 +3703,12 @@ void initial_cost_hashjoin(PlannerInfo* root, JoinCostWorkspace* workspace, Join
      */
     inner_width = get_path_actual_total_width(inner_path, root->glob->vectorized, OP_HASHJOIN, newcolnum);
     outer_width = get_path_actual_total_width(outer_path, root->glob->vectorized, OP_HASHJOIN);
-    ExecChooseHashTableSize(inner_path_rows,
+    ExecChooseHashTableSize(inner_path_rows_total,
         inner_width,
         true,
+        parallel_hash, /* try_combined_work_mem */
+        outer_path->parallel_workers,
+        &space_allowed,
         &numbuckets,
         &numbatches,
         &num_skew_mcvs,
@@ -3759,6 +3775,7 @@ void initial_cost_hashjoin(PlannerInfo* root, JoinCostWorkspace* workspace, Join
     workspace->run_cost = run_cost;
     workspace->numbuckets = numbuckets;
     workspace->numbatches = numbatches;
+    workspace->inner_rows_total = inner_path_rows_total;
 
     ereport(DEBUG1,
         (errmodule(MOD_OPT_JOIN),
@@ -3872,6 +3889,7 @@ void final_cost_hashjoin(PlannerInfo* root, HashPath* path, JoinCostWorkspace* w
     Path* inner_path = path->jpath.innerjoinpath;
     double outer_path_rows = PATH_LOCAL_ROWS(outer_path) / dop;
     double inner_path_rows = PATH_LOCAL_ROWS(inner_path) / dop;
+    double inner_path_rows_total = workspace->inner_rows_total;
     List* hashclauses = path->path_hashclauses;
     Cost startup_cost = workspace->startup_cost;
     Cost run_cost = workspace->run_cost;
@@ -3911,6 +3929,9 @@ void final_cost_hashjoin(PlannerInfo* root, HashPath* path, JoinCostWorkspace* w
 
     /* mark the path with estimated # of batches */
     path->num_batches = numbatches;
+
+    /* store the total number of tuples (sum of partial row estimates) */
+    path->inner_rows_total = inner_path_rows_total;
 
     /* and compute the number of "virtual" buckets in the whole join */
     virtualbuckets = (double)numbuckets * (double)numbatches;

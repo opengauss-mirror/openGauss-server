@@ -23,6 +23,7 @@
  *		ExecIndexRestrPos		restores scan position.
  *		ExecIndexScanEstimate	estimates DSM space needed for parallel index scan
  *		ExecIndexScanInitializeDSM initialize DSM for parallel indexscan
+ *		ExecIndexScanReInitializeDSM reinitialize DSM for fresh scan
  *		ExecIndexScanInitializeWorker attach to DSM info in parallel worker
  */
 #include "postgres.h"
@@ -182,19 +183,6 @@ TupleTableSlot* ExecIndexScan(IndexScanState* node)
  */
 void ExecReScanIndexScan(IndexScanState* node)
 {
-    bool reset_parallel_scan = true;
-
-    /*
-     * If we are here to just update the scan keys, then don't reset parallel
-     * scan.  We don't want each of the participating process in the parallel
-     * scan to update the shared parallel scan state at the start of the scan.
-     * It is quite possible that one of the participants has already begun
-     * scanning the index when another has yet to start it.
-     */
-    if (node->iss_NumRuntimeKeys != 0 && !node->iss_RuntimeKeysReady) {
-        reset_parallel_scan = false;
-    }
-
     /*
      * For recursive-stream rescan, if number of RuntimeKeys not euqal zero,
      * just return without rescan.
@@ -256,10 +244,6 @@ void ExecReScanIndexScan(IndexScanState* node)
     if (node->iss_ScanDesc) {
         abs_idx_rescan(node->iss_ScanDesc, node->iss_ScanKeys, node->iss_NumScanKeys, node->iss_OrderByKeys,
             node->iss_NumOrderByKeys);
-
-        if (reset_parallel_scan && GetIndexScanDesc(node->iss_ScanDesc)->parallel_scan) {
-            index_parallelrescan(GetIndexScanDesc(node->iss_ScanDesc));
-        }
     }
 
     ExecScanReScan(&node->ss);
@@ -1418,6 +1402,17 @@ void ExecIndexScanInitializeDSM(IndexScanState *node, ParallelContext *pcxt, int
         abs_idx_rescan(node->iss_ScanDesc, node->iss_ScanKeys, node->iss_NumScanKeys, node->iss_OrderByKeys,
             node->iss_NumOrderByKeys);
     }
+}
+
+/* ----------------------------------------------------------------
+ *		ExecIndexScanReInitializeDSM
+ *
+ *		Reset shared state before beginning a fresh scan.
+ * ----------------------------------------------------------------
+ */
+void ExecIndexScanReInitializeDSM(IndexScanState* node, ParallelContext* pcxt)
+{
+    index_parallelrescan((IndexScanDesc)node->iss_ScanDesc);
 }
 
 /* ----------------------------------------------------------------

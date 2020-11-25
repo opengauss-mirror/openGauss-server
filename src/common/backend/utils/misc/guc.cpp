@@ -1674,6 +1674,20 @@ static void init_configure_names_bool()
         },
         {
             {
+                "enable_parallel_hash", 
+                PGC_USERSET, 
+                QUERY_TUNING_METHOD,
+                gettext_noop("Enables the planner's user of parallel hash plans."),
+                NULL
+            },
+            &u_sess->attr.attr_sql.enable_parallel_hash,
+            true,
+            NULL, 
+            NULL, 
+            NULL
+        },
+        {
+            {
                 "enable_nodegroup_debug",
                 PGC_USERSET,
                 QUERY_TUNING_METHOD,

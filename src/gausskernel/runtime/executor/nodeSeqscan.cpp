@@ -681,6 +681,18 @@ void ExecSeqScanInitializeDSM(SeqScanState *node, ParallelContext *pcxt, int nod
 }
 
 /* ----------------------------------------------------------------
+ *		ExecSeqScanReInitializeDSM
+ *
+ *		Reset shared state before beginning a fresh scan.
+ * ----------------------------------------------------------------
+ */
+void ExecSeqScanReInitializeDSM(SeqScanState* node, ParallelContext* pcxt)
+{
+    HeapScanDesc scan = (HeapScanDesc)node->ss_currentScanDesc;
+    heap_parallelscan_reinitialize(scan->rs_parallel);
+}
+
+/* ----------------------------------------------------------------
  *      ExecSeqScanInitializeWorker
  *
  *      Copy relevant information from TOC into planstate.
