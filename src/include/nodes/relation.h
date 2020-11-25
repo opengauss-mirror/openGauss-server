@@ -1274,10 +1274,9 @@ typedef struct MergePath {
  */
 typedef struct HashPath {
     JoinPath jpath;
-    List* path_hashclauses;  /* join clauses used for hashing */
-    int num_batches;         /* number of batches expected */
-    double inner_rows_total; /* total inner rows expected */
-    OpMemInfo mem_info; /* Mem info for hash table */
+    List* path_hashclauses; /* join clauses used for hashing */
+    int num_batches;        /* number of batches expected */
+    OpMemInfo mem_info;     /* Mem info for hash table */
 } HashPath;
 
 #ifdef PGXC
@@ -1930,7 +1929,6 @@ typedef struct JoinCostWorkspace {
     /* private for cost_hashjoin code */
     int numbuckets;
     int numbatches;
-    double inner_rows_total;
 
     /* Meminfo for joins */
     OpMemInfo outer_mem_info;

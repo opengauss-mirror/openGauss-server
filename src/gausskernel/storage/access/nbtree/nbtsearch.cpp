@@ -747,7 +747,7 @@ bool _bt_first(IndexScanDesc scan, ScanDirection dir)
                         break; /* wrong direction, can't use it */
                     if (subkey->sk_flags & SK_ISNULL)
                         break; /* can't use null keys */
-                    Assert(keysCount < INDEX_MAX_KEYS);
+                    Assert(keysCount < INDEX_MAX_KEYS);                    
                     scankeys[keysCount] = *subkey;
                     keysCount++;
                     if (subkey->sk_flags & SK_ROW_END) {

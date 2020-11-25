@@ -93,7 +93,6 @@ extern void RelationInitPartitionMap(Relation relation);
 
 extern int partOidGetPartSequence(Relation rel, Oid partOid);
 extern Oid getRangePartitionOid(Relation relation, Const** partKeyValue, int* partIndex, bool topClosed);
-extern Oid getPartitionOidByParam(Relation relation, Param *paramArg, ParamExternData *prm);
 
 extern List* getPartitionBoundaryList(Relation rel, int sequence);
 extern Oid partitionKeyValueListGetPartitionOid(Relation rel, List* partKeyValueList, bool topClosed);

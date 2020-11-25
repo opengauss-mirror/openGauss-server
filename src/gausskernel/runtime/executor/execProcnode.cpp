@@ -1360,27 +1360,20 @@ void ExecEndNode(PlanState* node)
  * no more rows will be needed (e.g. when a Limit is filled) rather than only
  * at the end of ExecutorRun.
  */
-bool ExecShutdownNode(PlanState* node)
+bool ExecShutdownNode(PlanState *node)
 {
-    if (node == NULL) {
+    if (node == NULL)
         return false;
-    }
-    (void)planstate_tree_walker(node, (bool (*)())ExecShutdownNode, NULL);
+
     switch (nodeTag(node)) {
         case T_GatherState:
-            ExecShutdownGather((GatherState*)node);
-            break;
-        case T_HashState:
-            ExecShutdownHash((HashState*)node);
-            break;
-        case T_HashJoinState:
-            ExecShutdownHashJoin((HashJoinState*)node);
+            ExecShutdownGather((GatherState *)node);
             break;
         default:
             break;
     }
 
-    return false;
+    return planstate_tree_walker(node, (bool (*)())ExecShutdownNode, NULL);
 }
 
 /*

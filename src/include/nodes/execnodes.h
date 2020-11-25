@@ -24,7 +24,6 @@
 #include "storage/pagecompress.h"
 #include "utils/bloom_filter.h"
 #include "utils/reltrigger.h"
-#include "utils/sharedtuplestore.h"
 #include "utils/sortsupport.h"
 #include "utils/tuplesort.h"
 #include "utils/tuplestore.h"
@@ -701,8 +700,6 @@ typedef HASH_SEQ_STATUS TupleHashIterator;
  * ----------------
  */
 typedef struct ExprState ExprState;
-
-struct ParallelHashJoinState;
 
 typedef Datum (*ExprStateEvalFunc)(ExprState* expression, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 typedef ScalarVector* (*VectorExprFun)(
@@ -2111,7 +2108,6 @@ typedef struct HashJoinState {
     bool hj_OuterNotEmpty;
     bool hj_streamBothSides;
     bool hj_rebuildHashtable;
-    bool isParallel;
 } HashJoinState;
 
 /* ----------------------------------------------------------------
@@ -2335,16 +2331,6 @@ typedef struct GatherState {
 } GatherState;
 
 /* ----------------
- *	 Shared memory container for per-worker hash information
- * ----------------
- */
-typedef struct SharedHashInfo {
-    int num_workers;
-    int plan_node_id; /* used to identify speicific plan */
-    Instrumentation instrument[FLEXIBLE_ARRAY_MEMBER];
-} SharedHashInfo;
-
-/* ----------------
  *	 HashState information
  * ----------------
  */
@@ -2355,12 +2341,7 @@ typedef struct HashState {
     int32 local_work_mem;    /* work_mem local for this hash join */
     int64 spill_size;
 
-    /* Parallel hash state. */
-    struct ParallelHashJoinState* parallel_state;
     /* hashkeys is same as parent's hj_InnerHashKeys */
-
-    SharedHashInfo* shared_info; /* one entry per worker */
-    Instrumentation* instrument; /* this worker's entry */
 } HashState;
 
 /* ----------------

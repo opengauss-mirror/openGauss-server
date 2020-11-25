@@ -571,7 +571,7 @@ void finalize_node_id(Plan* result_plan, int* plan_node_id, int* parent_node_id,
                     subplan_ids[subplanid] = subplan_ids[0];
                     *parent_node_id = save_parent_id;
                 }
-                if (IsExplainPlanStmt || IS_SINGLE_NODE) {
+                if (IsExplainPlanStmt) {
                     CteScan* cte_plan = (CteScan*)result_plan;
                     Plan* ru_plan = (Plan*)list_nth(subplans, cte_plan->ctePlanId - 1);
                     if (!IsA(ru_plan, RecursiveUnion))

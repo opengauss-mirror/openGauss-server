@@ -825,7 +825,7 @@ static void try_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType j
                     ? 1
                     : u_sess->opt_cxt.query_dop;
     initial_cost_hashjoin(
-        root, &workspace, jointype, hashclauses, outer_path, inner_path, sjinfo, semifactors, max_dop, false);
+        root, &workspace, jointype, hashclauses, outer_path, inner_path, sjinfo, semifactors, max_dop);
 
     if (add_path_precheck(joinrel, workspace.startup_cost, workspace.total_cost, NIL, required_outer) ||
         add_path_hintcheck(root->parse->hintState, joinrel->relids, outer_path, inner_path, HINT_KEYWORD_HASHJOIN)) {
@@ -899,7 +899,6 @@ static void try_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType j
                     semifactors,
                     outerpath,
                     innerpath,
-                    false, /* parallel_hash */
                     restrict_clauses,
                     required_outer,
                     hashclauses);
@@ -915,7 +914,6 @@ static void try_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType j
                         semifactors,
                         outer_path,
                         inner_path,
-                        false, /* parallel_hash */
                         restrict_clauses,
                         required_outer,
                         hashclauses));
@@ -931,13 +929,9 @@ static void try_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType j
  * try_partial_hashjoin_path
  *	  Consider a partial hashjoin join path; if it appears useful, push it into
  *	  the joinrel's partial_pathlist via add_partial_path().
- *	  The outer side is partial.  If parallel_hash is true, then the inner path
- *	  must be partial and will be run in parallel to create one or more shared
- *	  hash tables; otherwise the inner path must be complete and a copy of it
- *	  is run in every process to create separate identical private hash tables.
  */
 static void try_partial_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, Path* outer_path, Path* inner_path,
-    List* hashclauses, JoinType jointype, JoinPathExtraData* extra, bool parallel_hash)
+    List* hashclauses, JoinType jointype, JoinPathExtraData* extra)
 {
     JoinCostWorkspace workspace;
 
@@ -959,16 +953,8 @@ static void try_partial_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, Pa
      * Before creating a path, get a quick lower bound on what it is likely
      * to cost.  Bail out right away if it looks terrible.
      */
-    initial_cost_hashjoin(root,
-        &workspace,
-        jointype,
-        hashclauses,
-        outer_path,
-        inner_path,
-        extra->sjinfo,
-        &extra->semifactors,
-        1,
-        parallel_hash);
+    initial_cost_hashjoin(
+        root, &workspace, jointype, hashclauses, outer_path, inner_path, extra->sjinfo, &extra->semifactors, 1);
     if (!add_partial_path_precheck(joinrel, workspace.total_cost, NIL)) {
         return;
     }
@@ -983,7 +969,6 @@ static void try_partial_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, Pa
             &extra->semifactors,
             outer_path,
             inner_path,
-            parallel_hash,
             extra->restrictlist,
             NULL,
             hashclauses));
@@ -1790,34 +1775,13 @@ static void hash_inner_and_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
                  * because the outer path will be partial, and therefore we won't be
                  * able to properly guarantee uniqueness.  Also, the resulting path
                  * must not be parameterized.
-                 * We would be able to support JOIN_FULL and JOIN_RIGHT for Parallelgs
-                 * Hash, since in that case we're back to a single hash table with a
-                 * single set of match bits for each batch, but that will require
-                 * figuring out a deadlock-free way to wait for the probe to finish.
                  */
                 if (joinrel->consider_parallel && jointype != JOIN_UNIQUE_OUTER && jointype != JOIN_FULL &&
                     jointype != JOIN_RIGHT && outerrel->partial_pathlist != NIL) {
-                    Path* cheapest_partial_outer = NULL;
-                    Path* cheapest_partial_inner = NULL;
+                    Path* cheapest_partial_outer;
                     Path* cheapest_safe_inner = NULL;
 
                     cheapest_partial_outer = (Path*)linitial(outerrel->partial_pathlist);
-
-                    /*
-                     * Can we use a partial inner plan too, so that we can build a
-                     * shared hash table in parallel?
-                     */
-                    if (innerrel->partial_pathlist != NIL && u_sess->attr.attr_sql.enable_parallel_hash) {
-                        cheapest_partial_inner = (Path*)linitial(innerrel->partial_pathlist);
-                        try_partial_hashjoin_path(root,
-                            joinrel,
-                            cheapest_partial_outer,
-                            cheapest_partial_inner,
-                            hashclauses,
-                            jointype,
-                            extra,
-                            true /* parallel_hash */);
-                    }
 
                     /*
                      * Normally, given that the joinrel is parallel-safe, the cheapest
@@ -1841,14 +1805,8 @@ static void hash_inner_and_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
                     }
 
                     if (cheapest_safe_inner != NULL) {
-                        try_partial_hashjoin_path(root,
-                            joinrel,
-                            cheapest_partial_outer,
-                            cheapest_safe_inner,
-                            hashclauses,
-                            jointype,
-                            extra,
-                            false /* parallel_hash */);
+                        try_partial_hashjoin_path(
+                            root, joinrel, cheapest_partial_outer, cheapest_safe_inner, hashclauses, jointype, extra);
                     }
                 }
             }

@@ -98,8 +98,7 @@ static bool simplify_EXISTS_query(Query* query);
 static Query* convert_EXISTS_to_ANY(PlannerInfo* root, Query* subselect, Node** testexpr, List** paramIds);
 static Node* replace_correlation_vars_mutator(Node* node, PlannerInfo* root);
 static Node* process_sublinks_mutator(Node* node, process_sublinks_context* context);
-static Bitmapset* finalize_plan(
-    PlannerInfo* root, Plan* plan, int gather_param, Bitmapset* valid_params, Bitmapset* scan_params);
+static Bitmapset* finalize_plan(PlannerInfo* root, Plan* plan, Bitmapset* valid_params, Bitmapset* scan_params);
 static bool finalize_primnode(Node* node, finalize_primnode_context* context);
 static Node* convert_joinqual_to_antiqual(Node* node, Query* parse);
 static Node* convert_opexpr_to_boolexpr_for_antijoin(Node* node, Query* parse);
@@ -2312,7 +2311,7 @@ void SS_finalize_plan(PlannerInfo* root, Plan* plan, bool attach_initplans)
     /*
      * Now recurse through plan tree.
      */
-    (void)finalize_plan(root, plan, -1, valid_params, NULL);
+    (void)finalize_plan(root, plan, valid_params, NULL);
 
     bms_free_ext(valid_params);
 
@@ -2372,22 +2371,19 @@ static bool finalize_agg_primnode(Node* node, finalize_primnode_context* context
     return expression_tree_walker(node, (bool (*)())finalize_agg_primnode, (void*)context);
 }
 
-static void finalize_plans(PlannerInfo* root, finalize_primnode_context* context, List* plans, Bitmapset* valid_params,
-    Bitmapset* scan_params, int gather_param = -1)
+static void finalize_plans(
+    PlannerInfo* root, finalize_primnode_context* context, List* plans, Bitmapset* valid_params, Bitmapset* scan_params)
 {
     ListCell* lc = NULL;
 
     foreach (lc, plans) {
-        context->paramids = bms_add_members(
-            context->paramids, finalize_plan(root, (Plan*)lfirst(lc), gather_param, valid_params, scan_params));
+        context->paramids =
+            bms_add_members(context->paramids, finalize_plan(root, (Plan*)lfirst(lc), valid_params, scan_params));
     }
 }
 
 /*
  * Recursive processing of all nodes in the plan tree
- *
- * gather_param is the rescan_param of an ancestral Gather/GatherMerge,
- * or -1 if there is none.
  *
  * valid_params is the set of param IDs considered valid to reference in
  * this plan node or its children.
@@ -2398,8 +2394,7 @@ static void finalize_plans(PlannerInfo* root, finalize_primnode_context* context
  * The return value is the computed allParam set for the given Plan node.
  * This is just an internal notational convenience.
  */
-static Bitmapset* finalize_plan(
-    PlannerInfo* root, Plan* plan, int gather_param, Bitmapset* valid_params, Bitmapset* scan_params)
+static Bitmapset* finalize_plan(PlannerInfo* root, Plan* plan, Bitmapset* valid_params, Bitmapset* scan_params)
 {
     finalize_primnode_context context;
     int locally_added_param;
@@ -2423,17 +2418,6 @@ static Bitmapset* finalize_plan(
     /* Find params in targetlist and qual */
     (void)finalize_primnode((Node*)plan->targetlist, &context);
     (void)finalize_primnode((Node*)plan->qual, &context);
-
-    /*
-     * If it's a parallel-aware scan node, mark it as dependent on the parent
-     * Gather/GatherMerge's rescan Param.
-     */
-    if (plan->parallel_aware) {
-        if (gather_param < 0) {
-            elog(ERROR, "parallel-aware plan node is not below a Gather");
-        }
-        context.paramids = bms_add_member(context.paramids, gather_param);
-    }
 
     /* Check additional node-type-specific fields */
     switch (nodeTag(plan)) {
@@ -2589,7 +2573,7 @@ static Bitmapset* finalize_plan(
             context.paramids = bms_add_members(context.paramids, scan_params);
 
             /* child nodes if any */
-            finalize_plans(root, &context, cscan->extensible_plans, valid_params, scan_params, gather_param);
+            finalize_plans(root, &context, cscan->extensible_plans, valid_params, scan_params);
         } break;
 
         case T_ModifyTable: {
@@ -2601,7 +2585,7 @@ static Bitmapset* finalize_plan(
             scan_params = bms_add_member(bms_copy(scan_params), locally_added_param);
             (void)finalize_primnode((Node*)mtplan->returningLists, &context);
             (void)finalize_primnode((Node*)mtplan->updateTlist, &context);
-            finalize_plans(root, &context, mtplan->plans, valid_params, scan_params, gather_param);
+            finalize_plans(root, &context, mtplan->plans, valid_params, scan_params);
         } break;
 #ifdef PGXC
         case T_RemoteQuery:
@@ -2610,28 +2594,27 @@ static Bitmapset* finalize_plan(
 #endif
 
         case T_Append: {
-            finalize_plans(root, &context, ((Append*)plan)->appendplans, valid_params, scan_params, gather_param);
+            finalize_plans(root, &context, ((Append*)plan)->appendplans, valid_params, scan_params);
         } break;
+
         case T_MergeAppend: {
-            finalize_plans(root, &context, ((MergeAppend*)plan)->mergeplans, valid_params, scan_params, gather_param);
+            finalize_plans(root, &context, ((MergeAppend*)plan)->mergeplans, valid_params, scan_params);
         } break;
 
         case T_BitmapAnd: {
-            finalize_plans(root, &context, ((BitmapAnd*)plan)->bitmapplans, valid_params, scan_params, gather_param);
+            finalize_plans(root, &context, ((BitmapAnd*)plan)->bitmapplans, valid_params, scan_params);
 
         } break;
 
         case T_BitmapOr: {
-            finalize_plans(root, &context, ((BitmapOr*)plan)->bitmapplans, valid_params, scan_params, gather_param);
+            finalize_plans(root, &context, ((BitmapOr*)plan)->bitmapplans, valid_params, scan_params);
         } break;
 
         case T_CStoreIndexAnd: {
-            finalize_plans(
-                root, &context, ((CStoreIndexAnd*)plan)->bitmapplans, valid_params, scan_params, gather_param);
+            finalize_plans(root, &context, ((CStoreIndexAnd*)plan)->bitmapplans, valid_params, scan_params);
         } break;
         case T_CStoreIndexOr: {
-            finalize_plans(
-                root, &context, ((CStoreIndexOr*)plan)->bitmapplans, valid_params, scan_params, gather_param);
+            finalize_plans(root, &context, ((CStoreIndexOr*)plan)->bitmapplans, valid_params, scan_params);
         } break;
         case T_NestLoop: {
             ListCell* l = NULL;
@@ -2691,23 +2674,7 @@ static Bitmapset* finalize_plan(
             valid_params = bms_add_member(bms_copy(valid_params), locally_added_param);
             /* wtParam does *not* get added to scan_params */
             break;
-        case T_Gather:
-            /* child nodes are allowed to reference rescan_param, if any */
-            locally_added_param = ((Gather*)plan)->rescan_param;
-            if (locally_added_param >= 0) {
-                valid_params = bms_add_member(bms_copy(valid_params), locally_added_param);
 
-                /*
-                 * We currently don't support nested Gathers.  The issue so
-                 * far as this function is concerned would be how to identify
-                 * which child nodes depend on which Gather.
-                 */
-                Assert(gather_param < 0);
-                /* Pass down rescan_param to child parallel-aware nodes */
-                gather_param = locally_added_param;
-            }
-            /* rescan_param does *not* get added to scan_params */
-            break;
         case T_LockRows:
             /* Force descendant scan nodes to reference epqParam */
             locally_added_param = ((LockRows*)plan)->epqParam;
@@ -2742,6 +2709,7 @@ static Bitmapset* finalize_plan(
         case T_Material:
         case T_Sort:
         case T_Unique:
+        case T_Gather:
         case T_SetOp:
         case T_Group:
         case T_Stream:
@@ -2756,19 +2724,18 @@ static Bitmapset* finalize_plan(
     }
 
     /* Process left and right child plans, if any */
-    child_params = finalize_plan(root, plan->lefttree, gather_param, valid_params, scan_params);
+    child_params = finalize_plan(root, plan->lefttree, valid_params, scan_params);
     context.paramids = bms_add_members(context.paramids, child_params);
 
     if (nestloop_params != NULL) {
         /* right child can reference nestloop_params as well as valid_params */
-        child_params =
-            finalize_plan(root, plan->righttree, gather_param, bms_union(nestloop_params, valid_params), scan_params);
+        child_params = finalize_plan(root, plan->righttree, bms_union(nestloop_params, valid_params), scan_params);
         /* ... and they don't count as parameters used at my level */
         child_params = bms_difference(child_params, nestloop_params);
         bms_free_ext(nestloop_params);
     } else {
         /* easy case */
-        child_params = finalize_plan(root, plan->righttree, gather_param, valid_params, scan_params);
+        child_params = finalize_plan(root, plan->righttree, valid_params, scan_params);
     }
     context.paramids = bms_add_members(context.paramids, child_params);
 

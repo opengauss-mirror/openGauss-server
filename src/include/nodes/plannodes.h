@@ -1160,7 +1160,6 @@ typedef struct Unique {
 typedef struct Gather {
     Plan plan;
     int num_workers;
-    int rescan_param; /* ID of Param that signals a rescan, or -1 */
     bool single_copy;
 } Gather;
 
@@ -1178,10 +1177,9 @@ typedef struct Hash {
     Oid skewTable;         /* outer join key's table OID, or InvalidOid */
     AttrNumber skewColumn; /* outer join key's column #, or zero */
     bool skewInherit;      /* is outer join rel an inheritance tree? */
-    double rows_total;     /* estimate total rows if parallel_aware */
-    Oid skewColType;     /* datatype of the outer key column */
-    int32 skewColTypmod; /* typmod of the outer key column */
-                         /* all other info is in the parent HashJoin node */
+    Oid skewColType;       /* datatype of the outer key column */
+    int32 skewColTypmod;   /* typmod of the outer key column */
+                           /* all other info is in the parent HashJoin node */
 } Hash;
 
 /* ----------------

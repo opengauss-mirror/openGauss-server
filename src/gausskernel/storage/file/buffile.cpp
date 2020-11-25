@@ -462,7 +462,6 @@ static void BufFileLoadBuffer(BufFile* file)
 
     if (file->nbytes < 0) {
         file->nbytes = 0;
-        ereport(ERROR, (errcode_for_file_access(), errmsg("could not read file \"%s\": %m", FilePathName(thisfile))));
     }
 
     file->offsets[file->curFile] += file->nbytes;

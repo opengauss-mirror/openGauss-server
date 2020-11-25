@@ -3574,7 +3574,6 @@ static Hash* _readHash(Hash* local_node)
 
     READ_INT_FIELD(skewColumn);
     READ_BOOL_FIELD(skewInherit);
-    READ_FLOAT_FIELD(rows_total);
     READ_OID_FIELD(skewColType);
     READ_INT_FIELD(skewColTypmod);
 
@@ -4871,7 +4870,6 @@ static Gather* _readGather(void)
     _readPlan(&local_node->plan);
 
     READ_INT_FIELD(num_workers);
-    READ_INT_FIELD(rescan_param);
     READ_BOOL_FIELD(single_copy);
     READ_DONE();
 }

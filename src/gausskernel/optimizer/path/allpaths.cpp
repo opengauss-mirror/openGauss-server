@@ -667,8 +667,8 @@ static void set_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, Index rti, Rang
         generate_gather_paths(root, rel);
     }
 
-    /*
-     * Find the cheapest of the paths for this rel here because
+    /* 
+     * Find the cheapest of the paths for this rel here because 
      * generate_gather_paths may delete a path that some paths have
      * a reference to.
      */
@@ -715,13 +715,9 @@ static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry
 
         Assert(rel->pruning_result);
 
-        if (u_sess->attr.attr_sql.enable_pbe_optimization && rel->pruning_result->paramArg != NULL) {
-            rel->partItrs = 1;
-        } else {
-            /* set flag for dealing with partintioned table */
-            rel->partItrs = bms_num_members(rel->pruning_result->bm_rangeSelectedPartitions) +
-                            bms_num_members(rel->pruning_result->intervalSelectedPartitions);
-        }
+        /* set flag for dealing with partintioned table */
+        rel->partItrs = bms_num_members(rel->pruning_result->bm_rangeSelectedPartitions) +
+                        bms_num_members(rel->pruning_result->intervalSelectedPartitions);
 
         if (relation->partMap != NULL && PartitionMapIsRange(relation->partMap)) {
             RangePartitionMap *partMmap = (RangePartitionMap *)relation->partMap;
@@ -1787,7 +1783,7 @@ static void add_paths_to_append_rel(PlannerInfo *root, RelOptInfo *rel, List *li
 
             parallel_workers = Max(parallel_workers, path->parallel_workers);
         }
-
+ 
         /*
          * Same formula here as above.  It's even more important in this
          * instance because the non-partial paths won't contribute anything to

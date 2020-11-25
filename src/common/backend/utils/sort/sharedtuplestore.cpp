@@ -1,6 +1,6 @@
 /*-------------------------------------------------------------------------
  *
- * sharedtuplestore.cpp
+ * sharedtuplestore.c
  *	  Simple mechanism for sharing tuples between backends.
  *
  * This module contains a shared temporary tuple storage mechanism providing
@@ -12,10 +12,9 @@
  *
  * Portions Copyright (c) 1996-2020, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
- * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
  *
  * IDENTIFICATION
- *	  src/common/backend/utils/sort/sharedtuplestore.cpp
+ *	  src/backend/utils/sort/sharedtuplestore.c
  *
  *-------------------------------------------------------------------------
  */
@@ -183,7 +182,7 @@ static void sts_flush_chunk(SharedTuplestoreAccessor* accessor)
     size_t size;
 
     size = WRITE_CHUNK_LEN;
-    (void)BufFileWrite(accessor->write_file, accessor->write_chunk, size);
+    BufFileWrite(accessor->write_file, accessor->write_chunk, size);
     int rc = memset_s(accessor->write_chunk, size, 0, size);
     securec_check(rc, "", "");
 
@@ -276,7 +275,7 @@ void sts_end_parallel_scan(SharedTuplestoreAccessor* accessor)
  * Write a tuple.  If a meta-data size was provided to sts_initialize, then a
  * pointer to meta data of that size must be provided.
  */
-void sts_puttuple(SharedTuplestoreAccessor* accessor, const void* meta_data, MinimalTuple tuple)
+void sts_puttuple(SharedTuplestoreAccessor* accessor, void* meta_data, MinimalTuple tuple)
 {
     size_t size;
     errno_t rc;
@@ -495,7 +494,7 @@ MinimalTuple sts_parallel_scan_next(SharedTuplestoreAccessor* accessor, void* me
         /* Find the location of a new chunk to read. */
         p = &accessor->sts->participants[accessor->read_participant];
 
-        (void)LWLockAcquire(&p->lock, LW_EXCLUSIVE);
+        LWLockAcquire(&p->lock, LW_EXCLUSIVE);
         /* We can skip directly past overflow pages we know about. */
         if (p->read_page < accessor->read_next_page) {
             p->read_page = accessor->read_next_page;

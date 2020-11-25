@@ -334,8 +334,6 @@ hot_standby = on			# "on" allows queries during recovery
 #enable_seqscan = on
 #enable_sort = on
 #enable_tidscan = on
-#enable_parallel_append = on
-#enable_parallel_hash = on
 enable_kill_query = off			# optional: [on, off], default: off
 #enforce_a_behavior = on
 # - Planner Cost Constants -

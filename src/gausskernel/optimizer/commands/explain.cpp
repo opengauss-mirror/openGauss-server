@@ -1497,13 +1497,6 @@ static void show_pruning_info(PlanState* planstate, ExplainState* es, bool is_pr
                 appendStringInfo(es->str, "NONE");
             else
                 appendStringInfo(es->planinfo->m_detailInfo->info_str, "NONE");
-        } else if (scanplan->pruningInfo->paramArg != NULL) {
-            if (is_pretty == false) {
-                appendStringInfo(es->str, "$%d", scanplan->pruningInfo->paramArg->paramid);
-            } else {
-                appendStringInfo(es->planinfo->m_detailInfo->info_str, "$%d",
-                    scanplan->pruningInfo->paramArg->paramid);
-            }
         } else {
             ListCell* cell = NULL;
             List* part_seqs = scanplan->pruningInfo->ls_rangeSelectedPartitions;
@@ -1593,12 +1586,6 @@ static void show_pruning_info(PlanState* planstate, ExplainState* es, bool is_pr
     } else {
         if (scanplan->itrs <= 0) {
             ExplainPropertyText("Selected Partitions", "NONE", es);
-        } else if (scanplan->pruningInfo->paramArg != NULL) {
-            StringInfo strif = makeStringInfo();
-            appendStringInfo(strif, "$%d", scanplan->pruningInfo->paramArg->paramid);
-            ExplainPropertyText("Selected Partitions", strif->data, es);
-            pfree(strif->data);
-            pfree(strif);
         } else {
             int i = 0;
             StringInfo strif;
@@ -4596,46 +4583,18 @@ static void show_hash_info(HashState* hashstate, ExplainState* es)
                 }
             }
         }
-    } else {
-        Instrumentation* instrument = NULL;
-        /*
-         * In a parallel query, the leader process may or may not have run the
-         * hash join, and even if it did it may not have built a hash table due to
-         * timing (if it started late it might have seen no tuples in the outer
-         * relation and skipped building the hash table).  Therefore we have to be
-         * prepared to get instrumentation data from a worker if there is no hash
-         * table.
-         */
-        if (hashstate->hashtable) {
-            instrument = (Instrumentation*)palloc(sizeof(Instrumentation));
-            ExecHashGetInstrumentation(instrument, hashstate->hashtable);
-        } else if (hashstate->shared_info) {
-            SharedHashInfo* shared_info = hashstate->shared_info;
-            int i;
+    } else if (hashstate->ps.instrument) {
+        SortHashInfo hashinfo = hashstate->ps.instrument->sorthashinfo;
+        spacePeakKb = (hashinfo.spacePeak + BYTE_PER_KB - 1) / BYTE_PER_KB;
+        nbatch = hashinfo.nbatch;
+        nbatch_original = hashinfo.nbatch_original;
+        nbuckets = hashinfo.nbuckets;
 
-            /* Find the first worker that built a hash table. */
-            for (i = 0; i < shared_info->num_workers; ++i) {
-                if (shared_info->instrument[i].sorthashinfo.nbatch > 0) {
-                    instrument = &shared_info->instrument[i];
-                    break;
-                }
-            }
-        } else if  (hashstate->ps.instrument) {
-            instrument = hashstate->ps.instrument;
-        }
-        if (instrument) {
-            SortHashInfo hashinfo = instrument->sorthashinfo;
-            spacePeakKb = (hashinfo.spacePeak + BYTE_PER_KB - 1) / BYTE_PER_KB;
-            nbatch = hashinfo.nbatch;
-            nbatch_original = hashinfo.nbatch_original;
-            nbuckets = hashinfo.nbuckets;
-
-            /* wlm_statistics_plan_max_digit: this variable is used to judge, isn't it a active sql */
-            if (es->wlm_statistics_plan_max_digit == NULL) {
-                if (es->format == EXPLAIN_FORMAT_TEXT)
-                    appendStringInfoSpaces(es->str, es->indent * 2);
-                show_datanode_hash_info<false>(es, nbatch, nbatch_original, nbuckets, spacePeakKb);
-            }
+        /* wlm_statistics_plan_max_digit: this variable is used to judge, isn't it a active sql */
+        if (es->wlm_statistics_plan_max_digit == NULL) {
+            if (es->format == EXPLAIN_FORMAT_TEXT)
+                appendStringInfoSpaces(es->str, es->indent * 2);
+            show_datanode_hash_info<false>(es, nbatch, nbatch_original, nbuckets, spacePeakKb);
         }
     }
 }

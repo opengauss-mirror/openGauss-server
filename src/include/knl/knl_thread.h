@@ -2766,7 +2766,6 @@ typedef struct knl_t_bgworker_context {
 
     BufferUsage *save_pgBufferUsage;
     MemoryContext hpm_context;
-    MemoryContext memCxt;
 } knl_t_bgworker_context;
 
 struct shm_mq;

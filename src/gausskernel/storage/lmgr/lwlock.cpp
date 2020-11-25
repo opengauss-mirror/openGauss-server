@@ -157,8 +157,7 @@ static const char *BuiltinTrancheNames[] = {
     "GlobalTempTableControl",
     "PLdebugger",
     "SharedTupleStore",
-    "parallel_append",
-    "ParallelHashJoinLock"
+    "parallel_append"
 };
 
 static void RegisterLWLockTranches(void);

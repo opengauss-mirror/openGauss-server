@@ -36,7 +36,7 @@ extern ParallelExecutorInfo *ExecInitParallelPlan(PlanState *planstate, EState *
 extern void ExecParallelCreateReaders(ParallelExecutorInfo *pei, TupleDesc tupDesc);
 extern void ExecParallelFinish(ParallelExecutorInfo *pei);
 extern void ExecParallelCleanup(ParallelExecutorInfo *pei);
-extern void ExecParallelReinitialize(PlanState *planstate, ParallelExecutorInfo *pei);
+extern void ExecParallelReinitialize(ParallelExecutorInfo *pei);
 
 extern void ParallelQueryMain(void *seg);
 #endif /* EXECPARALLEL_H */

@@ -131,8 +131,7 @@ static Plan* setPartitionParam(PlannerInfo* root, Plan* plan, RelOptInfo* rel);
 static Plan* setBucketInfoParam(PlannerInfo* root, Plan* plan, RelOptInfo* rel);
 Plan* create_globalpartInterator_plan(PlannerInfo* root, PartIteratorPath* pIterpath);
 
-static Gather* make_gather(
-    List* qptlist, List* qpqual, int nworkers, int rescan_param, bool single_copy, Plan* subplan);
+static Gather *make_gather(List *qptlist, List *qpqual, int nworkers, bool single_copy, Plan *subplan);
 static IndexScan* make_indexscan(List* qptlist, List* qpqual, Index scanrelid, Oid indexid, List* indexqual,
     List* indexqualorig, List* indexorderby, List* indexorderbyorig, ScanDirection indexscandir);
 static IndexOnlyScan* make_indexonlyscan(List* qptlist, List* qpqual, Index scanrelid, Oid indexid, List* indexqual,
@@ -1837,12 +1836,8 @@ static Gather* create_gather_plan(PlannerInfo* root, GatherPath* best_path)
 
     disuse_physical_tlist(subplan, best_path->subpath);
 
-    Gather* gather_plan = make_gather(subplan->targetlist,
-        NIL,
-        best_path->path.parallel_workers,
-        SS_assign_special_param(root),
-        best_path->single_copy,
-        subplan);
+    Gather* gather_plan =
+        make_gather(subplan->targetlist, NIL, best_path->path.parallel_workers, best_path->single_copy, subplan);
 
     copy_path_costsize(&gather_plan->plan, &best_path->path);
 
@@ -4689,15 +4684,6 @@ static HashJoin* create_hashjoin_plan(PlannerInfo* root, HashPath* best_path, Pl
      * Build the hash node and hash join node.
      */
     hash_plan = make_hash(inner_plan, skewTable, skewColumn, skewInherit, skewColType, skewColTypmod);
-    /*
-     * If parallel-aware, the executor will also need an estimate of the total
-     * number of rows expected from all participants so that it can size the
-     * shared hash table.
-     */
-    if (best_path->jpath.path.parallel_aware) {
-        hash_plan->plan.parallel_aware = true;
-        hash_plan->rows_total = best_path->inner_rows_total;
-    }
     join_plan = make_hashjoin(
         tlist, joinclauses, otherclauses, hashclauses, outer_plan, (Plan*)hash_plan, best_path->jpath.jointype);
 
@@ -6224,7 +6210,6 @@ static void estimate_directHashjoin_Cost(
     int num_skew_mcvs;
     int inner_width = hash_plan->plan_width; /* width of inner rel */
     int outer_width = outerPlan->plan_width; /* width of outer rel */
-    size_t space_allowed;                    /* unused */
 
     errno_t rc = 0;
     rc = memset_s(&inner_mem_info, sizeof(OpMemInfo), 0, sizeof(OpMemInfo));
@@ -6248,9 +6233,6 @@ static void estimate_directHashjoin_Cost(
     ExecChooseHashTableSize(inner_path_rows,
         inner_width,
         true, /* useskew */
-        false,
-        0,
-        &space_allowed,
         &numbuckets,
         &numbatches,
         &num_skew_mcvs,
@@ -7607,7 +7589,7 @@ Unique* make_unique(Plan* lefttree, List* distinctList)
     return node;
 }
 
-static Gather *make_gather(List *qptlist, List *qpqual, int nworkers, int rescan_param, bool single_copy, Plan *subplan)
+static Gather *make_gather(List *qptlist, List *qpqual, int nworkers, bool single_copy, Plan *subplan)
 {
     Gather *node = makeNode(Gather);
     Plan *plan = &node->plan;
@@ -7618,7 +7600,6 @@ static Gather *make_gather(List *qptlist, List *qpqual, int nworkers, int rescan
     plan->lefttree = subplan;
     plan->righttree = NULL;
     node->num_workers = nworkers;
-    node->rescan_param = rescan_param;
     node->single_copy = single_copy;
 
     return node;

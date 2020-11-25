@@ -393,37 +393,25 @@ void InitScanRelation(SeqScanState* node, EState* estate)
         }
         node->lockMode = lockmode;
 
-        /* Generate node->partitions if exists */
         if (plan->itrs > 0) {
             Partition part = NULL;
-            if (plan->pruningInfo->paramArg != NULL) {
-                Param *paramArg = plan->pruningInfo->paramArg;
-                Oid tablepartitionid = getPartitionOidByParam(current_relation, paramArg,
-                    &(estate->es_param_list_info->params[paramArg->paramid - 1]));
-                if (OidIsValid(tablepartitionid)) {
-                    part = partitionOpen(current_relation, tablepartitionid, lockmode);
-                    node->partitions = lappend(node->partitions, part);
-                }
-            } else {
-                ListCell* cell = NULL;
-                List* part_seqs = plan->pruningInfo->ls_rangeSelectedPartitions;
+            Partition currentPart = NULL;
+            ListCell* cell = NULL;
+            List* part_seqs = plan->pruningInfo->ls_rangeSelectedPartitions;
 
-                Assert(plan->itrs == part_seqs->length);
+            Assert(plan->itrs == part_seqs->length);
 
-                foreach (cell, part_seqs) {
-                    Oid tablepartitionid = InvalidOid;
-                    int partSeq = lfirst_int(cell);
+            foreach (cell, part_seqs) {
+                Oid tablepartitionid = InvalidOid;
+                int partSeq = lfirst_int(cell);
 
-                    tablepartitionid = getPartitionOidFromSequence(current_relation, partSeq);
-                    part = partitionOpen(current_relation, tablepartitionid, lockmode);
-                    node->partitions = lappend(node->partitions, part);
-                }
+                tablepartitionid = getPartitionOidFromSequence(current_relation, partSeq);
+                part = partitionOpen(current_relation, tablepartitionid, lockmode);
+                node->partitions = lappend(node->partitions, part);
             }
-        }
 
-        if (node->partitions != NIL) {
             /* construct HeapScanDesc for first partition */
-            Partition currentPart = (Partition)list_nth(node->partitions, 0);
+            currentPart = (Partition)list_nth(node->partitions, 0);
             current_part_rel = partitionGetRelation(current_relation, currentPart);
             node->ss_currentPartition = current_part_rel;
 
@@ -690,18 +678,6 @@ void ExecSeqScanInitializeDSM(SeqScanState *node, ParallelContext *pcxt, int nod
     cxt->pwCtx->queryInfo.pscan[nodeid]->plan_node_id = node->ps.plan->plan_node_id;
     node->ss_currentScanDesc =
         (AbsTblScanDesc)heap_beginscan_parallel(node->ss_currentRelation, cxt->pwCtx->queryInfo.pscan[nodeid]);
-}
-
-/* ----------------------------------------------------------------
- *		ExecSeqScanReInitializeDSM
- *
- *		Reset shared state before beginning a fresh scan.
- * ----------------------------------------------------------------
- */
-void ExecSeqScanReInitializeDSM(SeqScanState* node, ParallelContext* pcxt)
-{
-    HeapScanDesc scan = (HeapScanDesc)node->ss_currentScanDesc;
-    heap_parallelscan_reinitialize(scan->rs_parallel);
 }
 
 /* ----------------------------------------------------------------
