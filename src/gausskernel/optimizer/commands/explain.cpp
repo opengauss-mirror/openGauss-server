@@ -610,7 +610,7 @@ static void ExplainOneQuery(
     }
 
     u_sess->exec_cxt.remotequery_list = NIL;
-    es->is_explain_gplan = false;
+    es->is_explain_gplan = true;
     /* planner will not cope with utility statements */
     if (query->commandType == CMD_UTILITY) {
         if (IsA(query->utilityStmt, CreateTableAsStmt)) {
