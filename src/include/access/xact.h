@@ -130,7 +130,6 @@ typedef struct xl_xact_assignment {
 typedef struct xl_xact_commit_compact {
     TimestampTz xact_time;  /* time of commit */
     uint64 csn;             /* commit sequence number */
-    bool isMOTEngine;       /* Indicate whether MOT Engine involves in the transaction commit */
     int nsubxacts;          /* number of subtransaction XIDs */
     /* ARRAY OF COMMITTED SUBTRANSACTION XIDs FOLLOWS */
     TransactionId subxacts[FLEXIBLE_ARRAY_MEMBER]; /* VARIABLE LENGTH ARRAY */
