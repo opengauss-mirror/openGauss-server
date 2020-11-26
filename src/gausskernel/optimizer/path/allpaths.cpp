@@ -715,13 +715,9 @@ static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry
 
         Assert(rel->pruning_result);
 
-        if (u_sess->attr.attr_sql.enable_pbe_optimization && rel->pruning_result->paramArg != NULL) {
-            rel->partItrs = 1;
-        } else {
-            /* set flag for dealing with partintioned table */
-            rel->partItrs = bms_num_members(rel->pruning_result->bm_rangeSelectedPartitions) +
-                            bms_num_members(rel->pruning_result->intervalSelectedPartitions);
-        }
+        /* set flag for dealing with partintioned table */
+        rel->partItrs = bms_num_members(rel->pruning_result->bm_rangeSelectedPartitions) +
+                        bms_num_members(rel->pruning_result->intervalSelectedPartitions);
 
         if (relation->partMap != NULL && PartitionMapIsRange(relation->partMap)) {
             RangePartitionMap *partMmap = (RangePartitionMap *)relation->partMap;

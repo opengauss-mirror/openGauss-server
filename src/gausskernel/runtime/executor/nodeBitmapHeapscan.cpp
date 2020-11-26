@@ -671,14 +671,12 @@ BitmapHeapScanState* ExecInitBitmapHeapScan(BitmapHeapScan* node, EState* estate
             Partition partition = NULL;
             Relation partitiontrel = NULL;
 
-            if (scanstate->ss.partitions != NIL) {
-                /* construct a dummy table relation with the next table partition for scan */
-                partition = (Partition)list_nth(scanstate->ss.partitions, 0);
-                partitiontrel = partitionGetRelation(currentRelation, partition);
-                scanstate->ss.ss_currentPartition = partitiontrel;
-                scanstate->ss.ss_currentScanDesc =
-                    abs_tbl_beginscan_bm(partitiontrel, estate->es_snapshot, 0, NULL, &scanstate->ss);
-            }
+            /* construct a dummy table relation with the next table partition for scan */
+            partition = (Partition)list_nth(scanstate->ss.partitions, 0);
+            partitiontrel = partitionGetRelation(currentRelation, partition);
+            scanstate->ss.ss_currentPartition = partitiontrel;
+            scanstate->ss.ss_currentScanDesc =
+                abs_tbl_beginscan_bm(partitiontrel, estate->es_snapshot, 0, NULL, &scanstate->ss);
         }
     } else {
         scanstate->ss.ss_currentScanDesc =
@@ -777,7 +775,6 @@ static void ExecInitPartitionForBitmapHeapScan(BitmapHeapScanState* scanstate, E
     if (plan->scan.itrs > 0) {
         LOCKMODE lock = NoLock;
         Partition tablepartition = NULL;
-        Oid tablepartitionid = InvalidOid;
         bool relistarget = false;
         ListCell* cell = NULL;
         List* part_seqs = plan->scan.pruningInfo->ls_rangeSelectedPartitions;
@@ -787,18 +784,8 @@ static void ExecInitPartitionForBitmapHeapScan(BitmapHeapScanState* scanstate, E
         lock = (relistarget ? RowExclusiveLock : AccessShareLock);
         scanstate->ss.lockMode = lock;
 
-        if (plan->scan.pruningInfo->paramArg != NULL) {
-            Param *paramArg = plan->scan.pruningInfo->paramArg;
-            tablepartitionid = getPartitionOidByParam(currentRelation, paramArg,
-                &(estate->es_param_list_info->params[paramArg->paramid - 1]));
-            if (OidIsValid(tablepartitionid)) {
-                tablepartition = partitionOpen(currentRelation, tablepartitionid, lock);
-                scanstate->ss.partitions = lappend(scanstate->ss.partitions, tablepartition);
-            }
-            return;
-        }
-
         foreach (cell, part_seqs) {
+            Oid tablepartitionid = InvalidOid;
             int partSeq = lfirst_int(cell);
             /* add table partition to list */
             tablepartitionid = getPartitionOidFromSequence(currentRelation, partSeq);

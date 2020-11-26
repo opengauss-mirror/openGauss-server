@@ -669,26 +669,23 @@ IndexScanState* ExecInitIndexScan(IndexScan* node, EState* estate, int eflags)
             /* Initialize table partition list and index partition list for following scan */
             ExecInitPartitionForIndexScan(index_state, estate);
 
-            if (index_state->ss.partitions != NIL) {
-                /* construct a dummy relation with the first table partition for following scan */
-                current_partition = (Partition)list_nth(index_state->ss.partitions, 0);
-                index_state->ss.ss_currentPartition =
-                    partitionGetRelation(index_state->ss.ss_currentRelation, current_partition);
+            /* construct a dummy relation with the first table partition for following scan */
+            current_partition = (Partition)list_nth(index_state->ss.partitions, 0);
+            index_state->ss.ss_currentPartition =
+                partitionGetRelation(index_state->ss.ss_currentRelation, current_partition);
 
-                /* construct a dummy relation with the first table partition for following scan */
-                currentindex = (Partition)list_nth(index_state->iss_IndexPartitionList, 0);
-                index_state->iss_CurrentIndexPartition = partitionGetRelation(index_state->iss_RelationDesc,
-                    currentindex);
+            /* construct a dummy relation with the first table partition for following scan */
+            currentindex = (Partition)list_nth(index_state->iss_IndexPartitionList, 0);
+            index_state->iss_CurrentIndexPartition = partitionGetRelation(index_state->iss_RelationDesc, currentindex);
 
-                /* Initialize scan descriptor for partitioned table */
-                index_state->iss_ScanDesc = abs_idx_beginscan(index_state->ss.ss_currentPartition,
-                    index_state->iss_CurrentIndexPartition,
-                    estate->es_snapshot,
-                    index_state->iss_NumScanKeys,
-                    index_state->iss_NumOrderByKeys,
-                    (ScanState*)index_state);
-                Assert(PointerIsValid(index_state->iss_ScanDesc));
-            }
+            /* Initialize scan descriptor for partitioned table */
+            index_state->iss_ScanDesc = abs_idx_beginscan(index_state->ss.ss_currentPartition,
+                index_state->iss_CurrentIndexPartition,
+                estate->es_snapshot,
+                index_state->iss_NumScanKeys,
+                index_state->iss_NumOrderByKeys,
+                (ScanState*)index_state);
+            Assert(PointerIsValid(index_state->iss_ScanDesc));
         }
     } else {
         /*
@@ -1323,36 +1320,6 @@ void ExecInitPartitionForIndexScan(IndexScanState* index_state, EState* estate)
         lock = (relis_target ? RowExclusiveLock : AccessShareLock);
         index_state->ss.lockMode = lock;
         index_state->lockMode = lock;
-
-        if (plan->scan.pruningInfo->paramArg != NULL) {
-            Param *paramArg = plan->scan.pruningInfo->paramArg;
-            Oid tablepartitionid = getPartitionOidByParam(current_relation, paramArg,
-                &(estate->es_param_list_info->params[paramArg->paramid - 1]));
-            if (OidIsValid(tablepartitionid)) {
-                List *partitionIndexOidList = NIL;
-                table_partition = partitionOpen(current_relation, tablepartitionid, lock);
-                index_state->ss.partitions = lappend(index_state->ss.partitions, table_partition);
-                partitionIndexOidList = PartitionGetPartIndexList(table_partition);
-
-                Assert(PointerIsValid(partitionIndexOidList));
-                if (!PointerIsValid(partitionIndexOidList)) {
-                    ereport(ERROR,
-                        (errcode(ERRCODE_WRONG_OBJECT_TYPE),
-                            errmsg("no local indexes found for partition %s", PartitionGetPartitionName(table_partition))));
-                }
-
-                Oid indexpartitionid = searchPartitionIndexOid(indexid, partitionIndexOidList);
-                list_free(partitionIndexOidList);
-                index_partition = partitionOpen(index_state->iss_RelationDesc, indexpartitionid, lock);
-                if (index_partition->pd_part->indisusable == false) {
-                    elog(ERROR, "can'nt initialize index scans using unusable local index \"%s\"",
-                        PartitionGetPartitionName(index_partition));
-                }
-
-                index_state->iss_IndexPartitionList = lappend(index_state->iss_IndexPartitionList, index_partition);
-            }
-            return;
-        }
 
         Assert(plan->scan.itrs == plan->scan.pruningInfo->ls_rangeSelectedPartitions->length);
 

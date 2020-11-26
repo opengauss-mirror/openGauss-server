@@ -36,7 +36,6 @@ ScanFusion::ScanFusion(ParamListInfo params, PlannedStmt* planstmt)
     m_params = params;
     m_planstmt = planstmt;
     m_rel = NULL;
-    m_parentRel = NULL;
     m_tupDesc = NULL;
     m_reslot = NULL;    
     m_direction = NULL;
@@ -336,8 +335,6 @@ IndexScanFusion::IndexScanFusion(IndexScan* node, PlannedStmt* planstmt, ParamLi
     m_values = NULL;
     m_index = NULL;
     m_epq_indexqual = NULL;
-    m_parentRel = NULL;
-    m_partRel = NULL;
 
     m_node = node;
     m_keyInit = false;
@@ -375,30 +372,13 @@ IndexScanFusion::IndexScanFusion(IndexScan* node, PlannedStmt* planstmt, ParamLi
             i++;
         }
     }
-    if (m_node->scan.isPartTbl) {
-        Oid parentRelOid = getrelid(m_node->scan.scanrelid, planstmt->rtable);
-        m_parentRel = heap_open(parentRelOid, AccessShareLock);
-        if (params != NULL) {
-            Param* paramArg = m_node->scan.pruningInfo->paramArg;
-            Assert(paramArg != NULL);
-            m_reloid= getPartitionOidByParam(m_parentRel, paramArg,
-                &(params->params[paramArg->paramid - 1]));
-        } else {
-            Assert(list_length(m_node->scan.pruningInfo->ls_rangeSelectedPartitions) != 0);
-            int partId = lfirst_int(list_head(m_node->scan.pruningInfo->ls_rangeSelectedPartitions));
-            m_reloid = getPartitionOidFromSequence(m_parentRel, partId);
-        }
 
-        m_partRel = partitionOpen(m_parentRel, m_reloid, AccessShareLock);
-        m_rel = partitionGetRelation(m_parentRel, m_partRel);
-    } else {
-        m_reloid = getrelid(m_node->scan.scanrelid, planstmt->rtable);
-        m_rel = heap_open(m_reloid, AccessShareLock);
-    }
+    m_reloid = getrelid(m_node->scan.scanrelid, planstmt->rtable);
     m_targetList = m_node->scan.plan.targetlist;
     m_tupDesc = ExecCleanTypeFromTL(m_targetList, false);
     m_direction = (ScanDirection*)palloc0(sizeof(ScanDirection));
 
+    m_rel = heap_open(m_reloid, AccessShareLock);
     Relation rel = m_rel;
     m_attrno = (int16*)palloc(m_tupDesc->natts * sizeof(int16));
     m_values = (Datum*)palloc(RelationGetDescr(rel)->natts * sizeof(Datum));
@@ -406,39 +386,12 @@ IndexScanFusion::IndexScanFusion(IndexScan* node, PlannedStmt* planstmt, ParamLi
     m_isnull = (bool*)palloc(RelationGetDescr(rel)->natts * sizeof(bool));
     m_tmpisnull = (bool*)palloc(m_tupDesc->natts * sizeof(bool));
     setAttrNo();
-
-    if (m_node->scan.isPartTbl) {
-        partitionClose(m_parentRel, m_partRel, AccessShareLock);
-        releaseDummyRelation(&m_rel);
-        heap_close(m_parentRel, AccessShareLock);
-    } else {
-        heap_close(m_rel, AccessShareLock);
-    }
+    heap_close(m_rel, AccessShareLock);
 }
 
 void IndexScanFusion::Init(long max_rows)
 {
-    if (m_node->scan.isPartTbl) {
-        Oid parent_relOid = getrelid(m_node->scan.scanrelid, m_planstmt->rtable);
-        m_parentRel = heap_open(parent_relOid, AccessShareLock);
-
-        /* get partition relation */
-        m_partRel = partitionOpen(m_parentRel, m_reloid, AccessShareLock);
-        PartitionGetPartIndexList(m_partRel);
-        m_rel = partitionGetRelation(m_parentRel, m_partRel);
-
-        /* get partition index */
-        Oid parentIndexOid = m_node->indexid;
-        Relation parentIndex = relation_open(parentIndexOid, AccessShareLock);
-        Oid partIndexOid = lfirst_int(list_head(m_rel->rd_indexlist));
-        Partition partIndex = partitionOpen(parentIndex, partIndexOid, AccessShareLock);
-        m_index = partitionGetRelation(parentIndex, partIndex);
-        partitionClose(parentIndex, partIndex, AccessShareLock);
-        relation_close(parentIndex, AccessShareLock);
-    } else {
-        m_rel = heap_open(m_reloid, AccessShareLock);
-        m_index = index_open(m_node->indexid, AccessShareLock);
-    }
+    m_index = index_open(m_node->indexid, AccessShareLock);
 
     if (unlikely(!m_keyInit)) {
         IndexFusion::IndexBuildScanKey(m_node->indexqual);
@@ -458,6 +411,7 @@ void IndexScanFusion::Init(long max_rows)
         *m_direction = NoMovementScanDirection;
     }
 
+    m_rel = heap_open(m_reloid, AccessShareLock);
     ScanState* scanstate = makeNode(ScanState); // need release
     scanstate->ps.plan =  (Plan *)m_node;
     m_scandesc = (AbsIdxScanDesc)abs_idx_beginscan(m_rel, m_index, GetActiveSnapshot(), m_keyNum, 0, scanstate); // add scanstate pointer ?
@@ -520,20 +474,10 @@ void IndexScanFusion::End(bool isCompleted)
         abs_idx_endscan(m_scandesc);
     }
     if (m_index != NULL) {
-        if (m_node->scan.isPartTbl) {
-            releaseDummyRelation(&m_index);
-        } else {
-            index_close(m_index, NoLock);
-        }
+        index_close(m_index, NoLock);
     }
     if (m_rel != NULL) {
-        if (m_node->scan.isPartTbl) {
-            partitionClose(m_parentRel, m_partRel, AccessShareLock);
-            releaseDummyRelation(&m_rel);
-            heap_close(m_parentRel, AccessShareLock);
-        } else {
-            heap_close(m_rel, NoLock);
-        }
+        heap_close(m_rel, NoLock);
     }
 }
 

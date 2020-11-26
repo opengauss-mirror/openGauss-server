@@ -1497,13 +1497,6 @@ static void show_pruning_info(PlanState* planstate, ExplainState* es, bool is_pr
                 appendStringInfo(es->str, "NONE");
             else
                 appendStringInfo(es->planinfo->m_detailInfo->info_str, "NONE");
-        } else if (scanplan->pruningInfo->paramArg != NULL) {
-            if (is_pretty == false) {
-                appendStringInfo(es->str, "$%d", scanplan->pruningInfo->paramArg->paramid);
-            } else {
-                appendStringInfo(es->planinfo->m_detailInfo->info_str, "$%d",
-                    scanplan->pruningInfo->paramArg->paramid);
-            }
         } else {
             ListCell* cell = NULL;
             List* part_seqs = scanplan->pruningInfo->ls_rangeSelectedPartitions;
@@ -1593,12 +1586,6 @@ static void show_pruning_info(PlanState* planstate, ExplainState* es, bool is_pr
     } else {
         if (scanplan->itrs <= 0) {
             ExplainPropertyText("Selected Partitions", "NONE", es);
-        } else if (scanplan->pruningInfo->paramArg != NULL) {
-            StringInfo strif = makeStringInfo();
-            appendStringInfo(strif, "$%d", scanplan->pruningInfo->paramArg->paramid);
-            ExplainPropertyText("Selected Partitions", strif->data, es);
-            pfree(strif->data);
-            pfree(strif);
         } else {
             int i = 0;
             StringInfo strif;

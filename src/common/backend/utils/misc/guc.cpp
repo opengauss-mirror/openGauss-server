@@ -4505,20 +4505,6 @@ static void init_configure_names_bool()
         },
         {
             {
-                "enable_partition_opfusion",
-                PGC_USERSET,
-                QUERY_TUNING_METHOD,
-                gettext_noop("Enables opfusion features in partition table."),
-                NULL
-            },
-            &u_sess->attr.attr_sql.enable_partition_opfusion,
-            false,
-            NULL,
-            NULL,
-            NULL
-        },
-        {
-            {
                 "check_implicit_conversions",
                 PGC_USERSET,
                 UNGROUPED,
