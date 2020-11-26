@@ -3884,6 +3884,9 @@ void ExplainSetSessionInfo(int plan_node_id, Instrumentation* instr, bool on_dat
         p_detail->can_record_to_table = u_sess->instr_cxt.can_record_to_table;
         p_detail->status = Operator_Normal;
         UnLockOperHistHashPartition(hash_code);
+#ifndef ENABLE_MULTIPLE_NODES
+        return;
+#endif
     }
 
     if (IS_PGXC_DATANODE) {

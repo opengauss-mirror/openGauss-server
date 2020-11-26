@@ -333,6 +333,7 @@ typedef struct HashJoinTableData {
     int64 maxMem;           /* batch auto spread mem */
     int spreadNum;          /* auto spread times */
     int64* spill_size;
+    uint64 spill_count;     /* times of spilling to disk */
 } HashJoinTableData;
 
 #endif /* HASHJOIN_H */

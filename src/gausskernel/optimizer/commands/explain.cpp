@@ -3975,13 +3975,14 @@ static void show_sort_info(SortState* sortstate, ExplainState* es)
             }
         }
     } else {
-        const char* sortMethod = NULL;
-        const char* spaceType = NULL;
-        const int spaceTypeId = 0;
+        char* sortMethod = NULL;
+        char* spaceType = NULL;
+        int spaceTypeId = 0;
         if (es->analyze && sortstate->sort_Done && sortstate->sortMethodId >= (int)HEAPSORT &&
             sortstate->sortMethodId <= (int)STILLINPROGRESS &&
             (sortstate->spaceTypeId == SORT_IN_DISK || sortstate->spaceTypeId == SORT_IN_MEMORY)) {
             sortMethod = sortmessage[sortstate->sortMethodId].sortName;
+            spaceTypeId = sortstate->spaceTypeId;
             if (spaceTypeId == SORT_IN_DISK)
                 spaceType = "Disk";
             else

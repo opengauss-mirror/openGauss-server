@@ -30,6 +30,7 @@
 #include "utils/hsearch.h"
 #include "access/hash.h"
 #include "access/xact.h"
+#include "executor/hashjoin.h"
 #include "utils/memutils.h"
 #include "miscadmin.h"
 #include "pgxc/pgxc.h"
@@ -135,6 +136,8 @@ typedef struct {
     UniqueSQLCacheIO cache_io;         /* cache/IO */
     UniqueSQLParse parse;              /* hard/soft parse counter */
     bool is_local;                     /* local sql(run from current node) */
+    UniqueSQLWorkMemInfo sort_state;   /* work mem info of sort operation */
+    UniqueSQLWorkMemInfo hash_state;   /* work mem info of hash operation */
 } UniqueSQL;
 
 /* ---------Thread Local Variable---------- */
@@ -203,6 +206,19 @@ static void resetUniqueSQLEntry(UniqueSQL* entry)
         // parse info
         pg_atomic_write_u64(&(entry->parse.soft_parse), 0);
         pg_atomic_write_u64(&(entry->parse.hard_parse), 0);
+
+        // sort hash work_mem info
+        pg_atomic_write_u64(&(entry->sort_state.counts), 0);
+        gs_lock_test_and_set_64(&(entry->sort_state.total_time), 0);
+        gs_lock_test_and_set_64(&(entry->sort_state.used_work_mem), 0);
+        pg_atomic_write_u64(&(entry->sort_state.spill_counts), 0);
+        pg_atomic_write_u64(&(entry->sort_state.spill_size), 0);
+        
+        pg_atomic_write_u64(&(entry->hash_state.counts), 0);
+        gs_lock_test_and_set_64(&(entry->hash_state.total_time), 0);
+        gs_lock_test_and_set_64(&(entry->hash_state.used_work_mem), 0);
+        pg_atomic_write_u64(&(entry->hash_state.spill_counts), 0);
+        pg_atomic_write_u64(&(entry->hash_state.spill_size), 0);
 
         // time Info
         for (uint32 idx = 0; idx < TOTAL_TIME_INFO_TYPES; idx++) {
@@ -388,6 +404,117 @@ static void UpdateUniqueSQLParse(UniqueSQL* unique_sql)
     /* for parse counter, when update unique stat, aggregate&reset last parse counter */
     UniqueSQLStatCountResetParseCounter();
 }
+
+/*
+ * update sort/hash work_mem info when executor run finished
+ */
+static void UpdateUniqueSQLSortHashInfo(UniqueSQL* unique_sql)
+{
+    if (unique_sql == NULL) {
+        return;
+    }
+
+    if (u_sess->unique_sql_cxt.unique_sql_sort_instr->has_sorthash) {
+        /* if query contains SORT operation, the unique sql sort info will be updated */
+        unique_sql_instr* sort_instr = u_sess->unique_sql_cxt.unique_sql_sort_instr;
+
+        pg_atomic_fetch_add_u64(&unique_sql->sort_state.counts, sort_instr->counts);
+        gs_atomic_add_64(&unique_sql->sort_state.total_time, sort_instr->total_time);
+        gs_atomic_add_64(&unique_sql->sort_state.used_work_mem, sort_instr->used_work_mem);
+        pg_atomic_fetch_add_u64(&unique_sql->sort_state.spill_counts, sort_instr->spill_counts);
+        pg_atomic_fetch_add_u64(&unique_sql->sort_state.spill_size, sort_instr->spill_size);
+
+        ereport(DEBUG1,
+            (errmodule(MOD_INSTR),
+                errmsg("[UniqueSQL] unique id: %lu, sort state updated",
+                    u_sess->unique_sql_cxt.unique_sql_id)));
+
+        /* reset the sort counter */
+        errno_t rc = memset_s(sort_instr, sizeof(unique_sql_instr), 0, sizeof(unique_sql_instr));
+        securec_check(rc, "", "");
+    }
+
+    if (u_sess->unique_sql_cxt.unique_sql_hash_instr->has_sorthash) {
+        /* if query contains HASH operation, the unique sql hash info should be updated */
+        unique_sql_instr* hash_instr = u_sess->unique_sql_cxt.unique_sql_hash_instr;
+
+        pg_atomic_fetch_add_u64(&unique_sql->hash_state.counts, hash_instr->counts);
+        gs_atomic_add_64(&unique_sql->hash_state.total_time, hash_instr->total_time);
+        gs_atomic_add_64(&unique_sql->hash_state.used_work_mem, hash_instr->used_work_mem);
+        pg_atomic_fetch_add_u64(&unique_sql->hash_state.spill_counts, hash_instr->spill_counts);
+        pg_atomic_fetch_add_u64(&unique_sql->hash_state.spill_size, hash_instr->spill_size);
+
+        ereport(DEBUG1,
+            (errmodule(MOD_INSTR),
+                errmsg("[UniqueSQL] unique id: %lu, hash state updated",
+                    u_sess->unique_sql_cxt.unique_sql_id)));
+
+        /* reset the hash counter */
+        errno_t rc = memset_s(hash_instr, sizeof(unique_sql_instr), 0, sizeof(unique_sql_instr));
+        securec_check(rc, "", "");
+    }
+}
+
+/*
+ * get hash state from hashtable to update unqiue sql hash info later
+ */
+void UpdateUniqueSQLHashStats(HashJoinTable hashtable, TimestampTz* start_time)
+{
+    if (!is_unique_sql_enabled() || !is_local_unique_sql()) {
+        return;
+    }
+
+    /* the first time enter hash operation, init hash state */
+    unique_sql_instr* instr = u_sess->unique_sql_cxt.unique_sql_hash_instr;
+    instr->has_sorthash = true;
+
+    if (hashtable == NULL) {
+        /* update time info */
+        if (*start_time == 0) {
+            *start_time = GetCurrentTimestamp();
+        } else {
+            /* increased by hash exec time */
+            instr->total_time += GetCurrentTimestamp() - *start_time;
+        }
+    } else {
+        /* update work mem info */
+        instr->counts += 1;
+        instr->spill_counts += hashtable->spill_count;
+
+        /* get the space used in kbs */
+        instr->spill_size += (*hashtable->spill_size + 1023) / 1024;
+        instr->used_work_mem += (hashtable->spacePeak + 1023) / 1024;
+    }
+}
+
+/* UpdateUniqueSQLVecSortStats - parse the vector sort information from the Batchsortstate,
+ * used to update for the uniuqe sql sort infomation.
+ */
+void UpdateUniqueSQLVecSortStats(Batchsortstate* state, uint64 spill_count, TimestampTz* start_time)
+{
+    if (!is_unique_sql_enabled() || !is_local_unique_sql()) {
+        return;
+    }
+    unique_sql_instr* instr = u_sess->unique_sql_cxt.unique_sql_sort_instr;
+    /* the first time enter sort executor and init the state */
+    instr->has_sorthash = true;
+
+    if (*start_time == 0) {
+        *start_time = GetCurrentTimestamp();
+    } else if (state != NULL) {
+        instr->counts += 1;
+        instr->total_time += GetCurrentTimestamp() - *start_time;
+
+        /* update vect sort info of space used in kbs */
+        if (state->m_tapeset != NULL) {
+            instr->spill_counts += spill_count;
+            instr->spill_size += LogicalTapeSetBlocks(state->m_tapeset) * (BLCKSZ / 1024);
+        } else {
+            instr->used_work_mem += (state->m_allowedMem - state->m_availMem + 1023) / 1024;
+        }
+    }
+}
+
 
 static void mask_unique_sql_str(UniqueSQL* unique_sql)
 {
@@ -589,6 +716,9 @@ void UpdateUniqueSQLStat(
 
     // record SQL's time Info
     UpdateUniqueSQLTimeStat(entry, timeInfo);
+
+    /* Sort&Hash info */
+    UpdateUniqueSQLSortHashInfo(entry);
 
     UnlockUniqueSQLHashPartition(hashCode);
 }
@@ -951,6 +1081,19 @@ static void copy_unique_sql_entry(UniqueSQL* unique_sql_array, int num, int i, U
     unique_sql_array[i].parse.soft_parse = entry->parse.soft_parse;
     unique_sql_array[i].parse.hard_parse = entry->parse.hard_parse;
 
+    // sort&hash work mem info
+    unique_sql_array[i].sort_state.counts = entry->sort_state.counts;
+    unique_sql_array[i].sort_state.total_time = entry->sort_state.total_time;    
+    unique_sql_array[i].sort_state.used_work_mem = entry->sort_state.used_work_mem;
+    unique_sql_array[i].sort_state.spill_counts = entry->sort_state.spill_counts;
+    unique_sql_array[i].sort_state.spill_size = entry->sort_state.spill_size;
+
+    unique_sql_array[i].hash_state.counts = entry->hash_state.counts;
+    unique_sql_array[i].hash_state.total_time = entry->hash_state.total_time;    
+    unique_sql_array[i].hash_state.used_work_mem = entry->hash_state.used_work_mem;
+    unique_sql_array[i].hash_state.spill_counts = entry->hash_state.spill_counts;
+    unique_sql_array[i].hash_state.spill_size = entry->hash_state.spill_size;
+
     // time Info
     rc = memcpy_s(&unique_sql_array[i].timeInfo, sizeof(UniqueSQLTime), &entry->timeInfo, sizeof(UniqueSQLTime));
     securec_check(rc, "\0", "\0");
@@ -1189,6 +1332,18 @@ static void create_tuple_entry(TupleDesc tupdesc)
     for (num = 0; num < TOTAL_TIME_INFO_TYPES; num++) {
         TupleDescInitEntry(tupdesc, (AttrNumber)++i, TimeInfoTypeName[num], INT8OID, -1, 0);
     }
+
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "sort_count", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "sort_time", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "sort_mem_used", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "sort_spill_count", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "sort_spill_size", INT8OID, -1, 0);
+
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "hash_count", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "hash_time", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "hash_mem_used", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "hash_spill_count", INT8OID, -1, 0);
+    TupleDescInitEntry(tupdesc, (AttrNumber)++i, "hash_spill_size", INT8OID, -1, 0);
 }
 
 static void set_tuple_cn_node_name(UniqueSQL* unique_sql, Datum* values, int* i)
@@ -1278,6 +1433,19 @@ static void set_tuple_value(UniqueSQL* unique_sql, Datum* values, bool* nulls, i
         values[i++] = Int64GetDatum(unique_sql->timeInfo.TimeInfoArray[num]);
     }
 
+    // sort&hash work mem Info
+    values[i++] = Int64GetDatum(unique_sql->sort_state.counts);
+    values[i++] = Int64GetDatum(unique_sql->sort_state.total_time);
+    values[i++] = Int64GetDatum(unique_sql->sort_state.used_work_mem);
+    values[i++] = Int64GetDatum(unique_sql->sort_state.spill_counts);
+    values[i++] = Int64GetDatum(unique_sql->sort_state.spill_size);
+
+    values[i++] = Int64GetDatum(unique_sql->hash_state.counts);
+    values[i++] = Int64GetDatum(unique_sql->hash_state.total_time);
+    values[i++] = Int64GetDatum(unique_sql->hash_state.used_work_mem);
+    values[i++] = Int64GetDatum(unique_sql->hash_state.spill_counts);
+    values[i++] = Int64GetDatum(unique_sql->hash_state.spill_size);
+
     Assert(arr_size == i);
 }
 
@@ -1289,7 +1457,7 @@ Datum get_instr_unique_sql(PG_FUNCTION_ARGS)
     FuncCallContext* funcctx = NULL;
     long num = 0;
 
-#define INSTRUMENTS_UNIQUE_SQL_ATTRNUM (20 + TOTAL_TIME_INFO_TYPES)
+#define INSTRUMENTS_UNIQUE_SQL_ATTRNUM (30 + TOTAL_TIME_INFO_TYPES)
 
     if (!superuser()) {
         ereport(
@@ -1553,6 +1721,19 @@ static void package_unique_sql_msg_on_remote(StringInfoData* buf, UniqueSQL* ent
     for (uint32 idx = 0; idx < TOTAL_TIME_INFO_TYPES; idx++) {
         pq_sendint64(buf, entry->timeInfo.TimeInfoArray[idx]);
     }
+
+    /* sort hash work mem info */
+    pq_sendint64(buf, entry->sort_state.counts);
+    pq_sendint64(buf, entry->sort_state.total_time);
+    pq_sendint64(buf, entry->sort_state.used_work_mem);
+    pq_sendint64(buf, entry->sort_state.spill_counts);
+    pq_sendint64(buf, entry->sort_state.spill_size);
+
+    pq_sendint64(buf, entry->hash_state.counts);
+    pq_sendint64(buf, entry->hash_state.total_time);
+    pq_sendint64(buf, entry->hash_state.used_work_mem);
+    pq_sendint64(buf, entry->hash_state.spill_counts);
+    pq_sendint64(buf, entry->hash_state.spill_size);
 
     /* ... */
     pq_endmessage(buf);

@@ -119,6 +119,7 @@
 #include "pgxc/execRemote.h"
 #include "catalog/pgxc_node.h"
 #endif
+#include "instruments/instr_unique_sql.h"
 #include "utils/datum.h"
 #include "utils/logtape.h"
 #include "utils/lsyscache.h"
@@ -450,6 +451,7 @@ struct Tuplesortstate {
 #endif
 
     int64 spill_size;
+    uint64 spill_count;   /* the times of spilling to disk */
 };
 
 /*
@@ -3276,6 +3278,7 @@ static void markrunend(Tuplesortstate* state, int tapenum)
 
     LogicalTapeWrite(state->tapeset, tapenum, (void*)&len, sizeof(len));
     state->spill_size += sizeof(len);
+    state->spill_count += 1;
     pgstat_increase_session_spill_size(sizeof(len));
 }
 
@@ -3474,6 +3477,7 @@ static void writetup_heap(Tuplesortstate* state, int tapenum, SortTuple* stup)
     LogicalTapeWrite(state->tapeset, tapenum, (void*)tupbody, tupbodylen);
 
     state->spill_size += tuplen;
+    state->spill_count += 1;
     pgstat_increase_session_spill_size(tuplen);
     if (state->randomAccess) /* need trailing length word? */
     {
@@ -3640,6 +3644,7 @@ static void writetup_cluster(Tuplesortstate* state, int tapenum, SortTuple* stup
     LogicalTapeWrite(state->tapeset, tapenum, tuple->t_data, tuple->t_len);
 
     state->spill_size += tuplen;
+    state->spill_count += 1;
     pgstat_increase_session_spill_size(tuplen);
     if (state->randomAccess) {
 		/* need trailing length word? */
@@ -3889,6 +3894,7 @@ static void writetup_index(Tuplesortstate* state, int tapenum, SortTuple* stup)
     LogicalTapeWrite(state->tapeset, tapenum, (void*)tuple, IndexTupleSize(tuple));
 
     state->spill_size += tuplen;
+    state->spill_count += 1;
     pgstat_increase_session_spill_size(tuplen);
     if (state->randomAccess) {
         /* need trailing length word? */
@@ -3975,6 +3981,7 @@ static void writetup_datum(Tuplesortstate* state, int tapenum, SortTuple* stup)
     LogicalTapeWrite(state->tapeset, tapenum, waddr, tuplen);
 
     state->spill_size += writtenlen + tuplen;
+    state->spill_count += 1;
     pgstat_increase_session_spill_size(writtenlen);
     pgstat_increase_session_spill_size(tuplen);
     if (state->randomAccess) {
@@ -4653,4 +4660,32 @@ static void leader_takeover_tapes(Tuplesortstate *state)
     state->destTape = 0;
 
     state->status = TSS_BUILDRUNS;
+}
+
+/* UpdateUniqueSQLSortStats - parse the sort information from the SortState,
+ * used to update for the uniuqe sql sort infomation.
+ */
+void UpdateUniqueSQLSortStats(Tuplesortstate* state, TimestampTz* start_time)
+{
+    if (!is_unique_sql_enabled() || !is_local_unique_sql()) {
+        return;
+    }
+    unique_sql_instr* instr = u_sess->unique_sql_cxt.unique_sql_sort_instr;
+    instr->has_sorthash = true;
+
+    if (*start_time == 0) {
+        /* the first time enter sort executor and init the state */
+        *start_time = GetCurrentTimestamp();
+    } else if (state != NULL){
+        instr->counts += 1;
+        instr->total_time += GetCurrentTimestamp() - *start_time;
+
+        /* update info of space used in kbs */
+        if (state->tapeset != NULL) {
+            instr->spill_counts += state->spill_count;
+            instr->spill_size += LogicalTapeSetBlocks(state->tapeset) * (BLCKSZ / 1024);
+        } else {
+            instr->used_work_mem += (state->allowedMem - state->availMem + 1023) / 1024;
+        }
+    }
 }

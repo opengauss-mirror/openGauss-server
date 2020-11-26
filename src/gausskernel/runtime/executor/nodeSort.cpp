@@ -21,6 +21,7 @@
 #include "miscadmin.h"
 #include "optimizer/streamplan.h"
 #include "pgstat.h"
+#include "instruments/instr_unique_sql.h"
 #include "utils/tuplesort.h"
 #include "workload/workload.h"
 
@@ -55,6 +56,7 @@ TupleTableSlot* ExecSort(SortState* node)
     EState* estate = node->ss.ps.state;
     ScanDirection dir = estate->es_direction;
     Tuplesortstate* tuple_sortstate = (Tuplesortstate*)node->tuplesortstate;
+    TimestampTz start_time = 0;
 
     /*
      * If first time through, read all tuples from outer plan and pass them to
@@ -68,6 +70,8 @@ TupleTableSlot* ExecSort(SortState* node)
         int64 sort_mem = SET_NODEMEM(plan_node->plan.operatorMemKB[0], plan_node->plan.dop);
         int64 max_mem =
             (plan_node->plan.operatorMaxMem > 0) ? SET_NODEMEM(plan_node->plan.operatorMaxMem, plan_node->plan.dop) : 0;
+        /* init unique sort state at the first time */
+        UpdateUniqueSQLSortStats(NULL, &start_time);
 
         SO1_printf("ExecSort: %s\n", "sorting subplan");
 
@@ -144,6 +148,9 @@ TupleTableSlot* ExecSort(SortState* node)
         node->bounded_Done = node->bounded;
         node->bound_Done = node->bound;
         plan_state = &node->ss.ps;
+
+        /* analyze the tuple_sortstate information for update unique sql sort info */
+        UpdateUniqueSQLSortStats(tuple_sortstate, &start_time);
 
         /* Cache sort info into SortState for display of explain analyze */
         if (node->ss.ps.instrument != NULL) {

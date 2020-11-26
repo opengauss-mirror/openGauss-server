@@ -1687,7 +1687,21 @@ typedef struct knl_u_unique_sql_context {
      * - is_top_unique_sql to false
      */
     bool is_top_unique_sql;
+
+    /* sort and hash instrment states */
+    struct unique_sql_instr* unique_sql_sort_instr;
+    struct unique_sql_instr* unique_sql_hash_instr;
 } knl_u_unique_sql_context;
+
+typedef struct unique_sql_instr {
+    bool has_sorthash;       /* true if query contains sort/hash operation */
+    uint64 counts;           /* # of operation during unique sql */
+    int64 used_work_mem;         /* space of used work mem by kbs */
+    TimestampTz enter_time;  /* time stamp at the start point */
+    TimestampTz total_time;  /* execution time */
+    uint64 spill_counts;     /* # of spill times during the operation */
+    uint64 spill_size;       /* spill size for temp table by kbs */
+} unique_sql_instr;
 
 typedef struct knl_u_percentile_context {
     struct SqlRTInfo* LocalsqlRT;
