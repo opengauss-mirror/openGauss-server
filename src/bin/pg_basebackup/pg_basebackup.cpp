@@ -1349,6 +1349,32 @@ static void BaseBackup(void)
         disconnect_and_exit(1);
     }
 
+    /*
+  * End of copy data. Final result is already checked inside the loop.
+  */
+    PQclear(res);
+
+    res = PQgetResult(conn);
+    if (res != NULL) {
+        /*
+         * We expect the result to be NULL, otherwise we received some unexpected result.
+         * We just expect a 'Z' message and PQgetResult should set conn->asyncStatus to PGASYNC_IDLE,
+         * otherwise we have problem! Report error and disconnect.
+         */
+        fprintf(stderr,
+                _("%s: unexpected result received after final result, status: %u\n"),
+                progname,
+                PQresultStatus(res));
+        free(sysidentifier);
+        disconnect_and_exit(1);
+    }
+
+    if (verbose) {
+        fprintf(stderr, "%s: fetching MOT checkpoint\n", progname);
+    }
+
+    FetchMotCheckpoint(basedir, conn, progname, (bool)verbose, format, compresslevel);
+
     if (bgchild > 0) {
 #ifndef WIN32
         int status;
@@ -1427,32 +1453,6 @@ static void BaseBackup(void)
         /* Exited normally, we're happy */
 #endif
     }
-
-    /*
-     * End of copy data. Final result is already checked inside the loop.
-     */
-    PQclear(res);
-
-    res = PQgetResult(conn);
-    if (res != NULL) {
-        /*
-         * We expect the result to be NULL, otherwise we received some unexpected result.
-         * We just expect a 'Z' message and PQgetResult should set conn->asyncStatus to PGASYNC_IDLE,
-         * otherwise we have problem! Report error and disconnect.
-         */
-        fprintf(stderr,
-            _("%s: unexpected result received after final result, status: %u\n"),
-            progname,
-            PQresultStatus(res));
-        free(sysidentifier);
-        disconnect_and_exit(1);
-    }
-
-    if (verbose) {
-        fprintf(stderr, "%s: fetching MOT checkpoint\n", progname);
-    }
-
-    FetchMotCheckpoint(basedir, conn, progname, (bool)verbose, format, compresslevel);
 
     PQfinish(conn);
     conn = NULL;
