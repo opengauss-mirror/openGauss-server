@@ -1579,7 +1579,7 @@ static void ExecParallelHashIncreaseNumBuckets(HashJoinTable hashtable)
                     Assert(batchno == 0);
 
                     /* add the tuple to the proper bucket */
-                    ExecParallelHashPushTuple(&hashtable->buckets.shared[bucketno], hashTuple, hashTuple->next.shared);
+                    ExecParallelHashPushTuple(&hashtable->buckets.shared[bucketno], hashTuple, hashTuple);
 
                     /* advance index past the tuple */
                     idx += MAXALIGN(HJTUPLE_OVERHEAD + HJTUPLE_MINTUPLE(hashTuple)->t_len);
@@ -2031,10 +2031,18 @@ bool ExecParallelScanHashBucket(HashJoinState* hjstate, ExprContext* econtext)
             /* reset temp memory each time to avoid leaks from qual expr */
             ResetExprContext(econtext);
 
-            if (ExecQual(hjclauses, econtext, false)) {
+            if (ExecQual(hjclauses, econtext, false) ||
+                (hjstate->js.nulleqqual != NIL && ExecQual(hjstate->js.nulleqqual, econtext, false))) {
                 hjstate->hj_CurTuple = hashTuple;
                 return true;
             }
+        }
+        /*
+         * For right Semi/Anti join, we delete mathced tuples in HashTable to make next matching faster,
+         * so pointer hj_PreTuple is designed to follow the hj_CurTuple and to help us to clear the HashTable.
+         */
+        if (hjstate->js.jointype == JOIN_RIGHT_SEMI || hjstate->js.jointype == JOIN_RIGHT_ANTI) {
+            hjstate->hj_PreTuple = hashTuple;
         }
 
         hashTuple = ExecParallelHashNextTuple(hashtable, hashTuple);
@@ -3132,11 +3140,8 @@ void ExecHashTableDetach(HashJoinTable hashtable)
  */
 static inline HashJoinTuple ExecParallelHashFirstTuple(HashJoinTable hashtable, int bucketno)
 {
-    HashJoinTuple tuple;
-    ParallelHashJoinState* parallelState = hashtable->parallel_state;
-    Assert(parallelState);
-    tuple = (HashJoinTuple)dsa_get_address(hashtable->area, hashtable->buckets.shared[bucketno]);
-    return tuple;
+    Assert(hashtable->parallel_state);
+    return (HashJoinTuple)dsa_get_address(hashtable->area, hashtable->buckets.shared[bucketno]);
 }
 
 /*
