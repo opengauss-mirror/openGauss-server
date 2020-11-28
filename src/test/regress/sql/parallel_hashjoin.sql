@@ -1,3 +1,4 @@
+set enable_material to off;
 create table parallel_hashjoin_test_a (id int);
 create table parallel_hashjoin_test_b (id int);
 insert into parallel_hashjoin_test_a select n from generate_series(1,1000) n;

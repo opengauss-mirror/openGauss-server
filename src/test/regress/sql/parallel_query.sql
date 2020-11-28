@@ -1,3 +1,4 @@
+set enable_material to off;
 create table parallel_t1(a int);
 insert into parallel_t1 values(generate_series(1,100000));
 analyze parallel_t1;
