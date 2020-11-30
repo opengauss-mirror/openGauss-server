@@ -29,7 +29,7 @@
 #include "postgres_fe.h"
 #include "gs_tar_const.h"
 #include "streamutil.h"
-#include "libpq/libpq-fe.h"
+#include "fetchmot.h"
 #include "utils/builtins.h"
 #include "common/fe_memutils.h"
 
@@ -310,6 +310,7 @@ static void MotReceiveAndAppendTarFile(
             }
         } /* continuing data in existing file */
     }     /* loop over all data blocks */
+
     if (tarfile != NULL) {
         fclose(tarfile);
         tarfile = NULL;
@@ -546,10 +547,12 @@ static void MotReceiveAndUnpackTarFile(const char* basedir, const char* chkptNam
 
 /**
  * @brief Receives and writes the current MOT checkpoint.
- * @param the directory in which to save the files in.
- * @param the connection to use in order to fetch.
- * @param the caller program name (for logging).
- * @param controls verbose output
+ * @param basedir The directory in which to save the files in.
+ * @param conn The connection to use in order to fetch.
+ * @param progname The caller program name (for logging).
+ * @param verbose Controls verbose output.
+ * @param format Plain text format ('p') or tar format ('t').
+ * @param compresslevel Compression level.
  * @return Boolean value denoting success or failure.
  */
 void FetchMotCheckpoint(
@@ -670,9 +673,9 @@ static void TrimValue(char* value)
 
 /**
  * @brief Parses a certain value for an option from a file.
- * @param the file to parse from.
- * @param option to parse.
- * @return the option's value as a malloc'd buffer or NULL if
+ * @param fileName The file to parse from.
+ * @param option Option to parse.
+ * @return The option's value as a malloc'd buffer or NULL if
  * it was not found.
  */
 char* GetOptionValueFromFile(const char* fileName, const char* option)

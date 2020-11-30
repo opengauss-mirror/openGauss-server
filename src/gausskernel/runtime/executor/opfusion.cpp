@@ -922,7 +922,7 @@ MotJitSelectFusion::MotJitSelectFusion(
 
 bool MotJitSelectFusion::execute(long max_rows, char* completionTag)
 {
-    ParamListInfo params = m_outParams != NULL ? m_outParams : m_params;
+    ParamListInfo params = (m_outParams != NULL) ? m_outParams : m_params;
     bool success = false;
     setReceiver();
     unsigned long nprocessed = 0;
@@ -1181,7 +1181,7 @@ bool MotJitModifyFusion::execute(long max_rows, char* completionTag)
     bool success = false;
     uint64_t tpProcessed = 0;
     int scanEnded = 0;
-    ParamListInfo params = m_outParams != NULL ? m_outParams : m_params;
+    ParamListInfo params = (m_outParams != NULL) ? m_outParams : m_params;
     int rc = JitExec::JitExecQuery(m_cacheplan->mot_jit_context, params, m_reslot, &tpProcessed, &scanEnded);
     if (rc == 0) {
         (void)ExecClearTuple(m_reslot);
@@ -1191,18 +1191,18 @@ bool MotJitModifyFusion::execute(long max_rows, char* completionTag)
         {
             case CMD_INSERT:
                 ret = snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
-                   "INSERT 0 %lu", tpProcessed);
-                securec_check_ss(ret,"\0","\0");
+                    "INSERT 0 %lu", tpProcessed);
+                securec_check_ss(ret, "\0", "\0");
                 break;
             case CMD_UPDATE:
                 ret = snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
-                   "UPDATE %lu", tpProcessed);
-                securec_check_ss(ret,"\0","\0");
+                    "UPDATE %lu", tpProcessed);
+                securec_check_ss(ret, "\0", "\0");
                 break;
             case CMD_DELETE:
                 ret = snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
-                   "DELETE %lu", tpProcessed);
-                securec_check_ss(ret,"\0","\0");
+                    "DELETE %lu", tpProcessed);
+                securec_check_ss(ret, "\0", "\0");
                 break;
             default:
                 break;

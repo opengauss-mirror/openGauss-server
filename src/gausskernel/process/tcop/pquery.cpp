@@ -174,7 +174,7 @@ static void process_query(PlannedStmt* plan, const char* source_text, ParamListI
     Snapshot snap = InvalidSnapshot;
 
     /******************************* MOT LLVM *************************************/
-    if (isMOTTable && !IS_PGXC_COORDINATOR && JitExec::IsMotCodegenEnabled() && mot_jit_context) {
+    if (isMOTTable && mot_jit_context && !IS_PGXC_COORDINATOR && JitExec::IsMotCodegenEnabled()) {
         Oid lastOid = InvalidOid;
         uint64 tuplesProcessed = 0;
         int scanEnded = 0;
@@ -192,18 +192,18 @@ static void process_query(PlannedStmt* plan, const char* source_text, ParamListI
             switch (plan->commandType) {
                 case CMD_INSERT:
                     ret = snprintf_s(completion_tag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
-                            "INSERT %u %lu", lastOid, tuplesProcessed);
-                    securec_check_ss(ret,"\0","\0");
+                        "INSERT %u %lu", lastOid, tuplesProcessed);
+                    securec_check_ss(ret, "\0", "\0");
                     break;
                 case CMD_UPDATE:
                     ret = snprintf_s(completion_tag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
-                            "UPDATE %lu", tuplesProcessed);
-                    securec_check_ss(ret,"\0","\0");
+                        "UPDATE %lu", tuplesProcessed);
+                    securec_check_ss(ret, "\0", "\0");
                     break;
                 case CMD_DELETE:
                     ret = snprintf_s(completion_tag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
-                            "DELETE %lu", tuplesProcessed);
-                    securec_check_ss(ret,"\0","\0");
+                        "DELETE %lu", tuplesProcessed);
+                    securec_check_ss(ret, "\0", "\0");
                     break;
                 default:
                     break;

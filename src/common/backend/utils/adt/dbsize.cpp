@@ -821,7 +821,7 @@ int64 calculate_relation_size(RelFileNode* rfn, BackendId backend, ForkNumber fo
     return totalsize;
 }
 
-uint64 calculate_mot_relation_size(Relation rel, Oid idxOid)
+uint64 CalculateMotRelationSize(Relation rel, Oid idxOid)
 {
     uint64  totalSize = 0;
     FdwRoutine *fdwroutine = GetFdwRoutineForRelation(rel, false);
@@ -1047,7 +1047,7 @@ static int64 calculate_table_size(Relation rel, int fork_num_option)
 
     if (!RelationIsIndex(rel)) {
         if (RelationIsForeignTable(rel) && RelationIsMOTTableByOid(RelationGetRelid(rel))) {
-            size = calculate_mot_relation_size(rel, InvalidOid);
+            size = CalculateMotRelationSize(rel, InvalidOid);
         } else if (!RelationIsPartitioned(rel)) {
             size = calculate_table_file_size(rel, RelationIsColStore(rel), fork_num_option);
         } else {
@@ -1073,7 +1073,7 @@ static int64 calculate_table_size(Relation rel, int fork_num_option)
         bool b_cstore = RelationIsColStore(base_rel) && (rel->rd_rel->relam == PSORT_AM_OID);
 
         if (RelationIsForeignTable(base_rel) && RelationIsMOTTableByOid(RelationGetRelid(base_rel))) {
-            size = calculate_mot_relation_size(base_rel, RelationGetRelid(rel));
+            size = CalculateMotRelationSize(base_rel, RelationGetRelid(rel));
         } else if (!RelationIsPartitioned(rel)) {
             if (!b_cstore)
                 size = calculate_table_file_size(rel, false, fork_num_option);

@@ -103,7 +103,6 @@
 extern void* internal_load_library(const char* libname);
 extern char* expand_dynamic_library_name(const char* name);
 extern bool PMstateIsRun(void);
-extern void PerformMotCheckpointFetch();
 
 /* Are we there yet? */
 static bool WalSndCaughtUp = false;

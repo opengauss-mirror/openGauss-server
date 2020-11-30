@@ -152,8 +152,8 @@
 #endif
 
 #define CONFIG_FILENAME "postgresql.conf"
-#define MOT_CONFIG_FILENAME "mot.conf"
 #define CONFIG_LOCK_FILE "postgresql.conf.lock"
+#define MOT_CONFIG_FILENAME "mot.conf"
 #define HBA_FILENAME "pg_hba.conf"
 #define IDENT_FILENAME "pg_ident.conf"
 #define INVALID_LINES_IDX (int)(~0)
@@ -13534,13 +13534,13 @@ bool SelectConfigFiles(const char* userDoption, const char* progname)
     if (g_instance.attr.attr_common.MOTConfigFileName)
         motfname = make_absolute_path(g_instance.attr.attr_common.MOTConfigFileName);
     else if (configdir) {
-        motfname = (char*)guc_malloc(FATAL,strlen(configdir) + strlen(MOT_CONFIG_FILENAME) + 2);
+        motfname = (char*)guc_malloc(FATAL, strlen(configdir) + strlen(MOT_CONFIG_FILENAME) + 2);
         rc = snprintf_s(motfname,
-                strlen(configdir) + strlen(MOT_CONFIG_FILENAME) + 2,
-                strlen(configdir) + strlen(MOT_CONFIG_FILENAME) + 1,
-                "%s/%s",
-                configdir,
-                MOT_CONFIG_FILENAME);
+            strlen(configdir) + strlen(MOT_CONFIG_FILENAME) + 2,
+            strlen(configdir) + strlen(MOT_CONFIG_FILENAME) + 1,
+            "%s/%s",
+            configdir,
+            MOT_CONFIG_FILENAME);
         securec_check_ss(rc, configdir, "\0");
     }
 

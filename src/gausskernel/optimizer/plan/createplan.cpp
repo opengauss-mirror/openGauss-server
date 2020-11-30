@@ -8303,7 +8303,7 @@ uint32 getDistSessionKey(List* fdw_private)
 
     foreach (lc, fdw_private) {
         /*
-         * FDW may put a node of any type into the list, so if we are looking for
+         * MOT FDW may put a node of any type into the list, so if we are looking for
          * some specific type, we need to first make sure that it's the correct type.
          */
         Node* node = (Node*)lfirst(lc);

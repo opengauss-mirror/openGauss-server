@@ -2035,8 +2035,8 @@ static void ExecutePlan(EState *estate, PlanState *planstate, bool use_parallel_
                 // previous iteration has not signaled end of scan
                 slot = planstate->ps_ResultTupleSlot;
                 uint64_t tp_processed = 0;
-                int rc = JitExec::JitExecQuery(mot_jit_context, estate->es_param_list_info,
-                        slot, &tp_processed, &scan_ended);
+                int rc = JitExec::JitExecQuery(
+                    mot_jit_context, estate->es_param_list_info, slot, &tp_processed, &scan_ended);
                 if (scan_ended || (tp_processed == 0) || (rc != 0)) {
                     // raise flag so that next round we will bail out (current tuple still must be reported to user)
                     mot_finished_execution = true;

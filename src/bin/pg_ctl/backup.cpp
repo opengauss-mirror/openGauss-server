@@ -44,6 +44,8 @@
 #include "bin/elog.h"
 #include "file_ops.h"
 
+#include "fetchmot.h"
+
 /* Maximum number of digit in integer. Used to allocate memory to copy int to string */
 #define MAX_INT_SIZE 20
 /* set build receive timeout during master getting in backup mode */
@@ -127,9 +129,6 @@ static int replace_node_name(char* sSrc, const char* sMatchStr, const char* sRep
 static void show_full_build_process(const char* errmg);
 static void backup_dw_file(const char* target_dir);
 static void get_xlog_location(char (&xlog_location)[MAXPGPATH]);
-extern void FetchMotCheckpoint(const char* basedir, PGconn* fetchConn, const char* progname, bool verbose,
-    const char format = 'p', const int compresslevel = 0);
-extern char* GetOptionValueFromFile(const char* fileName, const char* option);
 
 /*
  * tblspaceDirectory is used for saving the table space directory created by
@@ -1317,8 +1316,8 @@ static void BaseBackup(const char* dirname, uint32 term)
     }
 
     /*
-    * End of copy data. Final result is already checked inside the loop.
-    */
+     * End of copy data. Final result is already checked inside the loop.
+     */
     PQclear(res);
 
     res = PQgetResult(streamConn);
@@ -1345,7 +1344,9 @@ static void BaseBackup(const char* dirname, uint32 term)
         securec_check_ss_c(nRet, "\0", "\0");
         motChkptDir = GetOptionValueFromFile(confPath, "checkpoint_dir");
     }
+
     FetchMotCheckpoint(motChkptDir ? (const char*)motChkptDir : dirname, streamConn, progname, (bool)verbose);
+
     if (motChkptDir) {
         free(motChkptDir);
     }

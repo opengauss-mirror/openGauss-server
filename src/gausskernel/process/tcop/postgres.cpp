@@ -2218,7 +2218,7 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
         else
             querytree_list = pg_analyze_and_rewrite(parsetree, sql_query_string, NULL, 0);
 
-        /* check cross engine queries and transactions violation */
+        /* check cross engine queries and transactions violation for MOT */
         StorageEngineType storageEngineType = SE_TYPE_UNSPECIFIED;
         if (querytree_list) {
             CheckTablesStorageEngine((Query*)linitial(querytree_list), &storageEngineType);
@@ -3131,10 +3131,11 @@ void exec_parse_message(const char* query_string,        /* string to execute */
         }
 
         /******************************* MOT LLVM *************************************/
-        if (JitExec::IsMotCodegenEnabled() && !IS_PGXC_COORDINATOR && psrc->storageEngineType == SE_TYPE_MOT) {
+        if (psrc->storageEngineType == SE_TYPE_MOT && !IS_PGXC_COORDINATOR && JitExec::IsMotCodegenEnabled()) {
             // try to generate LLVM jitted code - first cleanup jit of previous run
             if (psrc->mot_jit_context != NULL) {
-                // NOTE: context is cleaned up during end of session, this should not happen, maybe a warning should be issued
+                // NOTE: context is cleaned up during end of session, this should not happen,
+                // maybe a warning should be issued
                 psrc->mot_jit_context = NULL;
             }
 
@@ -4850,7 +4851,7 @@ void exec_describe_statement_message(const char* stmt_name)
     /* Prepared statements shouldn't have changeable result descs */
     Assert(psrc->fixed_result);
 
-    /* set current transaction storage engine*/
+    /* set current transaction storage engine */
     SetCurrentTransactionStorageEngine(psrc->storageEngineType);
 
     /*
