@@ -42,13 +42,12 @@ void FetchMotCheckpoint(const char* basedir, PGconn* conn, const char* progname,
     const char format = 'p', const int compresslevel = 0);
 
 /**
- * @brief Parses a certain value for an option from a file.
- * @param fileName The file to parse from.
- * @param option Option to parse.
- * @return The option's value as a malloc'd buffer or NULL if
- * it was not found.
+ * @brief Gets the checkpoint_dir config value from the mot.conf file.
+ * @param dataDir pg_data directory.
+ * @return checkpoint_dir config value as a malloc'd buffer or NULL if
+ * it was not found. Caller needs to free this malloc'd buffer.
  */
-char* GetOptionValueFromFile(const char* fileName, const char* option);
+char* GetMotCheckpointDir(const char* dataDir);
 
 #endif /* SRC_BIN_PG_CTL_FETCHMOT_H */
 

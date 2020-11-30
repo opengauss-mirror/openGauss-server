@@ -676,9 +676,9 @@ static void TrimValue(char* value)
  * @param fileName The file to parse from.
  * @param option Option to parse.
  * @return The option's value as a malloc'd buffer or NULL if
- * it was not found.
+ * it was not found. Caller's responsibility to free this returned buffer.
  */
-char* GetOptionValueFromFile(const char* fileName, const char* option)
+static char* GetOptionValueFromFile(const char* fileName, const char* option)
 {
     FILE* file = NULL;
     char* line = NULL;
@@ -708,4 +708,33 @@ char* GetOptionValueFromFile(const char* fileName, const char* option)
     }
     fclose(file);
     return ret;
+}
+
+/**
+ * @brief Gets the checkpoint_dir config value from the mot.conf file.
+ * @param dataDir pg_data directory.
+ * @return checkpoint_dir config value as a malloc'd buffer or NULL if
+ * it was not found. Caller's responsibility to free this returned buffer.
+ */
+char* GetMotCheckpointDir(const char* dataDir)
+{
+    char confPath[1024] = {0};
+    char* motChkptDir = NULL;
+
+    /* see if we have an mot conf file configured */
+    int nRet = sprintf_s(confPath, sizeof(confPath), "%s/%s", dataDir, "postgresql.conf");
+    securec_check_ss_c(nRet, "\0", "\0");
+
+    char* motConfPath = GetOptionValueFromFile(confPath, "mot_config_file");
+    if (motConfPath != NULL) {
+        motChkptDir = GetOptionValueFromFile(motConfPath, "checkpoint_dir");
+        free(motConfPath);
+        motConfPath = NULL;
+    } else {
+        nRet = sprintf_s(confPath, sizeof(confPath), "%s/%s", dataDir, "mot.conf");
+        securec_check_ss_c(nRet, "\0", "\0");
+        motChkptDir = GetOptionValueFromFile(confPath, "checkpoint_dir");
+    }
+
+    return motChkptDir;
 }

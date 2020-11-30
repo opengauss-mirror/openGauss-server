@@ -1470,6 +1470,24 @@ void index_constraint_create(Relation heapRelation, Oid indexRelationId, IndexIn
     }
 }
 
+static void MotFdwDropForeignIndex(Relation userHeapRelation, Relation userIndexRelation)
+{
+    /* Forward drop stmt to MOT FDW. */
+    if (RelationIsForeignTable(userHeapRelation) && isMOTFromTblOid(RelationGetRelid(userHeapRelation))) {
+        FdwRoutine* fdwroutine = GetFdwRoutineByRelId(userHeapRelation->rd_id);
+        if (fdwroutine->ValidateTableDef != NULL) {
+            DropForeignStmt stmt;
+            stmt.type = T_DropForeignStmt;
+            stmt.relkind = RELKIND_INDEX;
+            stmt.reloid = RelationGetRelid(userHeapRelation);
+            stmt.indexoid = RelationGetRelid(userIndexRelation);
+            stmt.name = userIndexRelation->rd_rel->relname.data;
+
+            fdwroutine->ValidateTableDef((Node*)&stmt);
+        }
+    }
+}
+
 /*
  *		index_drop
  *
@@ -1740,20 +1758,8 @@ void index_drop(Oid indexId, bool concurrent)
         freePartList(partIndexlist);
     }
 
-    /* Call FDW drop */
-    if (RelationIsForeignTable(userHeapRelation) && isMOTFromTblOid(RelationGetRelid(userHeapRelation))) {
-        FdwRoutine* fdwroutine = GetFdwRoutineByRelId(userHeapRelation->rd_id);
-        if (fdwroutine->ValidateTableDef != NULL) {
-            DropForeignStmt stmt;
-            stmt.type = T_DropForeignStmt;
-            stmt.relkind = RELKIND_INDEX;
-            stmt.reloid = userHeapRelation->rd_id;
-            stmt.indexoid = userIndexRelation->rd_id;
-            stmt.name = userIndexRelation->rd_rel->relname.data;
-
-            fdwroutine->ValidateTableDef((Node*)&stmt);
-        }
-    }
+    /* Forward drop stmt to MOT FDW. */
+    MotFdwDropForeignIndex(userHeapRelation, userIndexRelation);
 
     /*
      * Close and flush the index's relcache entry, to ensure relcache doesn't
@@ -3875,6 +3881,24 @@ void ReindexGlobalIndexInternal(Relation heapRelation, Relation iRel, IndexInfo*
     ATExecSetIndexUsableState(IndexRelationId, iRel->rd_id, true);
 }
 
+static void MotFdwReindex(Relation heapRelation, Relation iRel)
+{
+    /* Forward reindex stmt to MOT FDW. */
+    if (RelationIsForeignTable(heapRelation) && isMOTFromTblOid(RelationGetRelid(heapRelation))) {
+        FdwRoutine* fdwroutine = GetFdwRoutineByRelId(heapRelation->rd_id);
+        if (fdwroutine->ValidateTableDef != NULL) {
+            ReindexForeignStmt stmt;
+            stmt.type = T_ReindexStmt;
+            stmt.relkind = RELKIND_INDEX;
+            stmt.reloid = heapRelation->rd_id;
+            stmt.indexoid = iRel->rd_id;
+            stmt.name = iRel->rd_rel->relname.data;
+
+            fdwroutine->ValidateTableDef((Node*)&stmt);
+        }
+    }
+}
+
 /*
  * reindex_index - This routine is used to recreate a single index
  */
@@ -3917,20 +3941,8 @@ void reindex_index(Oid indexId, Oid indexPartId, bool skip_constraint_checks,
         ereport(ERROR,
             (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("cannot reindex temporary tables of other sessions")));
 
-    if (RelationIsForeignTable(heapRelation) && isMOTFromTblOid(RelationGetRelid(heapRelation))) {
-        FdwRoutine* fdwroutine = GetFdwRoutineByRelId(heapRelation->rd_id);
-        if (fdwroutine->ValidateTableDef != NULL) {
-            ReindexForeignStmt stmt;
-            stmt.type = T_ReindexStmt;
-            stmt.relkind = RELKIND_INDEX;
-            stmt.reloid = heapRelation->rd_id;
-            stmt.indexoid = iRel->rd_id;
-            stmt.name = iRel->rd_rel->relname.data;
-
-            fdwroutine->ValidateTableDef((Node*)&stmt);
-        }
-        return;
-    }
+    /* Forward reindex stmt to MOT FDW. */
+    MotFdwReindex(heapRelation, iRel);
 
     /*
      * Also check for active uses of the index in the current transaction; we

@@ -1196,6 +1196,7 @@ void MOTConfiguration::UpdateComponentLogLevel()
             const mot_string& componentName = *compItr;
             MOT_LOG_DEBUG("Loading component %s log level", componentName.c_str());
             const ConfigSection* componentCfg = cfgSection->GetConfigSection(componentName.c_str());
+            MOT_ASSERT(componentCfg != nullptr);
 
             // configure component log level first then override log level specific loggers in the component
             LogLevel componentLevel = componentCfg->GetUserConfigValue<LogLevel>("log_level", globalLogLevel);

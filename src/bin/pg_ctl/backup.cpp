@@ -1016,9 +1016,6 @@ static void BaseBackup(const char* dirname, uint32 term)
     errno_t rc = EOK;
     int nRet = 0;
     struct stat st;
-    char confPath[1024] = {0};
-    char* motConfPath = NULL;
-    char* motChkptDir = NULL;
 
     pqsignal(SIGCHLD, BuildReaper); /* handle child termination */
     /* concat file and path */
@@ -1333,25 +1330,10 @@ static void BaseBackup(const char* dirname, uint32 term)
 
     show_full_build_process("fetching MOT checkpoint");
 
-    /* see if we have an mot conf file configured */
-    nRet = sprintf_s(confPath, sizeof(confPath), "%s/%s", dirname, "postgresql.conf");
-    securec_check_ss_c(nRet, "\0", "\0");
-    motConfPath = GetOptionValueFromFile(confPath, "mot_config_file");
-    if (motConfPath != NULL) {
-        motChkptDir = GetOptionValueFromFile(motConfPath, "checkpoint_dir");
-    } else {
-        nRet = sprintf_s(confPath, sizeof(confPath), "%s/%s", dirname, "mot.conf");
-        securec_check_ss_c(nRet, "\0", "\0");
-        motChkptDir = GetOptionValueFromFile(confPath, "checkpoint_dir");
-    }
-
+    char* motChkptDir = GetMotCheckpointDir(dirname);
     FetchMotCheckpoint(motChkptDir ? (const char*)motChkptDir : dirname, streamConn, progname, (bool)verbose);
-
     if (motChkptDir) {
         free(motChkptDir);
-    }
-    if (motConfPath) {
-        free(motConfPath);
     }
 
     if (bgchild > 0) {

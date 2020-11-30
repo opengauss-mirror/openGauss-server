@@ -2888,6 +2888,29 @@ static void exec_plan_with_params(StringInfo input_message)
     finish_xact_command();
 }
 #endif
+
+static void TryMotJitCodegenQuery(const char* queryString, CachedPlanSource* psrc, Query* query)
+{
+    // Try to generate LLVM jitted code - first cleanup jit of previous run.
+    if (psrc->mot_jit_context != NULL) {
+        // NOTE: context is cleaned up during end of session, this should not happen,
+        // maybe a warning should be issued
+        psrc->mot_jit_context = NULL;
+    }
+
+    if (JitExec::IsMotCodegenPrintEnabled()) {
+        elog(LOG, "Attempting to generate MOT jitted code for query: %s\n", queryString);
+    }
+
+    JitExec::JitPlan* jitPlan = JitExec::IsJittable(query, queryString);
+    if (jitPlan != NULL) {
+        psrc->mot_jit_context = JitExec::JitCodegenQuery(query, queryString, jitPlan);
+        if ((psrc->mot_jit_context == NULL) && JitExec::IsMotCodegenPrintEnabled()) {
+            elog(LOG, "Failed to generate jitted MOT function for query %s\n", queryString);
+        }
+    }
+}
+
 /*
  * exec_parse_message
  *
@@ -3130,28 +3153,10 @@ void exec_parse_message(const char* query_string,        /* string to execute */
                     errmsg("Cross storage engine query is not supported")));
         }
 
-        /******************************* MOT LLVM *************************************/
         if (psrc->storageEngineType == SE_TYPE_MOT && !IS_PGXC_COORDINATOR && JitExec::IsMotCodegenEnabled()) {
-            // try to generate LLVM jitted code - first cleanup jit of previous run
-            if (psrc->mot_jit_context != NULL) {
-                // NOTE: context is cleaned up during end of session, this should not happen,
-                // maybe a warning should be issued
-                psrc->mot_jit_context = NULL;
-            }
-
-            if (JitExec::IsMotCodegenPrintEnabled()) {
-                elog(LOG, "Attempting to generate MOT jitted code for query: %s\n", query_string);
-            }
-
-            JitExec::JitPlan* jitPlan = JitExec::IsJittable(query, query_string);
-            if (jitPlan != NULL) {
-                psrc->mot_jit_context = JitExec::JitCodegenQuery(query, query_string, jitPlan);
-                if ((psrc->mot_jit_context == NULL) && JitExec::IsMotCodegenPrintEnabled()) {
-                    elog(LOG, "Failed to generate jitted MOT function for query %s\n", query_string);
-                }
-            }
+            // MOT LLVM
+            TryMotJitCodegenQuery(query_string, psrc, query);
         }
-        /******************************* MOT LLVM *************************************/
 
         if (!IsTransactionExitStmt(raw_parse_tree) && CheckMotIndexedColumnUpdate(query)) {
             ereport(ERROR, (errcode(ERRCODE_FDW_UPDATE_INDEXED_FIELD_NOT_SUPPORTED), errmodule(MOD_MOT),

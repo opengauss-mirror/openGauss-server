@@ -3856,9 +3856,6 @@ static void do_incremental_build(uint32 term)
     BuildErrorCode status = BUILD_SUCCESS;
     set_build_pid(getpid());
     char connstrSource[1024];
-    char confPath[1024] = {0};
-    char* motConfPath = NULL;
-    char* motChkptDir = NULL;
 
     /* 1. load repl_conninfo into conninfo_global.
      * read from postgresql.conf or get from command line.
@@ -3899,25 +3896,10 @@ static void do_incremental_build(uint32 term)
 
         pg_log(PG_PROGRESS, "fetching MOT checkpoint\n");
 
-        /* see if we have an mot conf file configured */
-        tnRet = sprintf_s(confPath, sizeof(confPath), "%s/%s", pg_data, "postgresql.conf");
-        securec_check_ss_c(tnRet, "\0", "\0");
-        motConfPath = GetOptionValueFromFile(confPath, "mot_config_file");
-        if (motConfPath != NULL) {
-            motChkptDir = GetOptionValueFromFile(motConfPath, "checkpoint_dir");
-        } else {
-            tnRet = sprintf_s(confPath, sizeof(confPath), "%s/%s", pg_data, "mot.conf");
-            securec_check_ss_c(tnRet, "\0", "\0");
-            motChkptDir = GetOptionValueFromFile(confPath, "checkpoint_dir");
-        }
-
+        char* motChkptDir = GetMotCheckpointDir(pg_data);
         FetchMotCheckpoint(motChkptDir ? (const char*)motChkptDir : (const char*)pg_data, streamConn, progname, true);
-
         if (motChkptDir) {
             free(motChkptDir);
-        }
-        if (motConfPath) {
-            free(motConfPath);
         }
     }
 

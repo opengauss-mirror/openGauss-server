@@ -48,8 +48,6 @@
  */
 THR_LOCAL Portal ActivePortal = NULL;
 
-static void process_query(PlannedStmt* plan, const char* source_text, ParamListInfo params, bool isMOTTable,
-    JitExec::JitContext* mot_jit_context, DestReceiver* dest, char* completion_tag);
 static void fill_portal_store(Portal portal, bool is_top_level);
 static uint32 run_from_store(Portal portal, ScanDirection direction, long count, DestReceiver* dest);
 static uint32 run_from_explain_store(Portal portal, ScanDirection direction, DestReceiver* dest);
@@ -148,6 +146,49 @@ void FreeQueryDesc(QueryDesc* qdesc)
 }
 
 /*
+ * MOT LLVM
+ */
+static void ProcessMotJitQuery(PlannedStmt* plan, const char* sourceText, ParamListInfo params,
+    JitExec::JitContext* motJitContext, char* completionTag)
+{
+    Oid lastOid = InvalidOid;
+    uint64 tuplesProcessed = 0;
+    int scanEnded = 0;
+
+    if (JitExec::IsMotCodegenPrintEnabled()) {
+        elog(DEBUG1, "Invoking jitted mot query and query string: %s\n", sourceText);
+    }
+
+    int rc = JitExec::JitExecQuery(motJitContext, params, NULL, &tuplesProcessed, &scanEnded);
+    if (JitExec::IsMotCodegenPrintEnabled()) {
+        elog(DEBUG1, "jitted mot query returned: %d\n", rc);
+    }
+
+    if (completionTag != NULL) {
+        errno_t ret = EOK;
+        switch (plan->commandType) {
+            case CMD_INSERT:
+                ret = snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
+                    "INSERT %u %lu", lastOid, tuplesProcessed);
+                securec_check_ss(ret, "\0", "\0");
+                break;
+            case CMD_UPDATE:
+                ret = snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
+                    "UPDATE %lu", tuplesProcessed);
+                securec_check_ss(ret, "\0", "\0");
+                break;
+            case CMD_DELETE:
+                ret = snprintf_s(completionTag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
+                    "DELETE %lu", tuplesProcessed);
+                securec_check_ss(ret, "\0", "\0");
+                break;
+            default:
+                break;
+        }
+    }
+}
+
+/*
  * ProcessQuery
  *		Execute a single plannable query within a PORTAL_MULTI_QUERY,
  *		PORTAL_ONE_RETURNING, or PORTAL_ONE_MOD_WITH portal
@@ -165,7 +206,7 @@ void FreeQueryDesc(QueryDesc* qdesc)
  * error; otherwise the executor's memory usage will be leaked.
  */
 static void process_query(PlannedStmt* plan, const char* source_text, ParamListInfo params, bool isMOTTable,
-    JitExec::JitContext* mot_jit_context, DestReceiver* dest, char* completion_tag)
+    JitExec::JitContext* motJitContext, DestReceiver* dest, char* completion_tag)
 {
     QueryDesc* query_desc = NULL;
 
@@ -173,45 +214,11 @@ static void process_query(PlannedStmt* plan, const char* source_text, ParamListI
 
     Snapshot snap = InvalidSnapshot;
 
-    /******************************* MOT LLVM *************************************/
-    if (isMOTTable && mot_jit_context && !IS_PGXC_COORDINATOR && JitExec::IsMotCodegenEnabled()) {
-        Oid lastOid = InvalidOid;
-        uint64 tuplesProcessed = 0;
-        int scanEnded = 0;
-        if (JitExec::IsMotCodegenPrintEnabled()) {
-            elog(DEBUG1, "Invoking jitted mot query and query string: %s\n", source_text);
-        }
-        int rc = JitExec::JitExecQuery(mot_jit_context, params, NULL, &tuplesProcessed, &scanEnded);
-        if (JitExec::IsMotCodegenPrintEnabled()) {
-            elog(DEBUG1, "jitted mot query returned: %d\n", rc);
-        }
-
-        if (completion_tag != NULL) {
-            errno_t ret = EOK;
-
-            switch (plan->commandType) {
-                case CMD_INSERT:
-                    ret = snprintf_s(completion_tag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
-                        "INSERT %u %lu", lastOid, tuplesProcessed);
-                    securec_check_ss(ret, "\0", "\0");
-                    break;
-                case CMD_UPDATE:
-                    ret = snprintf_s(completion_tag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
-                        "UPDATE %lu", tuplesProcessed);
-                    securec_check_ss(ret, "\0", "\0");
-                    break;
-                case CMD_DELETE:
-                    ret = snprintf_s(completion_tag, COMPLETION_TAG_BUFSIZE, COMPLETION_TAG_BUFSIZE - 1,
-                        "DELETE %lu", tuplesProcessed);
-                    securec_check_ss(ret, "\0", "\0");
-                    break;
-                default:
-                    break;
-            }
-        }
+    if (isMOTTable && motJitContext && !IS_PGXC_COORDINATOR && JitExec::IsMotCodegenEnabled()) {
+        // MOT LLVM
+        ProcessMotJitQuery(plan, source_text, params, motJitContext, completion_tag);
         return;
     }
-    /******************************* MOT LLVM *************************************/
 
     if (!isMOTTable) {
         snap = GetActiveSnapshot();
@@ -220,7 +227,7 @@ static void process_query(PlannedStmt* plan, const char* source_text, ParamListI
     /*
      * Create the QueryDesc object
      */
-    query_desc = CreateQueryDesc(plan, source_text, snap, InvalidSnapshot, dest, params, 0, mot_jit_context);
+    query_desc = CreateQueryDesc(plan, source_text, snap, InvalidSnapshot, dest, params, 0, motJitContext);
 
     if (ENABLE_WORKLOAD_CONTROL && (IS_PGXC_COORDINATOR || IS_SINGLE_NODE)) {
         WLMTopSQLReady(query_desc);

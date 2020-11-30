@@ -1429,7 +1429,7 @@ void CreateForeignIndex(IndexStmt* stmt, Oid indexRelationId)
         fdw = GetForeignDataWrapper(server->fdwid);
 
         FdwRoutine* fdwroutine = GetFdwRoutine(fdw->fdwhandler);
-        if (NULL != fdwroutine->ValidateTableDef) {
+        if (fdwroutine->ValidateTableDef != NULL) {
             char* indexRelationName;
             List* indexColNames;
             bool ixNameChanged = false;
