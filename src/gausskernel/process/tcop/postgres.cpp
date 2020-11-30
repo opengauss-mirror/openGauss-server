@@ -2243,7 +2243,7 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
 
         /* check for MOT update of indexed field. Can check only the querytree head, no need for drill down */
         if (!IsTransactionExitStmt(parsetree) &&
-                (querytree_list != NULL && IsMOTIndexedColumnUpdate((Query*)linitial(querytree_list)))) {
+                (querytree_list != NULL && CheckMotIndexedColumnUpdate((Query*)linitial(querytree_list)))) {
             ereport(ERROR, (errcode(ERRCODE_FDW_UPDATE_INDEXED_FIELD_NOT_SUPPORTED), errmodule(MOD_MOT),
                     errmsg("Update of indexed column is not supported for memory table")));
         }
@@ -3153,7 +3153,7 @@ void exec_parse_message(const char* query_string,        /* string to execute */
         }
         /******************************* MOT LLVM *************************************/
 
-        if (!IsTransactionExitStmt(raw_parse_tree) && IsMOTIndexedColumnUpdate(query)) {
+        if (!IsTransactionExitStmt(raw_parse_tree) && CheckMotIndexedColumnUpdate(query)) {
             ereport(ERROR, (errcode(ERRCODE_FDW_UPDATE_INDEXED_FIELD_NOT_SUPPORTED), errmodule(MOD_MOT),
                     errmsg("Update of indexed column is not supported for memory table")));
         }
