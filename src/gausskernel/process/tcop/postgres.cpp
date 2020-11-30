@@ -2218,7 +2218,7 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
         else
             querytree_list = pg_analyze_and_rewrite(parsetree, sql_query_string, NULL, 0);
 
-        /* check cross engine queries and transactions violation */
+        /* check cross engine queries and transactions violation for MOT */
         StorageEngineType storageEngineType = SE_TYPE_UNSPECIFIED;
         if (querytree_list) {
             CheckTablesStorageEngine((Query*)linitial(querytree_list), &storageEngineType);
@@ -2243,7 +2243,7 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
 
         /* check for MOT update of indexed field. Can check only the querytree head, no need for drill down */
         if (!IsTransactionExitStmt(parsetree) &&
-                (querytree_list != NULL && IsMOTIndexedColumnUpdate((Query*)linitial(querytree_list)))) {
+                (querytree_list != NULL && CheckMotIndexedColumnUpdate((Query*)linitial(querytree_list)))) {
             ereport(ERROR, (errcode(ERRCODE_FDW_UPDATE_INDEXED_FIELD_NOT_SUPPORTED), errmodule(MOD_MOT),
                     errmsg("Update of indexed column is not supported for memory table")));
         }
@@ -2888,6 +2888,29 @@ static void exec_plan_with_params(StringInfo input_message)
     finish_xact_command();
 }
 #endif
+
+static void TryMotJitCodegenQuery(const char* queryString, CachedPlanSource* psrc, Query* query)
+{
+    // Try to generate LLVM jitted code - first cleanup jit of previous run.
+    if (psrc->mot_jit_context != NULL) {
+        // NOTE: context is cleaned up during end of session, this should not happen,
+        // maybe a warning should be issued
+        psrc->mot_jit_context = NULL;
+    }
+
+    if (JitExec::IsMotCodegenPrintEnabled()) {
+        elog(LOG, "Attempting to generate MOT jitted code for query: %s\n", queryString);
+    }
+
+    JitExec::JitPlan* jitPlan = JitExec::IsJittable(query, queryString);
+    if (jitPlan != NULL) {
+        psrc->mot_jit_context = JitExec::JitCodegenQuery(query, queryString, jitPlan);
+        if ((psrc->mot_jit_context == NULL) && JitExec::IsMotCodegenPrintEnabled()) {
+            elog(LOG, "Failed to generate jitted MOT function for query %s\n", queryString);
+        }
+    }
+}
+
 /*
  * exec_parse_message
  *
@@ -3130,29 +3153,12 @@ void exec_parse_message(const char* query_string,        /* string to execute */
                     errmsg("Cross storage engine query is not supported")));
         }
 
-        /******************************* MOT LLVM *************************************/
-        if (JitExec::IsMotCodegenEnabled() && !IS_PGXC_COORDINATOR && psrc->storageEngineType == SE_TYPE_MOT) {
-            // try to generate LLVM jitted code - first cleanup jit of previous run
-            if (psrc->mot_jit_context != NULL) {
-                // NOTE: context is cleaned up during end of session, this should not happen, maybe a warning should be issued
-                psrc->mot_jit_context = NULL;
-            }
-
-            if (JitExec::IsMotCodegenPrintEnabled()) {
-                elog(LOG, "Attempting to generate MOT jitted code for query: %s\n", query_string);
-            }
-
-            JitExec::JitPlan* jitPlan = JitExec::IsJittable(query, query_string);
-            if (jitPlan != NULL) {
-                psrc->mot_jit_context = JitExec::JitCodegenQuery(query, query_string, jitPlan);
-                if ((psrc->mot_jit_context == NULL) && JitExec::IsMotCodegenPrintEnabled()) {
-                    elog(LOG, "Failed to generate jitted MOT function for query %s\n", query_string);
-                }
-            }
+        if (psrc->storageEngineType == SE_TYPE_MOT && !IS_PGXC_COORDINATOR && JitExec::IsMotCodegenEnabled()) {
+            // MOT LLVM
+            TryMotJitCodegenQuery(query_string, psrc, query);
         }
-        /******************************* MOT LLVM *************************************/
 
-        if (!IsTransactionExitStmt(raw_parse_tree) && IsMOTIndexedColumnUpdate(query)) {
+        if (!IsTransactionExitStmt(raw_parse_tree) && CheckMotIndexedColumnUpdate(query)) {
             ereport(ERROR, (errcode(ERRCODE_FDW_UPDATE_INDEXED_FIELD_NOT_SUPPORTED), errmodule(MOD_MOT),
                     errmsg("Update of indexed column is not supported for memory table")));
         }
@@ -4850,7 +4856,7 @@ void exec_describe_statement_message(const char* stmt_name)
     /* Prepared statements shouldn't have changeable result descs */
     Assert(psrc->fixed_result);
 
-    /* set current transaction storage engine*/
+    /* set current transaction storage engine */
     SetCurrentTransactionStorageEngine(psrc->storageEngineType);
 
     /*

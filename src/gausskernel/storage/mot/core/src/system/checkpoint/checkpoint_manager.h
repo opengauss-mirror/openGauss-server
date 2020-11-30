@@ -195,8 +195,8 @@ public:
     CheckpointManager& operator=(const CheckpointManager&) = delete;
 
     struct MapFileEntry {
-        uint32_t m_id;
-        uint32_t m_numSegs;
+        uint32_t m_tableId;
+        uint32_t m_maxSegId;
     };
 
 private:

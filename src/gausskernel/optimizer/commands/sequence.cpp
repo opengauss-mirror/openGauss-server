@@ -2103,13 +2103,14 @@ static void process_owned_by(const Relation seqrel, List* owned_by)
         rel = makeRangeVarFromNameList(relname);
         tablerel = relation_openrv(rel, AccessShareLock);
 
-        /* Must be a regular table */
+        /* Must be a regular table or MOT or postgres_fdw table */
         if (tablerel->rd_rel->relkind != RELKIND_RELATION &&
             !(RelationIsForeignTable(tablerel) && (isMOTFromTblOid(RelationGetRelid(tablerel)) ||
-                isPostgresFDWFromTblOid(RelationGetRelid(tablerel)))))
+                isPostgresFDWFromTblOid(RelationGetRelid(tablerel))))) {
             ereport(ERROR,
                 (errcode(ERRCODE_WRONG_OBJECT_TYPE),
                     errmsg("referenced relation \"%s\" is not a table", RelationGetRelationName(tablerel))));
+        }
 
         /* We insist on same owner and schema */
         if (seqrel->rd_rel->relowner != tablerel->rd_rel->relowner)

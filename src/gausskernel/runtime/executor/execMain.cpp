@@ -1959,14 +1959,14 @@ static void ExecCollectMaterialForSubplan(EState *estate)
  */
 static void ExecutePlan(EState *estate, PlanState *planstate, bool use_parallel_mode,
     CmdType operation, bool sendTuples, long numberTuples, ScanDirection direction,
-    DestReceiver *dest, JitExec::JitContext* mot_jit_context)
+    DestReceiver *dest, JitExec::JitContext* motJitContext)
 {
     TupleTableSlot *slot = NULL;
     long current_tuple_count = 0;
     bool stream_instrument = false;
     bool need_sync_step = false;
     bool recursive_early_stop = false;
-    bool mot_finished_execution = false;
+    bool motFinishedExecution = false;
 
     /* Mark sync-up step is required */
     if (NeedSyncUpProducerStep(planstate->plan)) {
@@ -2027,26 +2027,23 @@ static void ExecutePlan(EState *estate, PlanState *planstate, bool use_parallel_
          */
         if (unlikely(recursive_early_stop)) {
             slot = NULL;
-        }
-        /******************************* MOT LLVM *************************************/
-        else if (mot_jit_context && !IS_PGXC_COORDINATOR && JitExec::IsMotCodegenEnabled()) {
-            int scan_ended = 0;
-            if (!mot_finished_execution) {
+        } else if (motJitContext && !IS_PGXC_COORDINATOR && JitExec::IsMotCodegenEnabled()) {
+            // MOT LLVM
+            int scanEnded = 0;
+            if (!motFinishedExecution) {
                 // previous iteration has not signaled end of scan
                 slot = planstate->ps_ResultTupleSlot;
-                uint64_t tp_processed = 0;
-                int rc = JitExec::JitExecQuery(mot_jit_context, estate->es_param_list_info,
-                        slot, &tp_processed, &scan_ended);
-                if (scan_ended || (tp_processed == 0) || (rc != 0)) {
+                uint64_t tuplesProcessed = 0;
+                int rc = JitExec::JitExecQuery(
+                    motJitContext, estate->es_param_list_info, slot, &tuplesProcessed, &scanEnded);
+                if (scanEnded || (tuplesProcessed == 0) || (rc != 0)) {
                     // raise flag so that next round we will bail out (current tuple still must be reported to user)
-                    mot_finished_execution = true;
+                    motFinishedExecution = true;
                 }
             } else {
                 (void)ExecClearTuple(slot);
             }
-        }
-        /******************************* MOT LLVM *************************************/
-        else {
+        } else {
             slot = ExecProcNode(planstate);
         }
 

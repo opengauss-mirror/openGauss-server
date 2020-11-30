@@ -472,9 +472,9 @@ void CheckpointManager::TaskDone(Table* table, uint32_t numSegs, bool success)
         }
         MapFileEntry* entry = new (std::nothrow) MapFileEntry();
         if (entry != nullptr) {
-            entry->m_id = table->GetTableId();
-            entry->m_numSegs = numSegs;
-            MOT_LOG_DEBUG("TaskDone %lu: %u %u segs", m_inProgressId, entry->m_id, numSegs);
+            entry->m_tableId = table->GetTableId();
+            entry->m_maxSegId = numSegs;
+            MOT_LOG_DEBUG("TaskDone %lu: %u %u segs", m_inProgressId, entry->m_tableId, numSegs);
             std::lock_guard<std::mutex> guard(m_tasksMutex);
             m_mapfileInfo.push_back(entry);
             m_finishedTasks.push_back(table);

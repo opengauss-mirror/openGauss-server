@@ -256,7 +256,7 @@ private:
     bool m_is_bucket_rel;
 };
 
-class MotJitSelectFusion: public OpFusion {
+class MotJitSelectFusion : public OpFusion {
 public:
     MotJitSelectFusion(MemoryContext context, CachedPlanSource *psrc, List *plantree_list, ParamListInfo params);
 
@@ -265,7 +265,7 @@ public:
     bool execute(long max_rows, char *completionTag);
 };
 
-class MotJitModifyFusion: public OpFusion {
+class MotJitModifyFusion : public OpFusion {
 public:
     MotJitModifyFusion(MemoryContext context, CachedPlanSource *psrc, List *plantree_list, ParamListInfo params);
 

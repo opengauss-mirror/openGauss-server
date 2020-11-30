@@ -750,17 +750,18 @@ static Query* FindQueryContainForeignTbl(Query* qry)
 }
 
 /*
- * brief: expression_tree_walker callback function.
- * checks the entire RTE used by a query to identify their storage engine type (MOT or PAGE)
+ * @brief: Expression_tree_walker callback function.
+ * Checks the entire RTE used by a query to identify their storage engine type (MOT or PAGE).
  */
 static bool StorageEngineUsedWalker(Node* node, RTEDetectorContext* context)
 {
-    if (node == nullptr)
+    if (node == NULL) {
         return false;
+    }
 
     if (IsA(node, RangeTblRef)) {
-        RangeTblRef* rtr = (RangeTblRef*) node;
-        Query* qry = (Query*) llast(context->queryNodes);
+        RangeTblRef* rtr = (RangeTblRef*)node;
+        Query* qry = (Query*)llast(context->queryNodes);
         RangeTblEntry* rte = rt_fetch(rtr->rtindex, qry->rtable);
         if (rte->rtekind == RTE_RELATION) {
             if (rte->relkind == RELKIND_FOREIGN_TABLE && isMOTFromTblOid(rte->relid)) {
@@ -775,27 +776,27 @@ static bool StorageEngineUsedWalker(Node* node, RTEDetectorContext* context)
     if (IsA(node, Query)) {
         /* Recurse into subselects */
         bool result = false;
-        context->queryNodes = lappend(context->queryNodes, (Query*) node);
-        context->sublevels_up++;
-        result = query_tree_walker((Query*) node, (bool (*)())StorageEngineUsedWalker, (void*) context, 0);
-        context->sublevels_up--;
+        context->queryNodes = lappend(context->queryNodes, (Query*)node);
+        context->sublevelsUp++;
+        result = query_tree_walker((Query*)node, (bool (*)())StorageEngineUsedWalker, (void*)context, 0);
+        context->sublevelsUp--;
         context->queryNodes = list_delete(context->queryNodes, llast(context->queryNodes));
         return result;
     }
-    return expression_tree_walker(node, (bool (*)())StorageEngineUsedWalker, (void*) context);
+    return expression_tree_walker(node, (bool (*)())StorageEngineUsedWalker, (void*)context);
 }
 
 /*
- * brief: Analyze a query to check which storage engines are being used
- * PG, MOT, mixed PG & MOT or Other type
- * input: query to be analyzed
- * output: type of storage engines
+ * @brief: Analyze a query to check which storage engines are being used,
+ * PG, MOT, mixed PG & MOT or Other type.
+ * @input: Query to be analyzed.
+ * @output: Type of storage engine.
  */
 void CheckTablesStorageEngine(Query* qry, StorageEngineType* type)
 {
     RTEDetectorContext context;
     context.queryNodes = NIL;
-    context.sublevels_up = 0;
+    context.sublevelsUp = 0;
     context.isMotTable = false;
     context.isPageTable = false;
 
@@ -804,8 +805,8 @@ void CheckTablesStorageEngine(Query* qry, StorageEngineType* type)
     /* check root node RTEs in case of non RangeTblRef nodes */
     List* rtable = qry->rtable;
     ListCell* lc = NULL;
-    foreach(lc, rtable) {
-        RangeTblEntry *rte = (RangeTblEntry *) lfirst(lc);
+    foreach (lc, rtable) {
+        RangeTblEntry* rte = (RangeTblEntry*)lfirst(lc);
         if (rte->rtekind == RTE_RELATION) {
             if (rte->relkind == RELKIND_FOREIGN_TABLE && isMOTFromTblOid(rte->relid)) {
                 context.isMotTable = true;
@@ -815,11 +816,11 @@ void CheckTablesStorageEngine(Query* qry, StorageEngineType* type)
         }
     }
 
-    /* add root query to query stack list*/
+    /* add root query to query stack list */
     context.queryNodes = lappend(context.queryNodes, qry);
 
     /* recursive walk on the query */
-    (void)query_or_expression_tree_walker((Node*) qry, (bool (*)())StorageEngineUsedWalker, (void*) &context, 0);
+    (void)query_or_expression_tree_walker((Node*)qry, (bool (*)())StorageEngineUsedWalker, (void*)&context, 0);
 
     if (context.isMotTable && context.isPageTable) {
         *type = SE_TYPE_MIXED;
@@ -830,33 +831,92 @@ void CheckTablesStorageEngine(Query* qry, StorageEngineType* type)
     }
 }
 
-bool IsMOTIndexedColumnUpdate(Query* qry)
+/*
+ * @brief: Expression_tree_walker callback function.
+ * Checks the query and all sub queries to identify if there is update on indexed column.
+ */
+static bool MotIndexedColumnUpdateWalker(Node* node, UpdateDetectorContext* context)
 {
-    List* rtable = qry->rtable;
-    ListCell* lc = NULL;
-
-    /* we check only simple commands */
-    if (qry->commandType != CMD_UPDATE) {
+    if (node == NULL) {
         return false;
     }
 
-    foreach(lc, rtable) {
-        RangeTblEntry *rte = (RangeTblEntry *) lfirst(lc);
-        if (rte->rtekind == RTE_RELATION && rte->relkind == RELKIND_FOREIGN_TABLE && isMOTFromTblOid(rte->relid)) {
+    if (IsA(node, RangeTblRef)) {
+        RangeTblRef* rtr = (RangeTblRef*)node;
+        Query* qry = (Query*)llast(context->queryNodes);
+        RangeTblEntry* rte = rt_fetch(rtr->rtindex, qry->rtable);
+        if (qry->commandType == CMD_UPDATE && rte->rtekind == RTE_RELATION && rte->relkind == RELKIND_FOREIGN_TABLE &&
+            isMOTFromTblOid(rte->relid)) {
             Relation rel = relation_open(rte->relid, AccessShareLock);
-            Bitmapset* idx_bmps = RelationGetIndexAttrBitmap(rel,INDEX_ATTR_BITMAP_ALL);
+            Bitmapset* idx_bmps = RelationGetIndexAttrBitmap(rel, INDEX_ATTR_BITMAP_ALL);
             relation_close(rel, NoLock);
-            if (idx_bmps == NULL)
+            if (idx_bmps == NULL) {
                 return false;
+            }
             ListCell* target = NULL;
-            foreach(target, qry->targetList) {
+            foreach (target, qry->targetList) {
                 TargetEntry* entry = (TargetEntry*)lfirst(target);
-                /* junk entry is temporary and won't affect the db. in addition, entry->resno might be wrong.
-                 *  We should ignore it.
+                if (entry->resjunk) {
+                    continue;
+                }
+                if (bms_is_member(entry->resno - FirstLowInvalidHeapAttributeNumber, idx_bmps)) {
+                    context->isIndexedColumnUpdate = true;
+                }
+            }
+            bms_free(idx_bmps);
+        }
+        return false;
+    }
+
+    if (IsA(node, Query)) {
+        /* Recurse into subselects */
+        bool result = false;
+        context->queryNodes = lappend(context->queryNodes, (Query*)node);
+        context->sublevelsUp++;
+        result = query_tree_walker((Query*)node, (bool (*)())MotIndexedColumnUpdateWalker, (void*)context, 0);
+        context->sublevelsUp--;
+        context->queryNodes = list_delete(context->queryNodes, llast(context->queryNodes));
+        return result;
+    }
+
+    return expression_tree_walker(node, (bool (*)())MotIndexedColumnUpdateWalker, (void*)context);
+}
+
+/*
+ * @brief: Analyze a query to check if there is update on indexed column of MOT table.
+ * @input: Query to be analyzed.
+ * @output: True/false.
+ */
+bool CheckMotIndexedColumnUpdate(Query* qry)
+{
+    UpdateDetectorContext context;
+    context.queryNodes = NIL;
+    context.sublevelsUp = 0;
+    context.isIndexedColumnUpdate = false;
+
+    /* check root node RTEs in case of non RangeTblRef nodes */
+    List* rtable = qry->rtable;
+    ListCell* lc = NULL;
+    foreach (lc, rtable) {
+        RangeTblEntry* rte = (RangeTblEntry*)lfirst(lc);
+        if (qry->commandType == CMD_UPDATE && rte->rtekind == RTE_RELATION && rte->relkind == RELKIND_FOREIGN_TABLE &&
+            isMOTFromTblOid(rte->relid)) {
+            Relation rel = relation_open(rte->relid, AccessShareLock);
+            Bitmapset* idx_bmps = RelationGetIndexAttrBitmap(rel, INDEX_ATTR_BITMAP_ALL);
+            relation_close(rel, NoLock);
+            if (idx_bmps == NULL) {
+                return false;
+            }
+            ListCell* target = NULL;
+            foreach (target, qry->targetList) {
+                TargetEntry* entry = (TargetEntry*)lfirst(target);
+                /* Junk entry is temporary and won't affect the db. in addition, entry->resno might be wrong.
+                 * We should ignore it.
                  * More info in src/backend/executor/execJunk.cpp
                  */
-                if (entry->resjunk)
+                if (entry->resjunk) {
                     continue;
+                }
                 if (bms_is_member(entry->resno - FirstLowInvalidHeapAttributeNumber, idx_bmps)) {
                     bms_free(idx_bmps);
                     return true;
@@ -866,7 +926,13 @@ bool IsMOTIndexedColumnUpdate(Query* qry)
         }
     }
 
-    return false;
+    /* add root query to query stack list */
+    context.queryNodes = lappend(context.queryNodes, qry);
+
+    /* recursive walk on the query */
+    (void)query_or_expression_tree_walker((Node*)qry, (bool (*)())MotIndexedColumnUpdateWalker, (void*)&context, 0);
+
+    return context.isIndexedColumnUpdate;
 }
 
 static void CheckUnsupportInsertSelectClause(Query* query)

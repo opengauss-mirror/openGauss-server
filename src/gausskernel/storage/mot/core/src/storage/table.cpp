@@ -666,7 +666,7 @@ RC Table::AddColumn(const char* colName, uint64_t size, MOT_CATALOG_FIELD_TYPES 
     decltype(this->m_tupleSize) old_size = m_tupleSize;
     decltype(this->m_tupleSize) new_size = old_size + size;
     if (new_size < old_size)
-        return RC_COL_SIZE_INVLALID;
+        return RC_COL_SIZE_INVALID;
 
     m_columns[m_fieldCnt] = Column::AllocColumn(type);
     if (m_columns[m_fieldCnt] == nullptr) {

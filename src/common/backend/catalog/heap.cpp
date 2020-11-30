@@ -2627,6 +2627,21 @@ static void RemoveBulkLoadErrorTableFile(Oid databaseid, Oid relid)
     }
 }
 
+static void MotFdwDropForeignRelation(Relation rel, FdwRoutine* fdwRoutine)
+{
+    /* Forward drop stmt to MOT FDW. */
+    if (fdwRoutine->GetFdwType != NULL && fdwRoutine->GetFdwType() == MOT_ORC && fdwRoutine->ValidateTableDef != NULL) {
+        DropForeignStmt stmt;
+        stmt.type = T_DropForeignStmt;
+        stmt.relkind = RELKIND_RELATION;
+        stmt.reloid = RelationGetRelid(rel);
+        stmt.indexoid = 0;
+        stmt.name = rel->rd_rel->relname.data;
+
+        fdwRoutine->ValidateTableDef((Node*)&stmt);
+    }
+}
+
 /*
  * heap_drop_with_catalog	- removes specified relation from catalogs
  *
@@ -2694,17 +2709,8 @@ void heap_drop_with_catalog(Oid relid)
             fdwRoutine->PartitionTblProcess(NULL, relid, HDFS_DROP_PARTITIONED_FOREIGNTBL);
         }
 
-        /* forward drop stmt to fdw */
-        if (fdwRoutine->GetFdwType != NULL && fdwRoutine->GetFdwType() == MOT_ORC) {
-            DropForeignStmt stmt;
-            stmt.type = T_DropForeignStmt;
-            stmt.relkind = RELKIND_RELATION;
-            stmt.reloid = relid;
-            stmt.indexoid = 0;
-            stmt.name = rel->rd_rel->relname.data;
-
-            fdwRoutine->ValidateTableDef((Node*)&stmt);
-        }
+        /* Forward drop stmt to MOT FDW. */
+        MotFdwDropForeignRelation(rel, fdwRoutine);
     }
 
     /* drop enty for pg_partition */

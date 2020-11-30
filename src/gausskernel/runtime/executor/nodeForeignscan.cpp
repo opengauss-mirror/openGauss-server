@@ -126,7 +126,7 @@ ForeignScanState* ExecInitForeignScan(ForeignScan* node, EState* estate, int efl
      *
      * create expression context for node
      */
-    if (IS_PGXC_COORDINATOR || !JitExec::IsMotCodegenEnabled() || (estate->mot_jit_context == NULL)) {
+    if ((estate->mot_jit_context == NULL) || IS_PGXC_COORDINATOR || !JitExec::IsMotCodegenEnabled()) {
         ExecAssignExprContext(estate, &scanstate->ss.ps);
     }
 
@@ -202,7 +202,7 @@ ForeignScanState* ExecInitForeignScan(ForeignScan* node, EState* estate, int efl
     scanstate->fdwroutine = fdwroutine;
     scanstate->fdw_state = NULL;
 
-    if (IS_PGXC_COORDINATOR || !JitExec::IsMotCodegenEnabled() || (estate->mot_jit_context == NULL)) {
+    if ((estate->mot_jit_context == NULL) || IS_PGXC_COORDINATOR || !JitExec::IsMotCodegenEnabled()) {
         scanstate->scanMcxt = AllocSetContextCreate(CurrentMemoryContext,
             "Foreign Scan",
             ALLOCSET_DEFAULT_MINSIZE,

@@ -77,7 +77,7 @@ static int AllocConnectionIdArray(uint32_t maxConnections)
     MOT_LOG_TRACE("Initializing connection identifier pool with a maximum of %u connections", maxConnections);
     maxConnectionCount = maxConnections;
     connectionIdArraySize = (maxConnectionCount + CONNECTIONS_PER_WORD - 1) / CONNECTIONS_PER_WORD;
-    uint32_t allocSize = sizeof(uint64_t) * connectionIdArraySize;
+    size_t allocSize = sizeof(uint64_t) * connectionIdArraySize;
     connectionIdBitsetArray = (uint64_t*)malloc(allocSize);
     if (connectionIdBitsetArray == nullptr) {
         MOT_REPORT_PANIC(MOT_ERROR_OOM,
@@ -254,13 +254,13 @@ extern bool IsConnectionIdFree(ConnectionId connectionId)
 extern void DumpConnectionIds(const char* reportName)
 {
     MOT_LOG_INFO("Allocated connection id report: %s", reportName);
-    for (uint16_t i = 0; i < connectionIdArraySize; ++i) {
-        for (uint16_t j = 0; j < CONNECTIONS_PER_WORD; ++j) {
+    for (uint32_t i = 0; i < connectionIdArraySize; ++i) {
+        for (uint32_t j = 0; j < CONNECTIONS_PER_WORD; ++j) {
             // pay attention: the bit-set is inverted: "1" bit means free, "0" bit means allocated
             ConnectionId connectionId = i * CONNECTIONS_PER_WORD + j;
             if (connectionId < maxConnectionCount) {
                 if (IS_CONNECTION_ID_USED(i, j)) {
-                    MOT_LOG_INFO("connection id: %" PRIu16, connectionId);
+                    MOT_LOG_INFO("connection id: %" PRIu32, connectionId);
                 }
             } else {
                 break;

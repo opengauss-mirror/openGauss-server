@@ -35,6 +35,7 @@ extern XLogRecPtr XlogCopyStartPtr;
 extern void SendBaseBackup(BaseBackupCmd* cmd);
 extern int64 sendTablespace(const char* path, bool sizeonly);
 extern bool is_row_data_file(const char* filePath, int* segNo);
+extern void PerformMotCheckpointFetch();
 
 /* ut test */
 extern void ut_save_xlogloc(const char* xloglocation);

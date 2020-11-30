@@ -265,7 +265,7 @@ static const MotErrToPGErrSt MM_ERRCODE_TO_PG[] = {
     {ERRCODE_INVALID_COLUMN_DEFINITION,
         "Column definition of %s is not supported",
         "Column name %s exceeds max name size %u"},
-    // RC_COL_SIZE_INVLALID
+    // RC_COL_SIZE_INVALID
     {ERRCODE_INVALID_COLUMN_DEFINITION,
         "Column definition of %s is not supported",
         "Column size %d exceeds max size %u"},
@@ -361,7 +361,7 @@ void report_pg_error(MOT::RC rc, MOT::TxnManager* txn, void* arg1, void* arg2, v
                     errdetail(err->m_detail, col->colname, (uint32_t)MOT::Column::MAX_COLUMN_NAME_LEN)));
             break;
         }
-        case MOT::RC_COL_SIZE_INVLALID: {
+        case MOT::RC_COL_SIZE_INVALID: {
             ColumnDef* col = (ColumnDef*)arg1;
             ereport(ERROR,
                 (errmodule(MOD_MOT),
@@ -1174,7 +1174,7 @@ static MOT::RC TableFieldType(const ColumnDef* colDef, MOT::MOT_CATALOG_FIELD_TY
                     *typeLen = colLen = MAX_VARCHAR_LEN;
 #endif
                 if (colLen > MAX_VARCHAR_LEN || colLen < 0) {
-                    res = MOT::RC_COL_SIZE_INVLALID;
+                    res = MOT::RC_COL_SIZE_INVALID;
                 } else {
                     isBlob = true;
                 }

@@ -6830,7 +6830,7 @@ Datum mot_session_memory_detail(PG_FUNCTION_ARGS)
         funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
         /* total number of tuples to be returned */
-        funcctx->user_fctx = (void *)getMotSessionMemoryDetail(&(funcctx->max_calls));
+        funcctx->user_fctx = (void *)GetMotSessionMemoryDetail(&(funcctx->max_calls));
 
         (void)MemoryContextSwitchTo(oldcontext);
     }
@@ -6906,7 +6906,7 @@ Datum mot_global_memory_detail(PG_FUNCTION_ARGS)
         funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
         /* total number of tuples to be returned */
-        funcctx->user_fctx = (void *)getMotMemoryDetail(&(funcctx->max_calls), true);
+        funcctx->user_fctx = (void *)GetMotMemoryDetail(&(funcctx->max_calls), true);
 
         (void)MemoryContextSwitchTo(oldcontext);
     }
@@ -6981,7 +6981,7 @@ Datum mot_local_memory_detail(PG_FUNCTION_ARGS)
         funcctx->tuple_desc = BlessTupleDesc(tupdesc);
 
         /* total number of tuples to be returned */
-        funcctx->user_fctx = (void *)getMotMemoryDetail(&(funcctx->max_calls), false);
+        funcctx->user_fctx = (void *)GetMotMemoryDetail(&(funcctx->max_calls), false);
 
         (void)MemoryContextSwitchTo(oldcontext);
     }

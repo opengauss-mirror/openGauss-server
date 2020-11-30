@@ -40,10 +40,10 @@ extern const char* RcToString(RC rc)
             return "Maximum row size exceeded";
         case RC_COL_NAME_EXCEEDS_MAX_SIZE:
             return "Maximum column length exceeded";
-        case RC_COL_SIZE_INVLALID:
+        case RC_COL_SIZE_INVALID:
             return "Invalid column size";
         case RC_TABLE_EXCEEDS_MAX_DECLARED_COLS:
-            return "Reached muximum number of columns in table";
+            return "Reached maximum number of columns in table";
         case RC_INDEX_EXCEEDS_MAX_SIZE:
             return "Index key size exceeds maximum key size";
         case RC_UNIQUE_VIOLATION:
@@ -70,7 +70,6 @@ extern const char* RcToString(RC rc)
             return "Out of memory";
         case RC_ILLEGAL_ROW_STATE:
             return "Illegal row state";
-
         default:
             return "N/A";
     }
