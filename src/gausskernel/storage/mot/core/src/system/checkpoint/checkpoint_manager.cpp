@@ -927,9 +927,9 @@ bool CheckpointManager::SerializeInProcessTxns(int fd)
                 return RC_ERROR;
             }
             MOT_LOG_DEBUG("SerializeInProcessTxns: wrote seg %p %lu bytes", segment, bufSize);
-            if (buf != nullptr) {
-                free(buf);
-            }
+        }
+        if (buf != nullptr) {
+            free(buf);
         }
         return RC_OK;
     };
