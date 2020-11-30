@@ -687,115 +687,11 @@ int MOTConfiguration::GetMappedCore(int logicId) const
 #define UPDATE_TIME_CFG(var, cfgPath, defaultValue, scale, lowerBound, upperBound) \
     UpdateTimeConfigItem(var, cfgPath, defaultValue, scale, lowerBound, upperBound)
 
-void MOTConfiguration::LoadConfig()
+void MOTConfiguration::LoadMemConfig()
 {
-    MOT_LOG_TRACE("Loading main configuration");
     const LayeredConfigTree* cfg = ConfigManager::GetInstance().GetLayeredConfigTree();
 
-    // logger configuration
-    if (m_loadExtraParams) {
-        UPDATE_BOOL_CFG(m_enableRedoLog, "enable_redo_log", DEFAULT_ENABLE_REDO_LOG);
-        UPDATE_USER_CFG(m_loggerType, "logger_type", DEFAULT_LOGGER_TYPE);
-    }
-
-    // Even though we allow loading this unexposed parameter (redo_log_handler_type), in reality it is always
-    // overridden by the external configuration loader GaussdbConfigLoader (so in effect whatever is defined in
-    // mot.conf is discarded). See GaussdbConfigLoader::ConfigureRedoLogHandler() for more details.
-    UPDATE_USER_CFG(m_redoLogHandlerType, "redo_log_handler_type", DEFAULT_REDO_LOG_HANDLER_TYPE);
-    UPDATE_INT_CFG(m_asyncRedoLogBufferArrayCount,
-        "async_log_buffer_count",
-        DEFAULT_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT,
-        MIN_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT,
-        MAX_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT);
-
-    // commit configuration
-    UPDATE_BOOL_CFG(m_enableGroupCommit, "enable_group_commit", DEFAULT_ENABLE_GROUP_COMMIT);
-    UPDATE_INT_CFG(m_groupCommitSize,
-        "group_commit_size",
-        DEFAULT_GROUP_COMMIT_SIZE,
-        MIN_GROUP_COMMIT_SIZE,
-        MAX_GROUP_COMMIT_SIZE);
-    UPDATE_TIME_CFG(m_groupCommitTimeoutUSec,
-        "group_commit_timeout",
-        DEFAULT_GROUP_COMMIT_TIMEOUT,
-        SCALE_MICROS,
-        MIN_GROUP_COMMIT_TIMEOUT_USEC,
-        MAX_GROUP_COMMIT_TIMEOUT_USEC);
-
-    // Checkpoint configuration
-    if (m_loadExtraParams) {
-        UPDATE_BOOL_CFG(m_enableCheckpoint, "enable_checkpoint", DEFAULT_ENABLE_CHECKPOINT);
-    }
-
-    if (!m_enableCheckpoint && m_enableRedoLog) {
-        if (m_suppressLog == 0) {
-            MOT_LOG_WARN("Disabling redo_log forcibly as the checkpoint is disabled");
-        }
-        UpdateBoolConfigItem(m_enableRedoLog, false, "enable_redo_log");
-    }
-
-    UPDATE_STRING_CFG(m_checkpointDir, "checkpoint_dir", DEFAULT_CHECKPOINT_DIR);
-    UPDATE_ABS_MEM_CFG(m_checkpointSegThreshold,
-        "checkpoint_segsize",
-        DEFAULT_CHECKPOINT_SEGSIZE,
-        SCALE_BYTES,
-        MIN_CHECKPOINT_SEGSIZE_BYTES,
-        MAX_CHECKPOINT_SEGSIZE_BYTES);
-    UPDATE_INT_CFG(m_checkpointWorkers,
-        "checkpoint_workers",
-        DEFAULT_CHECKPOINT_WORKERS,
-        MIN_CHECKPOINT_WORKERS,
-        MAX_CHECKPOINT_WORKERS);
-
-    // Recovery configuration
-    UPDATE_INT_CFG(m_checkpointRecoveryWorkers,
-        "checkpoint_recovery_workers",
-        DEFAULT_CHECKPOINT_RECOVERY_WORKERS,
-        MIN_CHECKPOINT_RECOVERY_WORKERS,
-        MAX_CHECKPOINT_RECOVERY_WORKERS);
-
-    // Tx configuration - not configurable yet
-    if (m_loadExtraParams) {
-        UPDATE_BOOL_CFG(m_abortBufferEnable, "tx_abort_buffers_enable", true);
-        UPDATE_BOOL_CFG(m_preAbort, "tx_pre_abort", true);
-        m_validationLock = TxnValidation::TXN_VALIDATION_NO_WAIT;
-    }
-
-    // statistics configuration
-    UPDATE_BOOL_CFG(m_enableStats, "enable_stats", DEFAULT_ENABLE_STATS);
-    UPDATE_TIME_CFG(m_statPrintPeriodSeconds,
-        "print_stats_period",
-        DEFAULT_STATS_PRINT_PERIOD,
-        SCALE_SECONDS,
-        MIN_STATS_PRINT_PERIOD_SECONDS,
-        MAX_STATS_PRINT_PERIOD_SECONDS);
-    UPDATE_TIME_CFG(m_statPrintFullPeriodSeconds,
-        "print_full_stats_period",
-        DEFAULT_FULL_STATS_PRINT_PERIOD,
-        SCALE_SECONDS,
-        MIN_STATS_PRINT_PERIOD_SECONDS,
-        MAX_STATS_PRINT_PERIOD_SECONDS);
-    UPDATE_BOOL_CFG(m_enableLogRecoveryStats, "enable_log_recovery_stats", DEFAULT_ENABLE_LOG_RECOVERY_STATS);
-    UPDATE_BOOL_CFG(m_enableDbSessionStatistics, "enable_db_session_stats", DEFAULT_ENABLE_DB_SESSION_STAT_PRINT);
-    UPDATE_BOOL_CFG(m_enableNetworkStatistics, "enable_network_stats", DEFAULT_ENABLE_NETWORK_STAT_PRINT);
-    UPDATE_BOOL_CFG(m_enableLogStatistics, "enable_log_stats", DEFAULT_ENABLE_LOG_STAT_PRINT);
-    UPDATE_BOOL_CFG(m_enableMemoryStatistics, "enable_memory_stats", DEFAULT_ENABLE_MEMORY_STAT_PRINT);
-    UPDATE_BOOL_CFG(
-        m_enableDetailedMemoryStatistics, "enable_detailed_memory_stats", DEFAULT_ENABLE_DETAILED_MEMORY_STAT_PRINT);
-    UPDATE_BOOL_CFG(m_enableProcessStatistics, "enable_process_stats", DEFAULT_ENABLE_PROCESS_STAT_PRINT);
-    UPDATE_BOOL_CFG(m_enableSystemStatistics, "enable_system_stats", DEFAULT_ENABLE_SYSTEM_STAT_PRINT);
-    UPDATE_BOOL_CFG(m_enableJitStatistics, "enable_jit_stats", DEFAULT_ENABLE_JIT_STAT_PRINT);
-
-    // log configuration
-    UPDATE_USER_CFG(m_logLevel, "log_level", DEFAULT_LOG_LEVEL);
-    SetGlobalLogLevel(m_logLevel);
-    if (m_loadExtraParams) {
-        UPDATE_USER_CFG(m_numaErrorsLogLevel, "numa_errors_log_level", DEFAULT_NUMA_ERRORS_LOG_LEVEL);
-        UPDATE_USER_CFG(m_numaWarningsLogLevel, "numa_warnings_log_level", DEFAULT_NUMA_WARNINGS_LOG_LEVEL);
-        UPDATE_USER_CFG(m_cfgStartupLogLevel, "cfg_startup_log_level", DEFAULT_CFG_STARTUP_LOG_LEVEL);
-    }
-
-    // memory configuration
+    // Memory configurations
     UPDATE_BOOL_CFG(m_enableNuma, "enable_numa", DEFAULT_ENABLE_NUMA);
 
     // Even though we allow loading these unexposed parameter (max_threads and max_connections), in reality it is
@@ -979,6 +875,118 @@ void MOTConfiguration::LoadConfig()
         SCALE_MEGA_BYTES,
         MIN_SESSION_MAX_HUGE_OBJECT_SIZE_MB,
         MAX_SESSION_MAX_HUGE_OBJECT_SIZE_MB);
+}
+
+void MOTConfiguration::LoadConfig()
+{
+    MOT_LOG_TRACE("Loading main configuration");
+    const LayeredConfigTree* cfg = ConfigManager::GetInstance().GetLayeredConfigTree();
+
+    // logger configuration
+    if (m_loadExtraParams) {
+        UPDATE_BOOL_CFG(m_enableRedoLog, "enable_redo_log", DEFAULT_ENABLE_REDO_LOG);
+        UPDATE_USER_CFG(m_loggerType, "logger_type", DEFAULT_LOGGER_TYPE);
+    }
+
+    // Even though we allow loading this unexposed parameter (redo_log_handler_type), in reality it is always
+    // overridden by the external configuration loader GaussdbConfigLoader (so in effect whatever is defined in
+    // mot.conf is discarded). See GaussdbConfigLoader::ConfigureRedoLogHandler() for more details.
+    UPDATE_USER_CFG(m_redoLogHandlerType, "redo_log_handler_type", DEFAULT_REDO_LOG_HANDLER_TYPE);
+    UPDATE_INT_CFG(m_asyncRedoLogBufferArrayCount,
+        "async_log_buffer_count",
+        DEFAULT_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT,
+        MIN_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT,
+        MAX_ASYNC_REDO_LOG_BUFFER_ARRAY_COUNT);
+
+    // commit configuration
+    UPDATE_BOOL_CFG(m_enableGroupCommit, "enable_group_commit", DEFAULT_ENABLE_GROUP_COMMIT);
+    UPDATE_INT_CFG(m_groupCommitSize,
+        "group_commit_size",
+        DEFAULT_GROUP_COMMIT_SIZE,
+        MIN_GROUP_COMMIT_SIZE,
+        MAX_GROUP_COMMIT_SIZE);
+    UPDATE_TIME_CFG(m_groupCommitTimeoutUSec,
+        "group_commit_timeout",
+        DEFAULT_GROUP_COMMIT_TIMEOUT,
+        SCALE_MICROS,
+        MIN_GROUP_COMMIT_TIMEOUT_USEC,
+        MAX_GROUP_COMMIT_TIMEOUT_USEC);
+
+    // Checkpoint configuration
+    if (m_loadExtraParams) {
+        UPDATE_BOOL_CFG(m_enableCheckpoint, "enable_checkpoint", DEFAULT_ENABLE_CHECKPOINT);
+    }
+
+    if (!m_enableCheckpoint && m_enableRedoLog) {
+        if (m_suppressLog == 0) {
+            MOT_LOG_WARN("Disabling redo_log forcibly as the checkpoint is disabled");
+        }
+        UpdateBoolConfigItem(m_enableRedoLog, false, "enable_redo_log");
+    }
+
+    UPDATE_STRING_CFG(m_checkpointDir, "checkpoint_dir", DEFAULT_CHECKPOINT_DIR);
+    UPDATE_ABS_MEM_CFG(m_checkpointSegThreshold,
+        "checkpoint_segsize",
+        DEFAULT_CHECKPOINT_SEGSIZE,
+        SCALE_BYTES,
+        MIN_CHECKPOINT_SEGSIZE_BYTES,
+        MAX_CHECKPOINT_SEGSIZE_BYTES);
+    UPDATE_INT_CFG(m_checkpointWorkers,
+        "checkpoint_workers",
+        DEFAULT_CHECKPOINT_WORKERS,
+        MIN_CHECKPOINT_WORKERS,
+        MAX_CHECKPOINT_WORKERS);
+
+    // Recovery configuration
+    UPDATE_INT_CFG(m_checkpointRecoveryWorkers,
+        "checkpoint_recovery_workers",
+        DEFAULT_CHECKPOINT_RECOVERY_WORKERS,
+        MIN_CHECKPOINT_RECOVERY_WORKERS,
+        MAX_CHECKPOINT_RECOVERY_WORKERS);
+
+    // Tx configuration - not configurable yet
+    if (m_loadExtraParams) {
+        UPDATE_BOOL_CFG(m_abortBufferEnable, "tx_abort_buffers_enable", true);
+        UPDATE_BOOL_CFG(m_preAbort, "tx_pre_abort", true);
+        m_validationLock = TxnValidation::TXN_VALIDATION_NO_WAIT;
+    }
+
+    // statistics configuration
+    UPDATE_BOOL_CFG(m_enableStats, "enable_stats", DEFAULT_ENABLE_STATS);
+    UPDATE_TIME_CFG(m_statPrintPeriodSeconds,
+        "print_stats_period",
+        DEFAULT_STATS_PRINT_PERIOD,
+        SCALE_SECONDS,
+        MIN_STATS_PRINT_PERIOD_SECONDS,
+        MAX_STATS_PRINT_PERIOD_SECONDS);
+    UPDATE_TIME_CFG(m_statPrintFullPeriodSeconds,
+        "print_full_stats_period",
+        DEFAULT_FULL_STATS_PRINT_PERIOD,
+        SCALE_SECONDS,
+        MIN_STATS_PRINT_PERIOD_SECONDS,
+        MAX_STATS_PRINT_PERIOD_SECONDS);
+    UPDATE_BOOL_CFG(m_enableLogRecoveryStats, "enable_log_recovery_stats", DEFAULT_ENABLE_LOG_RECOVERY_STATS);
+    UPDATE_BOOL_CFG(m_enableDbSessionStatistics, "enable_db_session_stats", DEFAULT_ENABLE_DB_SESSION_STAT_PRINT);
+    UPDATE_BOOL_CFG(m_enableNetworkStatistics, "enable_network_stats", DEFAULT_ENABLE_NETWORK_STAT_PRINT);
+    UPDATE_BOOL_CFG(m_enableLogStatistics, "enable_log_stats", DEFAULT_ENABLE_LOG_STAT_PRINT);
+    UPDATE_BOOL_CFG(m_enableMemoryStatistics, "enable_memory_stats", DEFAULT_ENABLE_MEMORY_STAT_PRINT);
+    UPDATE_BOOL_CFG(
+        m_enableDetailedMemoryStatistics, "enable_detailed_memory_stats", DEFAULT_ENABLE_DETAILED_MEMORY_STAT_PRINT);
+    UPDATE_BOOL_CFG(m_enableProcessStatistics, "enable_process_stats", DEFAULT_ENABLE_PROCESS_STAT_PRINT);
+    UPDATE_BOOL_CFG(m_enableSystemStatistics, "enable_system_stats", DEFAULT_ENABLE_SYSTEM_STAT_PRINT);
+    UPDATE_BOOL_CFG(m_enableJitStatistics, "enable_jit_stats", DEFAULT_ENABLE_JIT_STAT_PRINT);
+
+    // log configuration
+    UPDATE_USER_CFG(m_logLevel, "log_level", DEFAULT_LOG_LEVEL);
+    SetGlobalLogLevel(m_logLevel);
+    if (m_loadExtraParams) {
+        UPDATE_USER_CFG(m_numaErrorsLogLevel, "numa_errors_log_level", DEFAULT_NUMA_ERRORS_LOG_LEVEL);
+        UPDATE_USER_CFG(m_numaWarningsLogLevel, "numa_warnings_log_level", DEFAULT_NUMA_WARNINGS_LOG_LEVEL);
+        UPDATE_USER_CFG(m_cfgStartupLogLevel, "cfg_startup_log_level", DEFAULT_CFG_STARTUP_LOG_LEVEL);
+    }
+
+    // memory configuration
+    LoadMemConfig();
 
     // GC configuration
     UPDATE_BOOL_CFG(m_gcEnable, "enable_gc", DEFAULT_GC_ENABLE);

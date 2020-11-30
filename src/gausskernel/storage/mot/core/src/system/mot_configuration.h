@@ -714,6 +714,9 @@ private:
     /** @brief Loads configuration from main configuration. */
     void LoadConfig();
 
+    /** @brief Loads memory configuration from main configuration. */
+    void LoadMemConfig();
+
     DECLARE_CLASS_LOGGER()
 
     // static helper methods

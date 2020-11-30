@@ -1748,7 +1748,7 @@ static int MOTXlateCheckpointErr(int err)
 {
     int code = 0;
     switch (err) {
-        case MOT::CheckpointWorkerPool::ErrCodes::NO_ERROR:
+        case MOT::CheckpointWorkerPool::ErrCodes::SUCCESS:
             code = ERRCODE_SUCCESSFUL_COMPLETION;
             break;
         case MOT::CheckpointWorkerPool::ErrCodes::FILE_IO:
