@@ -191,16 +191,24 @@ void RemoteServiceMain(void)
 
     char listen_address[MAXPGPATH];
     int rc = EOK;
+    int i = 0;
 
-    if (!t_thrd.postmaster_cxt.ReplConnArray[1] || 0 == t_thrd.postmaster_cxt.ReplConnArray[1]->localservice) {
-        ereport(FATAL, (errmodule(MOD_REMOTE), errmsg("remote service port not available")));
+    for (i = 1; i < MAX_REPLNODE_NUM; i++) {
+        if (t_thrd.postmaster_cxt.ReplConnArray[i] && 0 != t_thrd.postmaster_cxt.ReplConnArray[i]->localservice) {
+            break;
+        }
+    }
+
+    if (i == MAX_REPLNODE_NUM) {
+        ereport(WARNING, (errmodule(MOD_REMOTE), errmsg("remote service port not available")));
+        proc_exit(0);
     }
     rc = snprintf_s(listen_address,
         MAXPGPATH,
         (MAXPGPATH - 1),
         "%s:%d",
-        t_thrd.postmaster_cxt.ReplConnArray[1]->localhost,
-        t_thrd.postmaster_cxt.ReplConnArray[1]->localservice);
+        t_thrd.postmaster_cxt.ReplConnArray[i]->localhost,
+        t_thrd.postmaster_cxt.ReplConnArray[i]->localservice);
     securec_check_ss(rc, "", "");
 
     GRPC_TRY() {

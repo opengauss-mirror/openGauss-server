@@ -1,0 +1,319 @@
+#!/usr/bin/env python3
+# -*- coding:utf-8 -*-
+#############################################################################
+# Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms
+# and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS,
+# WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+# ----------------------------------------------------------------------------
+# Description  : gs_dropnode is a utility to drop a standby node from the cluster
+#############################################################################
+
+import datetime
+import os
+import re
+import subprocess
+import sys
+
+sys.path.append(sys.path[0])
+from gspylib.common.DbClusterInfo import dbClusterInfo
+from gspylib.common.DbClusterStatus import DbClusterStatus
+from gspylib.common.GaussLog import GaussLog
+from gspylib.common.Common import DefaultValue, ClusterCommand
+from gspylib.common.ErrorCode import ErrorCode
+from gspylib.common.ParallelBaseOM import ParallelBaseOM
+from gspylib.common.ParameterParsecheck import Parameter
+from gspylib.threads.SshTool import SshTool
+from impl.dropnode.DropnodeImpl import DropnodeImpl
+
+ENV_LIST = ["MPPDB_ENV_SEPARATE_PATH", "GPHOME", "PATH",
+            "LD_LIBRARY_PATH", "PYTHONPATH", "GAUSS_WARNING_TYPE",
+            "GAUSSHOME", "PATH", "LD_LIBRARY_PATH",
+            "S3_CLIENT_CRT_FILE", "GAUSS_VERSION", "PGHOST",
+            "GS_CLUSTER_NAME", "GAUSSLOG", "GAUSS_ENV", "umask"]
+
+
+class Dropnode(ParallelBaseOM):
+    """
+    """
+
+    def __init__(self):
+        """
+        """
+        ParallelBaseOM.__init__(self)
+        # Add the standby node backip list which need to be deleted
+        self.hostIpListForDel = []
+        self.hostMapForDel = {}
+        self.hostMapForExist = {}
+        self.clusterInfo = dbClusterInfo()
+        self.backIpNameMap = {}
+        self.failureHosts = []
+        self.flagOnlyPrimary = False
+        envFile = DefaultValue.getEnv("MPPDB_ENV_SEPARATE_PATH")
+        if envFile:
+            self.envFile = envFile
+        else:
+            self.envFile = "/etc/profile"
+        self.userProfile = ''
+
+    def usage(self):
+        """
+gs_dropnode is a utility to delete the standby node from a cluster.
+
+Usage:
+    gs_dropnode -? | --help
+    gs_dropnode -V | --version
+    gs_dropnode -U USER -G GROUP -h nodeList
+General options:
+    -U                                 Cluster user.
+    -G                                 Group of the cluster user.
+    -h                                 The standby node backip list which need to be deleted
+                                       Separate multiple nodes with commas (,).
+                                       such as '-h 192.168.0.1,192.168.0.2'
+    -?, --help                         Show help information for this
+                                       utility, and exit the command line mode.
+    -V, --version                      Show version information.
+        """
+        print(self.usage.__doc__)
+
+    def parseCommandLine(self):
+        """
+        parse parameter from command line
+        """
+        ParaObj = Parameter()
+        ParaDict = ParaObj.ParameterCommandLine("dropnode")
+
+        # parameter -h or -?
+        if (ParaDict.__contains__("helpFlag")):
+            self.usage()
+            sys.exit(0)
+        # Resolves command line arguments
+        # parameter -U
+        if (ParaDict.__contains__("user")):
+            self.user = ParaDict.get("user")
+            DefaultValue.checkPathVaild(self.user)
+        # parameter -G
+        if (ParaDict.__contains__("group")):
+            self.group = ParaDict.get("group")
+        # parameter -h
+        if (ParaDict.__contains__("nodename")):
+            self.hostIpListForDel = ParaDict.get("nodename")
+
+    def checkParameters(self):
+        """
+        function: Check parameter from command line
+        input: NA
+        output: NA
+        """
+
+        # check user | group | node
+        if len(self.user) == 0:
+            GaussLog.exitWithError(ErrorCode.GAUSS_358["GAUSS_35801"] % "-U")
+        if len(self.group) == 0:
+            GaussLog.exitWithError(ErrorCode.GAUSS_358["GAUSS_35801"] % "-G")
+        if len(self.hostIpListForDel) == 0:
+            GaussLog.exitWithError(ErrorCode.GAUSS_358["GAUSS_35801"] % "-h")
+
+        # get dbcluster info from static config file
+        self.clusterInfo.initFromStaticConfig(self.user)
+        self.backIpNameMap = {}
+        for node in self.clusterInfo.dbNodes:
+            self.backIpNameMap[node.name] = node.backIps[0]
+            if node.backIps[0] in self.hostIpListForDel:
+                self.hostMapForDel[node.name] = {'ipaddr': node.backIps[0],
+                                                 'datadir': [], 'dn_id': [],
+                                                 'port': []}
+                for i in node.datanodes:
+                    self.hostMapForDel[node.name]['datadir'].append(i.datadir)
+                    self.hostMapForDel[node.name]['dn_id'].append(
+                        'dn_' + str(i.instanceId))
+                    self.hostMapForDel[node.name]['port'].append(str(i.port))
+            else:
+                self.hostMapForExist[node.name] = {'ipaddr': node.backIps[0],
+                                                   'datadir': [], 'dn_id': [],
+                                                   'port': [],
+                                                   'replToBeDel': [],
+                                                   'syncStandbyDel': [],
+                                                   'pghbaDel': []}
+                for i in node.datanodes:
+                    self.hostMapForExist[node.name]['datadir'].append(i.datadir)
+                    self.hostMapForExist[node.name]['dn_id'].append(
+                        'dn_' + str(i.instanceId))
+                    self.hostMapForExist[node.name]['port'].append(str(i.port))
+
+        for ipLoop in self.hostIpListForDel:
+            if ipLoop not in self.backIpNameMap.values():
+                GaussLog.exitWithError(ErrorCode.GAUSS_358["GAUSS_35802"] % \
+                                       self.hostIpListForDel)
+
+        if not self.hostMapForDel:
+            GaussLog.exitWithError(ErrorCode.GAUSS_358["GAUSS_35802"] % \
+                                   self.hostIpListForDel)
+
+        # check the node ip is the IP of the current server
+        localIp = self.backIpNameMap[DefaultValue.GetHostIpOrName()]
+        if localIp in self.hostIpListForDel:
+            GaussLog.exitWithError(ErrorCode.GAUSS_358["GAUSS_35803"] % \
+                                   localIp)
+        localNode = self.clusterInfo.getDbNodeByName(
+            DefaultValue.GetHostIpOrName())
+        localInstanceType = self.clusterInfo.getdataNodeInstanceType(
+            localNode.id)
+        if localInstanceType:
+            GaussLog.exitWithError(ErrorCode.GAUSS_358["GAUSS_35804"])
+
+    def check_repeat_process(self):
+        """
+        function: Check whether only one node be left in the cluster
+        return a flag
+        """
+        cmd = "ps -ef | grep gs_dropnode | grep -v grep"
+        (status, output) = subprocess.getstatusoutput(cmd)
+        if status == 0 and len(output.split('\n')) > 1:
+            GaussLog.exitWithError(ErrorCode.GAUSS_358["GAUSS_35810"])
+
+    def flagForOnlyPrimaryLeft(self):
+        """
+        function: Check whether only one node be left in the cluster
+        return a flag
+        """
+        countClusterNodes = len(self.backIpNameMap.values())
+        if (countClusterNodes - len(self.hostIpListForDel)) == 1:
+            flag = input(
+                "The cluster will have only one standalone node left after the operation!"
+                "\nDo you want to continue to drop the target node (yes/no)? ")
+            count_f = 2
+            while count_f:
+                if (
+                        flag.upper() != "YES"
+                        and flag.upper() != "NO"
+                        and flag.upper() != "Y" and flag.upper() != "N"):
+                    count_f -= 1
+                    flag = input("Please type 'yes' or 'no': ")
+                    continue
+                break
+            if count_f == 0:
+                GaussLog.exitWithError(
+                    ErrorCode.GAUSS_358["GAUSS_35805"] % flag.upper())
+            if flag.upper() == "NO" or flag.upper() == "N":
+                GaussLog.exitWithError(
+                    ErrorCode.GAUSS_358["GAUSS_35805"] % flag.upper())
+            self.flagOnlyPrimary = True
+
+    def checkClusterStatus(self):
+        """
+        function: Check whether the status of cluster is normal
+        input: NA
+        output: NA
+        """
+        tmpDir = DefaultValue.getTmpDirFromEnv()
+        tmpFile = os.path.join(tmpDir, "gauss_cluster_status.dat_" + \
+                               str(datetime.datetime.now().strftime(
+                                   '%Y%m%d%H%M%S')) + "_" + str(os.getpid()))
+        cmd = ClusterCommand.getQueryStatusCmd(self.user, "", tmpFile, True)
+        (status, output) = subprocess.getstatusoutput(cmd)
+        if status != 0:
+            self.logger.debug("The cmd is %s " % cmd)
+            raise Exception(ErrorCode.GAUSS_514["GAUSS_51400"] % \
+                            cmd + "Error: \n%s" % output)
+
+        # Initialize cluster status information for the temporary file
+        clusterStatus = DbClusterStatus()
+        clusterStatus.initFromFile(tmpFile)
+
+        clsStatus = clusterStatus.clusterStatus
+        statusDelHost = " The target node to be dropped is %s \n" % str(
+            self.hostMapForDel.keys())[9:]
+        if clsStatus in ["Unknown", "Unavailable"]:
+            GaussLog.exitWithError(
+                ErrorCode.GAUSS_358["GAUSS_35806"] % clsStatus)
+        for dbNode in clusterStatus.dbNodes:
+            if dbNode.name in self.hostMapForDel.keys():
+                if dbNode.isNodeHealthy():
+                    statusDelHost += "The status of %s is %s \n" \
+                                     % (dbNode.name,
+                                        DbClusterStatus.OM_NODE_STATUS_NORMAL)
+                else:
+                    statusDelHost += "The status of %s is %s \n" \
+                                     % (dbNode.name,
+                                        DbClusterStatus.OM_NODE_STATUS_ABNORMAL)
+        flag = input(
+            statusDelHost + "\n \
+            Do you want to continue to drop the target node (yes/no)? ")
+        count_f = 2
+        while count_f:
+            if (
+                    flag.upper() != "YES"
+                    and flag.upper() != "NO"
+                    and flag.upper() != "Y" and flag.upper() != "N"):
+                count_f -= 1
+                flag = input("Please type 'yes' or 'no': ")
+                continue
+            break
+        if count_f == 0:
+            GaussLog.exitWithError(
+                ErrorCode.GAUSS_358["GAUSS_35805"] % flag.upper())
+        if flag.upper() == "NO" or flag.upper() == "N":
+            GaussLog.exitWithError(
+                ErrorCode.GAUSS_358["GAUSS_35805"] % flag.upper())
+
+    def checkConnection(self, hostnames, env):
+        """
+        check the node connection, change the timeout to 30s as 330s is too long
+        if the node which will not be deleted can't be connected, report ERR
+        else continue
+        """
+        command = "echo 1"
+        sshTool = SshTool(hostnames, None, 30)
+        resultMap, outputCollect = sshTool.getSshStatusOutput(command,
+                                                              hostnames, env)
+        self.logger.debug(outputCollect)
+        self.failureHosts = re.findall(r"\[FAILURE\] .*:.*\n", outputCollect)
+        for host in self.failureHosts:
+            if host in self.hostMapForExist.keys():
+                GaussLog.exitWithError(
+                    ErrorCode.GAUSS_358["GAUSS_35807"] % host)
+
+    def initLogs(self):
+        """
+        init log file
+        """
+        cmd = "echo ~%s" % self.user
+        (status, output) = subprocess.getstatusoutput(cmd)
+        self.userProfile = os.path.join(output, ".bashrc")
+        if not os.path.isfile(self.userProfile):
+            raise Exception(
+                ErrorCode.GAUSS_502["GAUSS_50210"] % self.userProfile)
+        log_path = DefaultValue.getEnvironmentParameterValue("GAUSSLOG",
+                                                             self.user,
+                                                             self.userProfile)
+        self.logFile = os.path.realpath(
+            "%s/om/%s" % (log_path, DefaultValue.DROPNODE_LOG_FILE))
+        # if not absolute path
+        if not os.path.isabs(self.logFile):
+            GaussLog.exitWithError(ErrorCode.GAUSS_502["GAUSS_50213"] % "log")
+        self.initLogger("gs_dropnode")
+        self.logger.ignoreErr = True
+
+
+if __name__ == "__main__":
+    dropNode = Dropnode()
+    dropNode.parseCommandLine()
+    dropNode.initLogs()
+    dropNode.check_repeat_process()
+    dropNode.checkParameters()
+    dropNode.flagForOnlyPrimaryLeft()
+    dropNode.checkConnection(list(dropNode.backIpNameMap.keys()),
+                             dropNode.envFile)
+    dropNodeImpl = DropnodeImpl(dropNode)
+    dropNodeImpl.run()

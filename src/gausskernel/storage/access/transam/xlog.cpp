@@ -11160,7 +11160,8 @@ static void KeepLogSeg(XLogRecPtr recptr, XLogSegNo* logSegNo)
      * 5 if enable_xlog_prune not set , When there are not quorum standbys connect, keep xlog
      */
     if (t_thrd.xlog_cxt.server_mode == PRIMARY_MODE &&
-        u_sess->attr.attr_storage.guc_synchronous_commit > SYNCHRONOUS_COMMIT_LOCAL_FLUSH) {
+        u_sess->attr.attr_storage.guc_synchronous_commit > SYNCHRONOUS_COMMIT_LOCAL_FLUSH &&
+        t_thrd.syncrep_cxt.SyncRepConfig != NULL) {
         if (WalSndInProgress(SNDROLE_PRIMARY_BUILDSTANDBY)) {
             /* segno = 1 show all file should be keep */
             segno = 1;
