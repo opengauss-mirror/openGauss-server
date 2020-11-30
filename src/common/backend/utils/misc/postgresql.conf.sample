@@ -316,6 +316,7 @@ hot_standby = on			# "on" allows queries during recovery
 #wal_receiver_connect_retries = 1	# max retries that receiver connect master
 #wal_receiver_buffer_size = 64MB	# wal receiver buffer size
 #enable_xlog_prune = on # xlog keep for all standbys even through they are not connecting and donnot created replslot.
+#config_sync_interval = 3600000         # The parameter is the synchronization interval of the configuration file in milliseconds. The default value is 1 hour = 3600000 milliseconds. 0 indicates that the configuration file is not synchronized.
 
 #------------------------------------------------------------------------------
 # QUERY TUNING
