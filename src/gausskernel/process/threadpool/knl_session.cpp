@@ -932,6 +932,11 @@ static void knl_u_syscache_init(knl_u_syscache_context* syscache_cxt)
     syscache_cxt->CacheInitialized = false;
 }
 
+static void knl_u_deepsql_init(knl_u_deepsql_context* deepsql_cxt)
+{
+    deepsql_cxt->enable_ai_env = false;
+}
+
 static void knl_u_pgxc_init(knl_u_pgxc_context* pgxc_cxt)
 {
     pgxc_cxt->NumDataNodes = 0;
@@ -1095,6 +1100,7 @@ void knl_session_init(knl_session_context* sess_cxt)
     knl_u_unique_sql_init(&sess_cxt->unique_sql_cxt);
     knl_u_user_login_init(&sess_cxt->user_login_cxt);
     knl_u_percentile_init(&sess_cxt->percentile_cxt);
+    knl_u_deepsql_init(&sess_cxt->deepsql_cxt);
     knl_u_mot_init(&sess_cxt->mot_cxt);
 }
 

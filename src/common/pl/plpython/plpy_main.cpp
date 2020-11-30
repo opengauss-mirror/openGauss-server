@@ -1,7 +1,7 @@
 /*
  * PL/Python main entry points
  *
- * src/pl/plpython/plpy_main.c
+ * src/common/pl/plpython/plpy_main.c
  */
 
 #include "postgres.h"
@@ -13,6 +13,7 @@
 #include "executor/spi.h"
 #include "executor/executor.h"
 #include "miscadmin.h"
+#include "pgaudit.h"
 #include "utils/guc.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
@@ -27,7 +28,8 @@
 #include "plpy_exec.h"
 #include "plpy_plpymodule.h"
 #include "plpy_procedure.h"
-#include "plpy_subxactobject.h"
+
+const int PGAUDIT_MAXLENGTH = 1024;
 
 /* exported functions */
 #if PY_MAJOR_VERSION >= 3
@@ -68,21 +70,22 @@ static void PLy_init_interp(void);
 
 static PLyExecutionContext* PLy_push_execution_context(void);
 static void PLy_pop_execution_context(void);
+static void AuditPlpythonFunction(Oid funcoid, const char* funcname, AuditResult result);
 
 static const int plpython_python_version = PY_MAJOR_VERSION;
 
 /* this doesn't need to be global; use PLy_current_execution_context() */
 static THR_LOCAL PLyExecutionContext* PLy_execution_contexts = NULL;
-THR_LOCAL plpy_t_context_struct plpy_t_context = {0};
+THR_LOCAL plpy_t_context_struct g_plpy_t_context = {0};
 
-pthread_mutex_t Ply_LocaleMutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t g_plyLocaleMutex = PTHREAD_MUTEX_INITIALIZER;
 
 void PG_init(void)
 {
     /* Be sure we do initialization only once (should be redundant now) */
     const int** version_ptr;
 
-    if (plpy_t_context.inited) {
+    if (g_plpy_t_context.inited) {
         return;
     }
 
@@ -134,11 +137,11 @@ void PG_init(void)
 
     init_procedure_caches();
 
-    plpy_t_context.explicit_subtransactions = NIL;
+    g_plpy_t_context.explicit_subtransactions = NIL;
 
     PLy_execution_contexts = NULL;
 
-    plpy_t_context.inited = true;
+    g_plpy_t_context.inited = true;
 }
 
 void _PG_init(void)
@@ -160,14 +163,14 @@ void PLy_init_interp(void)
         PLy_elog(ERROR, "could not import \"__main__\" module");
     }
     Py_INCREF(mainmod);
-    plpy_t_context.PLy_interp_globals = PyModule_GetDict(mainmod);
+    g_plpy_t_context.PLy_interp_globals = PyModule_GetDict(mainmod);
     PLy_interp_safe_globals = PyDict_New();
     if (PLy_interp_safe_globals == NULL) {
         PLy_elog(ERROR, "could not create globals");
     }
-    PyDict_SetItemString(plpy_t_context.PLy_interp_globals, "GD", PLy_interp_safe_globals);
+    PyDict_SetItemString(g_plpy_t_context.PLy_interp_globals, "GD", PLy_interp_safe_globals);
     Py_DECREF(mainmod);
-    if (plpy_t_context.PLy_interp_globals == NULL || PyErr_Occurred()) {
+    if (g_plpy_t_context.PLy_interp_globals == NULL || PyErr_Occurred()) {
         PLy_elog(ERROR, "could not initialize globals");
     }
 }
@@ -179,19 +182,20 @@ Datum plpython_validator(PG_FUNCTION_ARGS)
     Form_pg_proc procStruct;
     bool is_trigger = false;
 
-    if (!CheckFunctionValidatorAccess(fcinfo->flinfo->fn_oid, funcoid))
+    if (!CheckFunctionValidatorAccess(fcinfo->flinfo->fn_oid, funcoid)) {
         PG_RETURN_VOID();
+    }
 
     if (!u_sess->attr.attr_sql.check_function_bodies) {
         PG_RETURN_VOID();
     }
 
-    AutoMutexLock plpythonLock(&Ply_LocaleMutex);
-    if (plpy_t_context.Ply_LockLevel == 0) {
+    AutoMutexLock plpythonLock(&g_plyLocaleMutex);
+    if (g_plpy_t_context.Ply_LockLevel == 0) {
         plpythonLock.lock();
     }
 
-    PyLock pyLock(&(plpy_t_context.Ply_LockLevel));
+    PyLock pyLock(&(g_plpy_t_context.Ply_LockLevel));
 
     PG_TRY();
     {
@@ -205,7 +209,6 @@ Datum plpython_validator(PG_FUNCTION_ARGS)
         procStruct = (Form_pg_proc)GETSTRUCT(tuple);
 
         is_trigger = PLy_procedure_is_trigger(procStruct);
-
         if (is_trigger) {
             elog(ERROR, "PL/Python does not support trigger");
         }
@@ -217,7 +220,7 @@ Datum plpython_validator(PG_FUNCTION_ARGS)
     }
     PG_CATCH();
     {
-        pyLock.reset();
+        pyLock.Reset();
         plpythonLock.unLock();
         PG_RE_THROW();
     }
@@ -235,9 +238,9 @@ Datum plpython2_validator(PG_FUNCTION_ARGS)
 
 Datum plpython_call_handler(PG_FUNCTION_ARGS)
 {
-    AutoMutexLock plpythonLock(&Ply_LocaleMutex);
+    AutoMutexLock plpythonLock(&g_plyLocaleMutex);
 
-    if (plpy_t_context.Ply_LockLevel == 0) {
+    if (g_plpy_t_context.Ply_LockLevel == 0) {
         plpythonLock.lock();
     }
 
@@ -245,7 +248,8 @@ Datum plpython_call_handler(PG_FUNCTION_ARGS)
     PLyExecutionContext* exec_ctx = NULL;
     ErrorContextCallback plerrcontext;
 
-    PyLock pyLock(&(plpy_t_context.Ply_LockLevel));
+    PyLock pyLock(&(g_plpy_t_context.Ply_LockLevel));
+    u_sess->deepsql_cxt.enable_ai_env = true;
 
     PG_TRY();
     {
@@ -272,17 +276,18 @@ Datum plpython_call_handler(PG_FUNCTION_ARGS)
     }
     PG_CATCH();
     {
-        pyLock.reset();
+        pyLock.Reset();
         plpythonLock.unLock();
+        u_sess->deepsql_cxt.enable_ai_env = false;
         PG_RE_THROW();
     }
     PG_END_TRY();
 
+    Oid funcoid = fcinfo->flinfo->fn_oid;
+    PLyProcedure* proc = NULL;
+
     PG_TRY();
     {
-        Oid funcoid = fcinfo->flinfo->fn_oid;
-        PLyProcedure* proc = NULL;
-
         if (CALLED_AS_TRIGGER(fcinfo)) {
             elog(ERROR, "PL/Python does not support trigger");
             Relation tgrel = ((TriggerData*)fcinfo->context)->tg_relation;
@@ -296,13 +301,22 @@ Datum plpython_call_handler(PG_FUNCTION_ARGS)
             proc = PLy_procedure_get(funcoid, InvalidOid, false);
             exec_ctx->curr_proc = proc;
             retval = PLy_exec_function(fcinfo, proc);
+
+            if (AUDIT_EXEC_ENABLED) {
+                AuditPlpythonFunction(funcoid, proc->proname, AUDIT_OK);
+            }
         }
+        u_sess->deepsql_cxt.enable_ai_env = false;
     }
     PG_CATCH();
     {
+        if (AUDIT_EXEC_ENABLED) {
+            AuditPlpythonFunction(funcoid, proc->proname, AUDIT_FAILED);
+        }
+        u_sess->deepsql_cxt.enable_ai_env = false;
         PLy_pop_execution_context();
         PyErr_Clear();
-        pyLock.reset();
+        pyLock.Reset();
         plpythonLock.unLock();
         PG_RE_THROW();
     }
@@ -317,11 +331,13 @@ Datum plpython_call_handler(PG_FUNCTION_ARGS)
     }
     PG_CATCH();
     {
-        pyLock.reset();
+        pyLock.Reset();
         plpythonLock.unLock();
+        u_sess->deepsql_cxt.enable_ai_env = false;
         PG_RE_THROW();
     }
     PG_END_TRY();
+    u_sess->deepsql_cxt.enable_ai_env = false;
 
     return retval;
 }
@@ -335,11 +351,11 @@ Datum plpython2_call_handler(PG_FUNCTION_ARGS)
 
 Datum plpython_inline_handler(PG_FUNCTION_ARGS)
 {
-    AutoMutexLock plpythonLock(&Ply_LocaleMutex);
-    if (plpy_t_context.Ply_LockLevel == 0) {
+    AutoMutexLock plpythonLock(&g_plyLocaleMutex);
+    if (g_plpy_t_context.Ply_LockLevel == 0) {
         plpythonLock.lock();
     }
-    PyLock pyLock(&(plpy_t_context.Ply_LockLevel));
+    PyLock pyLock(&(g_plpy_t_context.Ply_LockLevel));
 
     InlineCodeBlock* codeblock = (InlineCodeBlock*)DatumGetPointer(PG_GETARG_DATUM(0));
     FunctionCallInfoData fake_fcinfo;
@@ -392,7 +408,7 @@ Datum plpython_inline_handler(PG_FUNCTION_ARGS)
     PG_CATCH();
     {
         plpythonLock.unLock();
-        pyLock.reset();
+        pyLock.Reset();
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -402,21 +418,27 @@ Datum plpython_inline_handler(PG_FUNCTION_ARGS)
         PLy_procedure_compile(&proc, codeblock->source_text);
         exec_ctx->curr_proc = &proc;
         PLy_exec_function(&fake_fcinfo, &proc);
+
+        if (AUDIT_EXEC_ENABLED) {
+            AuditPlpythonFunction(InvalidOid, proc.pyname, AUDIT_OK);
+        }
     }
     PG_CATCH();
     {
+        if (AUDIT_EXEC_ENABLED) {
+            AuditPlpythonFunction(InvalidOid, proc.pyname, AUDIT_FAILED);
+        }
         PLy_pop_execution_context();
         PLy_procedure_delete(&proc);
         PyErr_Clear();
         plpythonLock.unLock();
-        pyLock.reset();
+        pyLock.Reset();
         PG_RE_THROW();
     }
     PG_END_TRY();
 
     PG_TRY();
     {
-
         /* Pop the error context stack */
         t_thrd.log_cxt.error_context_stack = plerrcontext.previous;
         /* ... and then the execution context */
@@ -428,7 +450,7 @@ Datum plpython_inline_handler(PG_FUNCTION_ARGS)
     PG_CATCH();
     {
         plpythonLock.unLock();
-        pyLock.reset();
+        pyLock.Reset();
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -452,6 +474,10 @@ static void plpython_error_callback(void* arg)
 {
     PLyExecutionContext* exec_ctx = PLy_current_execution_context();
 
+    if (AUDIT_EXEC_ENABLED) {
+        AuditPlpythonFunction(InvalidOid, PLy_procedure_name(exec_ctx->curr_proc), AUDIT_FAILED);
+    }
+
     if (exec_ctx->curr_proc != NULL) {
         errcontext("PL/Python function \"%s\"", PLy_procedure_name(exec_ctx->curr_proc));
     }
@@ -459,6 +485,10 @@ static void plpython_error_callback(void* arg)
 
 static void plpython_inline_error_callback(void* arg)
 {
+    if (AUDIT_EXEC_ENABLED) {
+        AuditPlpythonFunction(InvalidOid, "__plpython_inline_block", AUDIT_FAILED);
+    }
+
     errcontext("PL/Python anonymous code block");
 }
 
@@ -498,4 +528,29 @@ static void PLy_pop_execution_context(void)
 
     MemoryContextDelete(context->scratch_ctx);
     PLy_free(context);
+}
+
+static void AuditPlpythonFunction(Oid funcoid, const char* funcname, AuditResult result)
+{
+    char details[PGAUDIT_MAXLENGTH];
+    errno_t rc = EOK;
+
+    if (result == AUDIT_OK) {
+        if (funcoid == InvalidOid) {
+            // for AnonymousBlock
+            rc = snprintf_s(details, PGAUDIT_MAXLENGTH, PGAUDIT_MAXLENGTH - 1,
+                "Execute Plpython anonymous code block(oid = %u). ", funcoid);
+        } else {
+            // for normal function
+            rc = snprintf_s(details, PGAUDIT_MAXLENGTH, PGAUDIT_MAXLENGTH - 1,
+                "Execute PLpython function(oid = %u). ", funcoid);
+        }
+    } else {
+        // for abnormal function
+        rc = snprintf_s(details, PGAUDIT_MAXLENGTH, PGAUDIT_MAXLENGTH - 1, 
+            "Execute PLpython function(%s). ", funcname);
+    }
+
+    securec_check_ss(rc, "", "");
+    audit_report(AUDIT_FUNCTION_EXEC, result, funcname, details);
 }

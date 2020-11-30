@@ -78,17 +78,21 @@ void PLy_typeinfo_dealloc(PLyTypeInfo* arg)
         int i;
 
         for (i = 0; i < arg->in.r.natts; i++) {
-            if (arg->in.r.atts[i].elm != NULL)
+            if (arg->in.r.atts[i].elm != NULL) {
                 PLy_free(arg->in.r.atts[i].elm);
+            }
         }
-        if (arg->in.r.atts)
+        if (arg->in.r.atts) {
             PLy_free(arg->in.r.atts);
-        for (i = 0; i < arg->out.r.natts; i++) {
-            if (arg->out.r.atts[i].elm != NULL)
-                PLy_free(arg->out.r.atts[i].elm);
         }
-        if (arg->out.r.atts)
+        for (i = 0; i < arg->out.r.natts; i++) {
+            if (arg->out.r.atts[i].elm != NULL) {
+                PLy_free(arg->out.r.atts[i].elm);
+            }
+        }
+        if (arg->out.r.atts) {
             PLy_free(arg->out.r.atts);
+        }
     }
 }
 
@@ -98,16 +102,18 @@ void PLy_typeinfo_dealloc(PLyTypeInfo* arg)
  */
 void PLy_input_datum_func(PLyTypeInfo* arg, Oid typeOid, HeapTuple typeTup)
 {
-    if (arg->is_rowtype > 0)
+    if (arg->is_rowtype > 0) {
         elog(ERROR, "PLyTypeInfo struct is initialized for Tuple");
+    }
     arg->is_rowtype = 0;
     PLy_input_datum_func2(&(arg->in.d), typeOid, typeTup);
 }
 
 void PLy_output_datum_func(PLyTypeInfo* arg, HeapTuple typeTup)
 {
-    if (arg->is_rowtype > 0)
+    if (arg->is_rowtype > 0) {
         elog(ERROR, "PLyTypeInfo struct is initialized for a Tuple");
+    }
     arg->is_rowtype = 0;
     PLy_output_datum_func2(&(arg->out.d), typeTup);
 }
@@ -116,20 +122,23 @@ void PLy_input_tuple_funcs(PLyTypeInfo* arg, TupleDesc desc)
 {
     int i;
 
-    if (arg->is_rowtype == 0)
+    if (arg->is_rowtype == 0) {
         elog(ERROR, "PLyTypeInfo struct is initialized for a Datum");
+    }
     arg->is_rowtype = 1;
 
     if (arg->in.r.natts != desc->natts) {
-        if (arg->in.r.atts)
+        if (arg->in.r.atts) {
             PLy_free(arg->in.r.atts);
+        }
         arg->in.r.natts = desc->natts;
         arg->in.r.atts = (PLyDatumToOb*)PLy_malloc0(desc->natts * sizeof(PLyDatumToOb));
     }
 
     /* Can this be an unnamed tuple? If not, then an Assert would be enough */
-    if (desc->tdtypmod != -1)
+    if (desc->tdtypmod != -1) {
         elog(ERROR, "received unnamed record type as input");
+    }
 
     Assert(OidIsValid(desc->tdtypeid));
 
@@ -143,8 +152,9 @@ void PLy_input_tuple_funcs(PLyTypeInfo* arg, TupleDesc desc)
         /* Get the pg_class tuple corresponding to the type of the input */
         arg->typ_relid = typeidTypeRelid(desc->tdtypeid);
         relTup = SearchSysCache1(RELOID, ObjectIdGetDatum(arg->typ_relid));
-        if (!HeapTupleIsValid(relTup))
+        if (!HeapTupleIsValid(relTup)) {
             elog(ERROR, "cache lookup failed for relation %u", arg->typ_relid);
+        }
 
         /* Remember XMIN and TID for later validation if cache is still OK */
         arg->typrel_xmin = HeapTupleGetRawXmin(relTup);
@@ -156,15 +166,18 @@ void PLy_input_tuple_funcs(PLyTypeInfo* arg, TupleDesc desc)
     for (i = 0; i < desc->natts; i++) {
         HeapTuple typeTup;
 
-        if (desc->attrs[i]->attisdropped)
+        if (desc->attrs[i]->attisdropped) {
             continue;
+        }
 
-        if (arg->in.r.atts[i].typoid == desc->attrs[i]->atttypid)
+        if (arg->in.r.atts[i].typoid == desc->attrs[i]->atttypid) {
             continue; /* already set up this entry */
+        }
 
         typeTup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(desc->attrs[i]->atttypid));
-        if (!HeapTupleIsValid(typeTup))
+        if (!HeapTupleIsValid(typeTup)) {
             elog(ERROR, "cache lookup failed for type %u", desc->attrs[i]->atttypid);
+        }
 
         PLy_input_datum_func2(&(arg->in.r.atts[i]), desc->attrs[i]->atttypid, typeTup);
 
@@ -176,13 +189,15 @@ void PLy_output_tuple_funcs(PLyTypeInfo* arg, TupleDesc desc)
 {
     int i;
 
-    if (arg->is_rowtype == 0)
+    if (arg->is_rowtype == 0) {
         elog(ERROR, "PLyTypeInfo struct is initialized for a Datum");
+    }
     arg->is_rowtype = 1;
 
     if (arg->out.r.natts != desc->natts) {
-        if (arg->out.r.atts)
+        if (arg->out.r.atts) {
             PLy_free(arg->out.r.atts);
+        }
         arg->out.r.natts = desc->natts;
         arg->out.r.atts = (PLyObToDatum*)PLy_malloc0(desc->natts * sizeof(PLyObToDatum));
     }
@@ -199,8 +214,9 @@ void PLy_output_tuple_funcs(PLyTypeInfo* arg, TupleDesc desc)
         /* Get the pg_class tuple corresponding to the type of the output */
         arg->typ_relid = typeidTypeRelid(desc->tdtypeid);
         relTup = SearchSysCache1(RELOID, ObjectIdGetDatum(arg->typ_relid));
-        if (!HeapTupleIsValid(relTup))
+        if (!HeapTupleIsValid(relTup)) {
             elog(ERROR, "cache lookup failed for relation %u", arg->typ_relid);
+        }
 
         /* Remember XMIN and TID for later validation if cache is still OK */
         arg->typrel_xmin = HeapTupleGetRawXmin(relTup);
@@ -212,15 +228,18 @@ void PLy_output_tuple_funcs(PLyTypeInfo* arg, TupleDesc desc)
     for (i = 0; i < desc->natts; i++) {
         HeapTuple typeTup;
 
-        if (desc->attrs[i]->attisdropped)
+        if (desc->attrs[i]->attisdropped) {
             continue;
+        }
 
-        if (arg->out.r.atts[i].typoid == desc->attrs[i]->atttypid)
+        if (arg->out.r.atts[i].typoid == desc->attrs[i]->atttypid) {
             continue; /* already set up this entry */
+        }
 
         typeTup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(desc->attrs[i]->atttypid));
-        if (!HeapTupleIsValid(typeTup))
+        if (!HeapTupleIsValid(typeTup)) {
             elog(ERROR, "cache lookup failed for type %u", desc->attrs[i]->atttypid);
+        }
 
         PLy_output_datum_func2(&(arg->out.r.atts[i]), typeTup);
 
@@ -234,8 +253,9 @@ void PLy_output_record_funcs(PLyTypeInfo* arg, TupleDesc desc)
      * If the output record functions are already set, we just have to check
      * if the record descriptor has not changed
      */
-    if ((arg->is_rowtype == 1) && (arg->out.d.typmod != -1) && (arg->out.d.typmod == desc->tdtypmod))
+    if ((arg->is_rowtype == 1) && (arg->out.d.typmod != -1) && (arg->out.d.typmod == desc->tdtypmod)) {
         return;
+    }
 
     /* bless the record to make it known to the typcache lookup code */
     BlessTupleDesc(desc);
@@ -261,12 +281,14 @@ PyObject* PLyDict_FromTuple(PLyTypeInfo* info, HeapTuple tuple, TupleDesc desc)
     MemoryContext oldcontext = CurrentMemoryContext;
     int i;
 
-    if (info->is_rowtype != 1)
+    if (info->is_rowtype != 1) {
         elog(ERROR, "PLyTypeInfo structure describes a datum");
+    }
 
     dict = PyDict_New();
-    if (dict == NULL)
+    if (dict == NULL) {
         PLy_elog(ERROR, "could not create new dictionary");
+    }
 
     PG_TRY();
     {
@@ -281,15 +303,16 @@ PyObject* PLyDict_FromTuple(PLyTypeInfo* info, HeapTuple tuple, TupleDesc desc)
             bool is_null = false;
             PyObject* value = NULL;
 
-            if (desc->attrs[i]->attisdropped)
+            if (desc->attrs[i]->attisdropped) {
                 continue;
+            }
 
             key = NameStr(desc->attrs[i]->attname);
             vattr = heap_getattr(tuple, (i + 1), desc, &is_null);
 
-            if (is_null || info->in.r.atts[i].func == NULL)
+            if (is_null || info->in.r.atts[i].func == NULL) {
                 PyDict_SetItemString(dict, key, Py_None);
-            else {
+            } else {
                 value = (info->in.r.atts[i].func)(&info->in.r.atts[i], vattr);
                 PyDict_SetItemString(dict, key, value);
                 Py_DECREF(value);
@@ -318,17 +341,18 @@ Datum PLyObject_ToCompositeDatum(PLyTypeInfo* info, TupleDesc desc, PyObject* pl
 {
     Datum datum;
 
-    if (PyString_Check(plrv) || PyUnicode_Check(plrv))
+    if (PyString_Check(plrv) || PyUnicode_Check(plrv)) {
         datum = PLyString_ToComposite(info, desc, plrv);
-    else if (PySequence_Check(plrv))
+    } else if (PySequence_Check(plrv)) {
         /* composite type as sequence (tuple, list etc) */
         datum = PLySequence_ToComposite(info, desc, plrv);
-    else if (PyMapping_Check(plrv))
+    } else if (PyMapping_Check(plrv)) {
         /* composite type as mapping (currently only dict) */
         datum = PLyMapping_ToComposite(info, desc, plrv);
-    else
+    } else {
         /* returned as smth, must provide method __getattr__(name) */
         datum = PLyGenericObject_ToComposite(info, desc, plrv);
+    }
 
     return datum;
 }
@@ -371,11 +395,12 @@ static void PLy_output_datum_func2(PLyObToDatum* arg, HeapTuple typeTup)
         char dummy_delim;
         Oid funcid;
 
-        if (type_is_rowtype(element_type))
+        if (type_is_rowtype(element_type)) {
             ereport(ERROR,
                 (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("PL/Python functions cannot return type %s", format_type_be(arg->typoid)),
                     errdetail("PL/Python does not support conversion to arrays of row types.")));
+        }
 
         arg->elm = (PLyObToDatum*)PLy_malloc0(sizeof(*arg->elm));
         arg->elm->func = arg->func;
@@ -472,8 +497,9 @@ static PyObject* PLyBool_FromBool(PLyDatumToOb* arg, Datum d)
      * Python >= 2.3, and we support older versions.
      * http://docs.python.org/api/boolObjects.html
      */
-    if (DatumGetBool(d))
+    if (DatumGetBool(d)) {
         return PyBool_FromLong(1);
+    }
     return PyBool_FromLong(0);
 }
 
@@ -512,10 +538,11 @@ static PyObject* PLyInt_FromInt32(PLyDatumToOb* arg, Datum d)
 static PyObject* PLyLong_FromInt64(PLyDatumToOb* arg, Datum d)
 {
     /* on 32 bit platforms "long" may be too small */
-    if (sizeof(int64) > sizeof(long))
+    if (sizeof(int64) > sizeof(long)) {
         return PyLong_FromLongLong(DatumGetInt64(d));
-    else
+    } else {
         return PyLong_FromLong(DatumGetInt64(d));
+    }
 }
 
 static PyObject* PLyLong_FromOid(PLyDatumToOb* arg, Datum d)
@@ -551,8 +578,9 @@ static PyObject* PLyList_FromArray(PLyDatumToOb* arg, Datum d)
     bits8* bitmap;
     int bitmask;
 
-    if (ARR_NDIM(array) == 0)
+    if (ARR_NDIM(array) == 0) {
         return PyList_New(0);
+    }
 
     /* Array dimensions and left bounds */
     ndim = ARR_NDIM(array);
@@ -586,8 +614,9 @@ static PyObject* PLyList_FromArray_recurse(
     PyObject* list;
 
     list = PyList_New(dims[dim]);
-    if (!list)
+    if (!list) {
         return NULL;
+    }
 
     if (dim < ndim - 1) {
         /* Outer dimension. Recurse for each inner slice. */
@@ -623,7 +652,8 @@ static PyObject* PLyList_FromArray_recurse(
             /* advance bitmap pointer if any */
             if (bitmap) {
                 bitmask <<= 1;
-                if (bitmask == 0x100 /* (1<<8) */) {
+                /* (1<<8) */
+                if (bitmask == 0x100) {
                     bitmap++;
                     bitmask = 1;
                 }
@@ -651,8 +681,9 @@ static Datum PLyObject_ToBool(PLyObToDatum* arg, int32 typmod, PyObject* plrv)
     Assert(plrv != Py_None);
     rv = BoolGetDatum(PyObject_IsTrue(plrv));
 
-    if (get_typtype(arg->typoid) == TYPTYPE_DOMAIN)
+    if (get_typtype(arg->typoid) == TYPTYPE_DOMAIN) {
         domain_check(rv, false, arg->typoid, &arg->typfunc.fn_extra, arg->typfunc.fn_mcxt);
+    }
 
     return rv;
 }
@@ -670,8 +701,9 @@ static Datum PLyObject_ToBytea(PLyObToDatum* arg, int32 typmod, PyObject* plrv)
     Assert(plrv != Py_None);
 
     plrv_so = PyObject_Bytes(plrv);
-    if (plrv_so == NULL)
+    if (plrv_so == NULL) {
         PLy_elog(ERROR, "could not create bytes representation of Python object");
+    }
 
     PG_TRY();
     {
@@ -695,8 +727,9 @@ static Datum PLyObject_ToBytea(PLyObToDatum* arg, int32 typmod, PyObject* plrv)
 
     Py_XDECREF(plrv_so);
 
-    if (get_typtype(arg->typoid) == TYPTYPE_DOMAIN)
+    if (get_typtype(arg->typoid) == TYPTYPE_DOMAIN) {
         domain_check(rv, false, arg->typoid, &arg->typfunc.fn_extra, arg->typfunc.fn_mcxt);
+    }
 
     return rv;
 }
@@ -712,8 +745,9 @@ static Datum PLyObject_ToComposite(PLyObToDatum* arg, int32 typmod, PyObject* pl
     PLyTypeInfo info;
     TupleDesc desc;
 
-    if (typmod != -1)
+    if (typmod != -1) {
         elog(ERROR, "received unnamed record type as input");
+    }
 
     /* Create a dummy PLyTypeInfo */
     errno_t rc = memset_s(&info, sizeof(PLyTypeInfo), 0, sizeof(PLyTypeInfo));
@@ -749,9 +783,9 @@ static Datum PLyObject_ToDatum(PLyObToDatum* arg, int32 typmod, PyObject* plrv)
 
     Assert(plrv != Py_None);
 
-    if (PyUnicode_Check(plrv))
+    if (PyUnicode_Check(plrv)) {
         plrv_bo = PLyUnicode_Bytes(plrv);
-    else {
+    } else {
 #if PY_MAJOR_VERSION >= 3
         PyObject* s = PyObject_Str(plrv);
 
@@ -761,21 +795,23 @@ static Datum PLyObject_ToDatum(PLyObToDatum* arg, int32 typmod, PyObject* plrv)
         plrv_bo = PyObject_Str(plrv);
 #endif
     }
-    if (plrv_bo == NULL)
+    if (plrv_bo == NULL) {
         PLy_elog(ERROR, "could not create string representation of Python object");
+    }
 
     PG_TRY();
     {
         char* plrv_sc = PyBytes_AsString(plrv_bo);
         size_t plen = PyBytes_Size(plrv_bo);
         size_t slen = strlen(plrv_sc);
-        if (slen < plen)
+        if (slen < plen) {
             ereport(ERROR,
                 (errcode(ERRCODE_DATATYPE_MISMATCH),
                     errmsg("could not convert Python object into cstring: Python string representation appears to "
                            "contain null bytes")));
-        else if (slen > plen)
+        } else if (slen > plen) {
             elog(ERROR, "could not convert Python object into cstring: Python string longer than reported length");
+        }
         pg_verifymbstr(plrv_sc, slen, false);
         rv = InputFunctionCall(&arg->typfunc, plrv_sc, arg->typioparam, typmod);
     }
@@ -803,8 +839,9 @@ static Datum PLySequence_ToArray(PLyObToDatum* arg, int32 typmod, PyObject* plrv
 
     Assert(plrv != Py_None);
 
-    if (!PySequence_Check(plrv))
+    if (!PySequence_Check(plrv)) {
         PLy_elog(ERROR, "return value of function with array return type is not a Python sequence");
+    }
 
     len = PySequence_Length(plrv);
     elems = (Datum*)palloc(sizeof(*elems) * len);
@@ -813,9 +850,9 @@ static Datum PLySequence_ToArray(PLyObToDatum* arg, int32 typmod, PyObject* plrv
     for (i = 0; i < len; i++) {
         PyObject* obj = PySequence_GetItem(plrv, i);
 
-        if (obj == Py_None)
+        if (obj == Py_None) {
             nulls[i] = true;
-        else {
+        } else {
             nulls[i] = false;
 
             /*
@@ -842,8 +879,9 @@ static Datum PLySequence_ToArray(PLyObToDatum* arg, int32 typmod, PyObject* plrv
      * checked.
      */
     rv = PointerGetDatum(array);
-    if (get_typtype(arg->typoid) == TYPTYPE_DOMAIN)
+    if (get_typtype(arg->typoid) == TYPTYPE_DOMAIN) {
         domain_check(rv, false, arg->typoid, &arg->typfunc.fn_extra, arg->typfunc.fn_mcxt);
+    }
     return rv;
 }
 
@@ -852,8 +890,9 @@ static Datum PLyString_ToComposite(PLyTypeInfo* info, TupleDesc desc, PyObject* 
     HeapTuple typeTup;
 
     typeTup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(desc->tdtypeid));
-    if (!HeapTupleIsValid(typeTup))
+    if (!HeapTupleIsValid(typeTup)) {
         elog(ERROR, "cache lookup failed for type %u", desc->tdtypeid);
+    }
 
     PLy_output_datum_func2(&info->out.d, typeTup);
 
@@ -872,8 +911,9 @@ static Datum PLyMapping_ToComposite(PLyTypeInfo* info, TupleDesc desc, PyObject*
 
     Assert(PyMapping_Check(mapping));
 
-    if (info->is_rowtype == 2)
+    if (info->is_rowtype == 2) {
         PLy_output_tuple_funcs(info, desc);
+    }
     Assert(info->is_rowtype == 1);
 
     /* Build tuple */
@@ -945,16 +985,19 @@ static Datum PLySequence_ToComposite(PLyTypeInfo* info, TupleDesc desc, PyObject
      */
     idx = 0;
     for (i = 0; i < desc->natts; i++) {
-        if (!desc->attrs[i]->attisdropped)
+        if (!desc->attrs[i]->attisdropped) {
             idx++;
+        }
     }
-    if (PySequence_Length(sequence) != idx)
+    if (PySequence_Length(sequence) != idx) {
         ereport(ERROR,
             (errcode(ERRCODE_DATATYPE_MISMATCH),
                 errmsg("length of returned sequence did not match number of columns in row")));
+    }
 
-    if (info->is_rowtype == 2)
+    if (info->is_rowtype == 2) {
         PLy_output_tuple_funcs(info, desc);
+    }
     Assert(info->is_rowtype == 1);
 
     /* Build tuple */
@@ -1013,8 +1056,9 @@ static Datum PLyGenericObject_ToComposite(PLyTypeInfo* info, TupleDesc desc, PyO
     bool* nulls = NULL;
     volatile int i;
 
-    if (info->is_rowtype == 2)
+    if (info->is_rowtype == 2) {
         PLy_output_tuple_funcs(info, desc);
+    }
     Assert(info->is_rowtype == 1);
 
     /* Build tuple */

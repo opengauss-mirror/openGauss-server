@@ -1,7 +1,7 @@
 /*
  * the PLyResult class
  *
- * src/pl/plpython/plpy_resultobject.c
+ * src/common/pl/plpython/plpy_resultobject.c
  */
 
 #include "postgres.h"
@@ -33,18 +33,18 @@ static int PLy_result_ass_subscript(PyObject* self, PyObject* item, PyObject* va
 static char PLy_result_doc[] = {"Results of a PostgreSQL query"};
 
 static PySequenceMethods PLy_result_as_sequence = {
-    PLy_result_length,    /* sq_length */
-    NULL,                 /* sq_concat */
-    NULL,                 /* sq_repeat */
-    PLy_result_item,      /* sq_item */
+    PLy_result_length, /* sq_length */
+    NULL,              /* sq_concat */
+    NULL,              /* sq_repeat */
+    PLy_result_item,   /* sq_item */
 #if PY_MAJOR_VERSION < 3
-    PLy_result_slice,     /* sq_slice */
-    PLy_result_ass_item,  /* sq_ass_item */
-    PLy_result_ass_slice  /* sq_ass_slice */
+    PLy_result_slice,    /* sq_slice */
+    PLy_result_ass_item, /* sq_ass_item */
+    PLy_result_ass_slice /* sq_ass_slice */
 #else
-    NULL,                 /* sq_slice */
-    NULL,                 /* sq_ass_item */
-    NULL                  /* sq_ass_slice */
+    NULL,            /* sq_slice */
+    NULL,            /* sq_ass_item */
+    NULL             /* sq_ass_slice */
 #endif
 };
 
@@ -69,21 +69,21 @@ static PyTypeObject PLy_ResultType = {
     /*
      * methods
      */
-    PLy_result_dealloc,                       /* tp_dealloc */
-    0,                                        /* tp_print */
-    0,                                        /* tp_getattr */
-    0,                                        /* tp_setattr */
-    0,                                        /* tp_compare */
-    0,                                        /* tp_repr */
-    0,                                        /* tp_as_number */
-    &PLy_result_as_sequence,                  /* tp_as_sequence */
-    &PLy_result_as_mapping,                   /* tp_as_mapping */
-    0,                                        /* tp_hash */
-    0,                                        /* tp_call */
+    PLy_result_dealloc,      /* tp_dealloc */
+    0,                       /* tp_print */
+    0,                       /* tp_getattr */
+    0,                       /* tp_setattr */
+    0,                       /* tp_compare */
+    0,                       /* tp_repr */
+    0,                       /* tp_as_number */
+    &PLy_result_as_sequence, /* tp_as_sequence */
+    &PLy_result_as_mapping,  /* tp_as_mapping */
+    0,                       /* tp_hash */
+    0,                       /* tp_call */
 #if PY_MAJOR_VERSION < 3
-    0,                                        /* tp_str */
+    0, /* tp_str */
 #else
-    &PLy_result_str,                          /* tp_str */
+    &PLy_result_str, /* tp_str */
 #endif
     0,                                        /* tp_getattro */
     0,                                        /* tp_setattro */
@@ -101,8 +101,9 @@ static PyTypeObject PLy_ResultType = {
 
 void PLy_result_init_type(void)
 {
-    if (PyType_Ready(&PLy_ResultType) < 0)
+    if (PyType_Ready(&PLy_ResultType) < 0) {
         elog(ERROR, "could not initialize PLy_ResultType");
+    }
 }
 
 PyObject* PLy_result_new(void)
@@ -143,13 +144,14 @@ static PyObject* PLy_result_colnames(PyObject* self, PyObject* unused)
     int i;
 
     if (!ob->tupdesc) {
-        PLy_exception_set(plpy_t_context.PLy_exc_error, "command did not produce a result set");
+        PLy_exception_set(g_plpy_t_context.PLy_exc_error, "command did not produce a result set");
         return NULL;
     }
 
     list = PyList_New(ob->tupdesc->natts);
-    for (i = 0; i < ob->tupdesc->natts; i++)
+    for (i = 0; i < ob->tupdesc->natts; i++) {
         PyList_SET_ITEM(list, i, PyString_FromString(NameStr(ob->tupdesc->attrs[i]->attname)));
+    }
 
     return list;
 }
@@ -161,13 +163,14 @@ static PyObject* PLy_result_coltypes(PyObject* self, PyObject* unused)
     int i;
 
     if (!ob->tupdesc) {
-        PLy_exception_set(plpy_t_context.PLy_exc_error, "command did not produce a result set");
+        PLy_exception_set(g_plpy_t_context.PLy_exc_error, "command did not produce a result set");
         return NULL;
     }
 
     list = PyList_New(ob->tupdesc->natts);
-    for (i = 0; i < ob->tupdesc->natts; i++)
+    for (i = 0; i < ob->tupdesc->natts; i++) {
         PyList_SET_ITEM(list, i, PyInt_FromLong(ob->tupdesc->attrs[i]->atttypid));
+    }
 
     return list;
 }
@@ -179,13 +182,14 @@ static PyObject* PLy_result_coltypmods(PyObject* self, PyObject* unused)
     int i;
 
     if (!ob->tupdesc) {
-        PLy_exception_set(plpy_t_context.PLy_exc_error, "command did not produce a result set");
+        PLy_exception_set(g_plpy_t_context.PLy_exc_error, "command did not produce a result set");
         return NULL;
     }
 
     list = PyList_New(ob->tupdesc->natts);
-    for (i = 0; i < ob->tupdesc->natts; i++)
+    for (i = 0; i < ob->tupdesc->natts; i++) {
         PyList_SET_ITEM(list, i, PyInt_FromLong(ob->tupdesc->attrs[i]->atttypmod));
+    }
 
     return list;
 }
@@ -219,8 +223,9 @@ static PyObject* PLy_result_item(PyObject* arg, Py_ssize_t idx)
     PLyResultObject* ob = (PLyResultObject*)arg;
 
     rv = PyList_GetItem(ob->rows, idx);
-    if (rv != NULL)
+    if (rv != NULL) {
         Py_INCREF(rv);
+    }
     return rv;
 }
 

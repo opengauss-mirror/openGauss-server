@@ -1,5 +1,5 @@
 /*
- * src/pl/plpython/plpy_spi.h
+ * src/common/pl/plpython/plpy_spi.h
  */
 
 #ifndef PLPY_SPI_H
@@ -7,6 +7,10 @@
 
 #include "utils/palloc.h"
 #include "utils/resowner.h"
+#ifdef ENABLE_MULTIPLE_NODES
+#include "pgxc/execRemote.h"
+#include "pgxc/pgxc.h"
+#endif
 
 extern PyObject* PLy_spi_prepare(PyObject* self, PyObject* args);
 extern PyObject* PLy_spi_execute(PyObject* self, PyObject* args);

@@ -1,5 +1,5 @@
 /*
- * src/pl/plpython/plpy_typeio.h
+ * src/common/pl/plpython/plpy_typeio.h
  */
 
 #ifndef PLPY_TYPEIO_H

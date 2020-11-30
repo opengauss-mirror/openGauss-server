@@ -1229,6 +1229,10 @@ typedef struct knl_u_postgres_context {
     bool ignore_till_sync;
 } knl_u_postgres_context;
 
+typedef struct knl_u_deepsql_context {
+    bool enable_ai_env;
+} knl_u_deepsql_context;
+
 typedef struct knl_u_stat_context {
     char* pgstat_stat_filename;
     char* pgstat_stat_tmpname;
@@ -2243,6 +2247,9 @@ typedef struct knl_session_context {
     knl_u_unique_sql_context unique_sql_cxt;
     knl_u_user_login_context user_login_cxt;
     knl_u_percentile_context percentile_cxt;
+
+    /* AI deepsql */
+    knl_u_deepsql_context deepsql_cxt;
 
     /* GTT */
     knl_u_gtt_context gtt_ctx;

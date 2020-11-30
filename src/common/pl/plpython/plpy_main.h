@@ -1,5 +1,5 @@
 /*
- * src/pl/plpython/plpy_main.h
+ * src/common/pl/plpython/plpy_main.h
  */
 
 #ifndef PLPY_MAIN_H
@@ -9,7 +9,7 @@
 
 class PyLock {
 public:
-    PyLock(int* lockLevel) : m_lockLevel(lockLevel)
+    explicit PyLock(int* lockLevel) : m_lockLevel(lockLevel)
     {
         (*m_lockLevel)++;
     }
@@ -18,7 +18,7 @@ public:
     {
         (*m_lockLevel)--;
     }
-    void reset()
+    void Reset()
     {
         (*m_lockLevel) = 0;
     }

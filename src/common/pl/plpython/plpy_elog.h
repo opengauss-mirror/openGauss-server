@@ -1,5 +1,5 @@
 /*
- * src/pl/plpython/plpy_elog.h
+ * src/common/pl/plpython/plpy_elog.h
  */
 
 #ifndef PLPY_ELOG_H
