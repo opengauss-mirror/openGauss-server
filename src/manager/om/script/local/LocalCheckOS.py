@@ -1908,7 +1908,7 @@ def CheckPlatformInfo():
                                              data.patchlevel, data.bits)
             g_logger.log("False %s %s" % (data.distname, platformStr))
             return
-    elif (data.distname in ("redhat", "centos")):
+    elif (data.distname in ("redhat", "centos", "asianux")):
         if (data.version in ("6.4", "6.5", "6.6", "6.7", "6.8", "6.9")):
             mixedType = "%s6" % data.distname
             platformStr = "%s_%s_%s" % (data.distname,
