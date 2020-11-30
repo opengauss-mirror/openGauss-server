@@ -813,6 +813,10 @@ static void knl_u_unique_sql_init(knl_u_unique_sql_context* unique_sql_cxt)
     unique_sql_cxt->curr_single_unique_sql = NULL;
     unique_sql_cxt->is_multi_unique_sql = false;
     unique_sql_cxt->is_top_unique_sql = false;
+    unique_sql_cxt->unique_sql_sort_instr = (unique_sql_instr*)palloc0(sizeof(unique_sql_instr));
+    unique_sql_cxt->unique_sql_hash_instr = (unique_sql_instr*)palloc0(sizeof(unique_sql_instr));
+    unique_sql_cxt->unique_sql_sort_instr->has_sorthash = false;
+    unique_sql_cxt->unique_sql_hash_instr->has_sorthash = false;
 }
 
 static void knl_u_percentile_init(knl_u_percentile_context* percentile_cxt)

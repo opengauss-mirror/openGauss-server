@@ -215,12 +215,11 @@ extern void tuplesort_markpos(Tuplesortstate* state);
 extern void tuplesort_restorepos(Tuplesortstate* state);
 
 extern void sort_count(Tuplesortstate* state);
-
 extern int64 tuplesort_get_avgwidth(Tuplesortstate* state);
 extern bool tuplesort_get_busy_status(Tuplesortstate* state);
 extern int tuplesort_get_spread_num(Tuplesortstate* state);
 extern bool tuplesort_skiptuples(Tuplesortstate* state, int64 ntuples, bool forward);
-
+extern void UpdateUniqueSQLSortStats(Tuplesortstate* state, TimestampTz* start_time);
 /*
  * Return the int64 value of tuplesortstate->peakMemorySize
  */

@@ -38,6 +38,7 @@
 #include "optimizer/streamplan.h"
 #include "pgstat.h"
 #include "pgxc/pgxc.h"
+#include "instruments/instr_unique_sql.h"
 #include "utils/anls_opt.h"
 #include "utils/atomic.h"
 #include "utils/dynahash.h"
@@ -99,6 +100,8 @@ TupleTableSlot* ExecHash(void)
  */
 Node* MultiExecHash(HashState* node)
 {
+    TimestampTz start_time = 0;
+
     /* must provide our own instrumentation support */
     if (node->ps.instrument) {
         InstrStartNode(node->ps.instrument);
@@ -107,11 +110,17 @@ Node* MultiExecHash(HashState* node)
         node->hashtable->spill_size = &node->spill_size;
     }
 
+    /* init unique sql hash state if needed*/
+    UpdateUniqueSQLHashStats(NULL, &start_time);
+
     if (node->parallel_state != NULL) {
         MultiExecParallelHash(node);
     } else {
         MultiExecPrivateHash(node);
     }
+
+    /* analyze hash table information for unique sql hash state */
+    UpdateUniqueSQLHashStats(NULL, &start_time);
 
     /* must provide our own instrumentation support */
     if (node->ps.instrument) {
@@ -191,7 +200,6 @@ static void MultiExecPrivateHash(HashState* node)
     if (anls_opt_is_on(ANLS_HASH_CONFLICT)) {
         ExecHashTableStats(hashtable, node->ps.plan->plan_node_id);
     }
-    
     hashtable->partialTuples = hashtable->totalTuples;
     /*
      * We do not return the hash table directly because it's not a subtype of
@@ -511,6 +519,7 @@ HashJoinTable ExecHashTableCreate(HashState* state, List* hashOperators, bool ke
     hashtable->outerBatchFile = NULL;
     hashtable->spaceUsed = 0;
     hashtable->spacePeak = 0;
+    hashtable->spill_count = 0;
     hashtable->spaceAllowed = (int64)space_allowed;
 
     hashtable->spaceUsedSkew = 0;
@@ -1720,6 +1729,7 @@ void ExecHashTableInsert(
         Assert(batchno > hashtable->curbatch);
         ExecHashJoinSaveTuple(tuple, hashvalue, &hashtable->innerBatchFile[batchno]);
 
+        hashtable->spill_count += 1;
         *hashtable->spill_size += sizeof(uint32) + tuple->t_len;
         pgstat_increase_session_spill_size(sizeof(uint32) + tuple->t_len);
     }
@@ -3362,7 +3372,12 @@ void ExecHashGetInstrumentation(Instrumentation* instrument, HashJoinTable hasht
  */
 void ExecShutdownHash(HashState* node)
 {
-    if (node->instrument && node->hashtable) {
-        ExecHashGetInstrumentation(node->instrument, node->hashtable);
+    if (node->hashtable) {
+        if (node->instrument) {
+            ExecHashGetInstrumentation(node->instrument, node->hashtable);
+        }
+
+        /* update unique sql hash work mem info when hash finish */
+        UpdateUniqueSQLHashStats(node->hashtable, NULL);
     }
 }

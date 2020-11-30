@@ -26,8 +26,10 @@
 #ifndef INSTR_UNIQUE_SQL_H
 #define INSTR_UNIQUE_SQL_H
 
+#include "nodes/execnodes.h"
 #include "nodes/parsenodes.h"
 #include "pgstat.h"
+#include "utils/batchsort.h"
 
 /* Unique SQL track type */
 typedef enum {
@@ -35,6 +37,14 @@ typedef enum {
     UNIQUE_SQL_TRACK_TOP, /* only top SQL will be tracked */
     UNIQUE_SQL_TRACK_ALL  /* later maybe support parent and child SQLs */
 } UniqueSQLTrackType;
+
+typedef struct UniqueSQLWorkMemInfo {
+    pg_atomic_uint64 counts; /* # of operation during unique sql */
+    int64 used_work_mem; /* space of used work mem by kbs */
+    int64 total_time; /* execution time of sort/hash operation */
+    pg_atomic_uint64 spill_counts; /* # of spill times during the sort/hash operation */
+    pg_atomic_uint64 spill_size;    /* spill size for temp table by kbs */
+} UniqueSQLWorkMemInfo;
 
 extern int GetUniqueSQLTrackType();
 
@@ -132,4 +142,6 @@ bool need_update_unique_sql_row_stat();
 void ResetCurrentUniqueSQL(bool need_reset_cn_id = false);
 bool isUniqueSQLContextInvalid();
 void UpdateSingleNodeByPassUniqueSQLStat(bool isTopLevel);
+void UpdateUniqueSQLHashStats(HashJoinTable hashtable, TimestampTz* start_time);
+void UpdateUniqueSQLVecSortStats(Batchsortstate* state, uint64 spill_count, TimestampTz* start_time);
 #endif
