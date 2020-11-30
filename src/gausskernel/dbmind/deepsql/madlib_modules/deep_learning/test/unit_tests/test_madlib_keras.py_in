@@ -1,0 +1,1681 @@
+# coding=utf-8
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+m4_changequote(`<!', `!>')
+
+import sys
+import numpy as np
+import os
+from os import path
+# Add convex module to the pythonpath.
+sys.path.append(path.dirname(path.dirname(path.dirname(path.dirname(path.abspath(__file__))))))
+sys.path.append(path.dirname(path.dirname(path.dirname(path.abspath(__file__)))))
+
+import keras
+from keras.models import *
+from keras.layers import *
+import unittest
+from mock import *
+import plpy_mock as plpy
+
+# helper for multiplying array by int
+def mult(k,arr):
+    return [ k*a for a in arr ]
+
+class MadlibKerasFitTestCase(unittest.TestCase):
+    def setUp(self):
+        self.plpy_mock = Mock(spec='error')
+        patches = {
+            'plpy': plpy
+        }
+
+        self.plpy_mock_execute = MagicMock()
+        plpy.execute = self.plpy_mock_execute
+
+        self.module_patcher = patch.dict('sys.modules', patches)
+        self.module_patcher.start()
+        import madlib_keras
+        self.subject = madlib_keras
+
+        self.model = Sequential()
+        self.model.add(Conv2D(2, kernel_size=(1, 1), activation='relu',
+                         input_shape=(1,1,1,), padding='same'))
+        self.model.add(Flatten())
+
+        self.compile_params = "optimizer=SGD(lr=0.01, decay=1e-6, nesterov=True), loss='categorical_crossentropy', metrics=['accuracy']"
+        self.fit_params = "batch_size=1, epochs=1"
+        self.model_weights = [3,4,5,6]
+        self.serialized_weights = np.array(self.model_weights, dtype=np.float32
+                                           ).tostring()
+        self.dist_key_mapping = [0,1,2]
+        self.accessible_gpus_for_seg = [0]
+
+        self.independent_var_real = [[[[0.5]]]] * 10
+        self.dependent_var_int = [[0,1]] * 10
+
+        # Params as bytea
+        self.independent_var = np.array(self.independent_var_real, dtype=np.float32).tobytes()
+        self.dependent_var = np.array(self.dependent_var_int, dtype=np.int16).tobytes()
+
+        self.independent_var_shape = [10,1,1,1]
+        self.dependent_var_shape = [10,2]
+        # We test on segment 0, which has 3 buffers filled with 10 identical
+        #  images each, or 30 images total
+        self.total_images_per_seg = [3*len(self.dependent_var_int),20,40]
+
+        self.dummy_prev_weights = 'dummy weights'
+
+    def tearDown(self):
+        self.module_patcher.stop()
+
+    def _test_fit_transition_first_buffer_pass(self, is_platform_pg):
+        #TODO should we mock tensorflow's close_session and keras'
+        # clear_session instead of mocking the function `K.clear_session`
+        self.subject.K.set_session = Mock()
+        self.subject.K.clear_session = Mock()
+        self.subject.is_platform_pg = Mock(return_value = is_platform_pg)
+        starting_image_count = 0
+        ending_image_count = len(self.dependent_var_int)
+
+        # last iteration Call
+        previous_state = np.array(self.model_weights, dtype=np.float32)
+
+        k = {'SD': {}}
+
+        new_state = self.subject.fit_transition(
+            None, self.dependent_var, self.independent_var,
+            self.dependent_var_shape, self.independent_var_shape,
+            self.model.to_json(), self.compile_params, self.fit_params, 0,
+            self.dist_key_mapping, 0, 4, self.total_images_per_seg, False,
+            self.accessible_gpus_for_seg, previous_state.tostring(), True, **k)
+
+        image_count = new_state
+        self.assertEqual(ending_image_count, image_count)
+        # set_session is always called
+        self.assertEqual(1, self.subject.K.set_session.call_count)
+        # Clear session and sess.close must not get called for the first buffer
+        self.assertEqual(0, self.subject.K.clear_session.call_count)
+        self.assertTrue(k['SD']['segment_model'])
+
+        # Non-last iteration Call
+        self.subject.K.set_session.reset_mock()
+        self.subject.K.clear_session.reset_mock()
+        previous_state = np.array(self.model_weights, dtype=np.float32)
+
+        k = {'SD' : {}}
+
+        new_state = self.subject.fit_transition(
+            None, self.dependent_var, self.independent_var,
+            self.dependent_var_shape, self.independent_var_shape,
+            self.model.to_json(), self.compile_params, self.fit_params, 0,
+            self.dist_key_mapping, 0, 4, self.total_images_per_seg, False,
+            self.accessible_gpus_for_seg, previous_state.tostring(), False, **k)
+
+        image_count = new_state
+
+        self.assertEqual(ending_image_count, image_count)
+        # set_session is always called
+        self.assertEqual(1, self.subject.K.set_session.call_count)
+        # Clear session and sess.close must not get called for the first buffer
+        self.assertEqual(0, self.subject.K.clear_session.call_count)
+        self.assertTrue(k['SD']['segment_model'])
+
+    def test_fit_transition_multiple_model_first_buffer_pass(self):
+        #TODO should we mock tensorflow's close_session and keras'
+        # clear_session instead of mocking the function `K.clear_session`
+        self.subject.K.set_session = Mock()
+        self.subject.K.clear_session = Mock()
+        starting_image_count = 0
+        ending_image_count = len(self.dependent_var_int)
+
+        previous_weights = np.array(self.model_weights, dtype=np.float32)
+
+        k = {'SD': {}}
+
+        new_state = self.subject.fit_transition(
+            None, self.dependent_var, self.independent_var,
+            self.dependent_var_shape, self.independent_var_shape,
+            self.model.to_json(), self.compile_params, self.fit_params, 0,
+            self.dist_key_mapping, 0, 4, self.total_images_per_seg, False,
+            self.accessible_gpus_for_seg, previous_weights.tostring(), True, True, **k)
+
+        image_count = new_state
+        self.assertEqual(ending_image_count, image_count)
+        # set_session is always called
+        self.assertEqual(1, self.subject.K.set_session.call_count)
+        # Clear session must not be called for the first buffer
+        self.assertEqual(0, self.subject.K.clear_session.call_count)
+        self.assertTrue(k['SD']['segment_model'])
+
+    def _test_fit_transition_middle_buffer_pass(self, is_platform_pg):
+        #TODO should we mock tensorflow's close_session and keras'
+        # clear_session instead of mocking the function `K.clear_session`
+        self.subject.K.set_session = Mock()
+        self.subject.K.clear_session = Mock()
+        self.subject.is_platform_pg = Mock(return_value = is_platform_pg)
+
+        starting_image_count = len(self.dependent_var_int)
+        ending_image_count = starting_image_count + len(self.dependent_var_int)
+
+        # last iteration Call
+
+
+        self.subject.compile_and_set_weights(self.model, self.compile_params,
+                                             '/cpu:0', self.serialized_weights)
+        k = {'SD': {'segment_model': self.model, 'sess': Mock()}}
+
+        state = starting_image_count
+        new_state = self.subject.fit_transition(
+            state, self.dependent_var, self.independent_var,
+            self.dependent_var_shape, self.independent_var_shape,
+            self.model.to_json(), None, self.fit_params, 0,
+            self.dist_key_mapping, 0, 4, self.total_images_per_seg, False,
+            self.accessible_gpus_for_seg, self.dummy_prev_weights, True, **k)
+
+        image_count = new_state
+        self.assertEqual(ending_image_count, image_count)
+
+        # set_session is always called
+        self.assertEqual(1, self.subject.K.set_session.call_count)
+        # Clear session and sess.close must not get called for the middle buffer
+        self.assertEqual(0, self.subject.K.clear_session.call_count)
+
+        # Non-last iteration Call
+        self.subject.K.set_session.reset_mock()
+        self.subject.K.clear_session.reset_mock()
+
+        self.subject.compile_and_set_weights(self.model, self.compile_params,
+                                             '/cpu:0', self.serialized_weights)
+        k = {'SD': {'segment_model': self.model, 'sess': Mock()}}
+
+        state = starting_image_count
+        new_state = self.subject.fit_transition(
+            state, self.dependent_var, self.independent_var,
+            self.dependent_var_shape, self.independent_var_shape,
+            self.model.to_json(), None, self.fit_params, 0,
+            self.dist_key_mapping, 0, 4, self.total_images_per_seg, False,
+            self.accessible_gpus_for_seg, self.dummy_prev_weights, False, **k)
+
+        image_count = new_state
+        self.assertEqual(ending_image_count, image_count)
+        # set_session is always called
+        self.assertEqual(1, self.subject.K.set_session.call_count)
+        # Clear session and sess.close must not get called for the middle buffer
+        self.assertEqual(0, self.subject.K.clear_session.call_count)
+
+    def test_fit_transition_multiple_model_middle_buffer_pass(self):
+        #TODO should we mock tensorflow's close_session and keras'
+        # clear_session instead of mocking the function `K.clear_session`
+        self.subject.K.set_session = Mock()
+        self.subject.K.clear_session = Mock()
+
+        starting_image_count = len(self.dependent_var_int)
+        ending_image_count = starting_image_count + len(self.dependent_var_int)
+
+        # last iteration Call
+
+
+        self.subject.compile_and_set_weights(self.model, self.compile_params,
+                                             '/cpu:0', self.serialized_weights)
+        k = {'SD': {'segment_model': self.model, 'sess': Mock()}}
+
+        state = starting_image_count
+        new_state = self.subject.fit_transition(
+            state, self.dependent_var, self.independent_var,
+            self.dependent_var_shape, self.independent_var_shape,
+            self.model.to_json(), None, self.fit_params, 0,
+            self.dist_key_mapping, 0, 4, self.total_images_per_seg, False,
+            self.accessible_gpus_for_seg, self.dummy_prev_weights, True, True, **k)
+
+        image_count = new_state
+        self.assertEqual(ending_image_count, image_count)
+        # set_session is always called
+        self.assertEqual(1, self.subject.K.set_session.call_count)
+        # Clear session and sess.close must not get called for the middle buffer
+        self.assertEqual(0, self.subject.K.clear_session.call_count)
+
+    def _test_fit_transition_last_buffer_pass(self, is_platform_pg):
+        #TODO should we mock tensorflow's close_session and keras'
+        # clear_session instead of mocking the function `K.clear_session`
+        self.subject.K.set_session = Mock()
+        self.subject.K.clear_session = Mock()
+        self.subject.is_platform_pg = Mock(return_value = is_platform_pg)
+
+        starting_image_count = 2*len(self.dependent_var_int)
+        ending_image_count = starting_image_count + len(self.dependent_var_int)
+
+        # last iteration Call
+
+        multiplied_weights = mult(self.total_images_per_seg[0],self.model_weights)
+
+        self.subject.compile_and_set_weights(self.model, self.compile_params,
+                                             '/cpu:0', self.serialized_weights)
+        k = {'SD': {'segment_model' :self.model, 'sess': Mock()}}
+
+        state = starting_image_count
+        new_state = self.subject.fit_transition(
+            state, self.dependent_var, self.independent_var,
+            self.dependent_var_shape, self.independent_var_shape,
+            self.model.to_json(), None, self.fit_params, 0,
+            self.dist_key_mapping, 0, 4, self.total_images_per_seg, False,
+            self.accessible_gpus_for_seg, self.dummy_prev_weights, True, **k)
+
+        state = np.fromstring(new_state, dtype=np.float32)
+        image_count = state[0]
+        weights = np.rint(state[1:]).astype(np.int)
+        self.assertEqual(ending_image_count, image_count)
+        # weights should be multiplied by final image count
+        self.assertTrue((multiplied_weights == weights).all())
+        # set_session is always called
+        self.assertEqual(1, self.subject.K.set_session.call_count)
+        # Clear session and sess.close must get called for the last buffer in gpdb,
+        #  but not in postgres
+        self.assertEqual(1, self.subject.K.clear_session.call_count)
+
+        # Non-last iteration Call
+        self.subject.K.set_session.reset_mock()
+        self.subject.K.clear_session.reset_mock()
+
+        multiplied_weights = mult(self.total_images_per_seg[0],self.model_weights)
+
+        self.subject.compile_and_set_weights(self.model, self.compile_params,
+                                             '/cpu:0', self.serialized_weights)
+        k = {'SD': {'segment_model' :self.model, 'sess': Mock()}}
+
+        state = starting_image_count
+        new_state = self.subject.fit_transition(
+            state, self.dependent_var, self.independent_var,
+            self.dependent_var_shape, self.independent_var_shape,
+            self.model.to_json(), None, self.fit_params, 0,
+            self.dist_key_mapping, 0, 4, self.total_images_per_seg, False,
+            self.accessible_gpus_for_seg, self.dummy_prev_weights, False, **k)
+
+        state = np.fromstring(new_state, dtype=np.float32)
+        image_count = state[0]
+        weights = np.rint(state[1:]).astype(np.int)
+        self.assertEqual(ending_image_count, image_count)
+        # weights should be multiplied by final image count
+        self.assertTrue((multiplied_weights == weights).all())
+        # set_session is always called
+        self.assertEqual(1, self.subject.K.set_session.call_count)
+        # Clear session and sess.close must get called for the last buffer in gpdb,
+        #  but not in postgres
+        self.assertEqual(0, self.subject.K.clear_session.call_count)
+
+    def test_fit_transition_multiple_model_last_buffer_pass(self):
+        #TODO should we mock tensorflow's close_session and keras'
+        # clear_session instead of mocking the function `K.clear_session`
+        self.subject.K.set_session = Mock()
+        self.subject.K.clear_session = Mock()
+
+        starting_image_count = 2*len(self.dependent_var_int)
+        ending_image_count = starting_image_count + len(self.dependent_var_int)
+
+        # last iteration Call
+        self.subject.compile_and_set_weights(self.model, self.compile_params,
+                                             '/cpu:0', self.serialized_weights)
+        k = {'SD': {'segment_model' :self.model, 'sess': Mock()}}
+
+        state = starting_image_count
+        new_state = self.subject.fit_transition(
+            state   , self.dependent_var, self.independent_var,
+            self.dependent_var_shape, self.independent_var_shape,
+            self.model.to_json(), None, self.fit_params, 0,
+            self.dist_key_mapping, 0, 4, self.total_images_per_seg, False,
+            self.accessible_gpus_for_seg, self.dummy_prev_weights, True, True, **k)
+
+        state = np.fromstring(new_state, dtype=np.float32)
+        weights = np.rint(state[0:]).astype(np.int)
+
+        ## image count should not be added to the final state of
+        # fit multiple
+        self.assertEqual(len(self.model_weights), len(weights))
+
+        # set_session is always called
+        self.assertEqual(1, self.subject.K.set_session.call_count)
+        # Clear session and sess.close must get called for the last buffer in gpdb,
+        #  but not in postgres
+        self.assertEqual(1, self.subject.K.clear_session.call_count)
+
+    def test_fit_transition_first_buffer_pass_pg(self):
+        self._test_fit_transition_first_buffer_pass(True)
+
+    def test_fit_transition_first_buffer_pass_gpdb(self):
+        self._test_fit_transition_first_buffer_pass(False)
+
+    def test_fit_transition_middle_buffer_pass_pg(self):
+        self._test_fit_transition_middle_buffer_pass(True)
+
+    def test_fit_transition_middle_buffer_pass_gpdb(self):
+        self._test_fit_transition_middle_buffer_pass(False)
+
+    def test_fit_transition_last_buffer_pass_pg(self):
+        self._test_fit_transition_last_buffer_pass(True)
+
+    def test_fit_transition_last_buffer_pass_gpdb(self):
+        self._test_fit_transition_last_buffer_pass(False)
+
+    def test_fit_transition_first_tuple_none_ind_var_dep_var(self):
+        k = {}
+        self.assertEqual('dummy_state',
+                         self.subject.fit_transition('dummy_state', [0], None,
+                                                     'noshape', 'noshape',
+                                                     'dummy_model_json', "foo", "bar",
+                                                     1, [0,1,2], 0, 4, [3,3,3], False,
+                                                     [0], 'dummy_prev_state', **k))
+        self.assertEqual('dummy_state',
+                         self.subject.fit_transition('dummy_state', None, [[0.5]],
+                                                     'noshape', 'noshape',
+                                                     'dummy_model_json', "foo", "bar",
+                                                     1, [0,1,2], 0, 4, [3,3,3], False,
+                                                     [0], 'dummy_prev_state', **k))
+        self.assertEqual('dummy_state',
+                         self.subject.fit_transition('dummy_state', None, None,
+                                                     'noshape', 'noshape',
+                                                     'dummy_model_json', "foo", "bar",
+                                                     1, [0,1,2], 0, 4, [3,3,3], False,
+                                                     [0], 'dummy_prev_state', **k))
+
+    def test_fit_merge(self):
+        image_count = self.total_images_per_seg[0]
+        state1 = [image_count]
+        state1.extend(mult(3,self.model_weights))
+        state1 = np.array(state1, dtype=np.float32)
+        state2 = [image_count+30]
+        state2.extend(mult(2,self.model_weights))
+        state2 = np.array(state2, dtype=np.float32)
+        merged_state = self.subject.fit_merge(state1.tostring(),state2.tostring())
+        state = np.fromstring(merged_state, dtype=np.float32)
+        image_count_total = state[0]
+        weights = np.rint(state[1:]).astype(np.int)
+
+        self.assertEqual( 2*image_count+30 , image_count_total )
+        self.assertTrue( (mult(5,self.model_weights) == weights).all())
+
+    def test_fit_merge_none_first(self):
+        image_count = self.total_images_per_seg[0]
+        input_state = [image_count]
+        input_state.extend(self.model_weights)
+        input_state = np.array(input_state, dtype=np.float32)
+        merged_state = self.subject.fit_merge(None, input_state.tostring())
+        state = np.fromstring(merged_state, dtype=np.float32)
+        image_count_total = state[0]
+        weights = np.rint(state[1:]).astype(np.int)
+
+        self.assertEqual(image_count, image_count_total)
+        self.assertTrue((self.model_weights == weights).all())
+
+    def test_fit_merge_none_second(self):
+        image_count = self.total_images_per_seg[0]
+        input_state = [image_count]
+        input_state.extend(self.model_weights)
+        input_state = np.array(input_state, dtype=np.float32)
+        merged_state = self.subject.fit_merge(input_state.tostring(), None)
+        state = np.fromstring(merged_state, dtype=np.float32)
+        image_count_total = state[0]
+        weights = np.rint(state[1:]).astype(np.int)
+
+        self.assertEqual(image_count, image_count_total)
+        self.assertTrue((self.model_weights == weights).all())
+
+    def test_fit_merge_both_none(self):
+        result = self.subject.fit_merge(None,None)
+        self.assertEqual(None, result)
+
+    def test_fit_final(self):
+        image_count = self.total_images_per_seg[0]
+        input_state = [image_count]
+        input_state.extend(mult(image_count,self.model_weights))
+        input_state = np.array(input_state, dtype=np.float32)
+
+        output_state = self.subject.fit_final(input_state.tostring())
+        output_state = np.fromstring(output_state, dtype=np.float32)
+        weights = np.rint(output_state).astype(np.int)
+
+        self.assertTrue((self.model_weights == weights).all())
+
+    def test_fit_final_none(self):
+        result = self.subject.fit_final(None)
+        self.assertEqual(result, None)
+
+    def test_fit_final_image_count_zero(self):
+        input_state = [0]
+        input_state.extend(self.model_weights)
+        input_state = np.array(input_state, dtype=np.float32)
+
+        with self.assertRaises(plpy.PLPYException):
+            result = self.subject.fit_final(input_state.tostring())
+
+    def test_should_compute_metrics_this_iter_last_iter_case1(self):
+        res = self.subject.should_compute_metrics_this_iter(5, 5, 5)
+        self.assertEqual(True, res)
+    def test_should_compute_metrics_this_iter_last_iter_case2(self):
+        res = self.subject.should_compute_metrics_this_iter(5, 3, 5)
+        self.assertEqual(True, res)
+    def test_should_compute_metrics_this_iter_before_interval(self):
+        res = self.subject.should_compute_metrics_this_iter(1, 3, 5)
+        self.assertEqual(False, res)
+    def test_should_compute_metrics_this_iter_after_interval(self):
+        res = self.subject.should_compute_metrics_this_iter(4, 3, 5)
+        self.assertEqual(False, res)
+    def test_should_compute_metrics_this_iter_at_interval(self):
+        res = self.subject.should_compute_metrics_this_iter(3, 3, 5)
+        self.assertEqual(True, res)
+    def test_should_compute_metrics_this_iter_every_iter(self):
+        res = self.subject.should_compute_metrics_this_iter(2, 1, 5)
+        self.assertEqual(True, res)
+
+
+class InternalKerasPredictTestCase(unittest.TestCase):
+    def setUp(self):
+        self.plpy_mock = Mock(spec='error')
+        patches = {
+            'plpy': plpy
+        }
+
+        self.plpy_mock_execute = MagicMock()
+        plpy.execute = self.plpy_mock_execute
+
+        self.module_patcher = patch.dict('sys.modules', patches)
+        self.module_patcher.start()
+        import madlib_keras_predict
+        self.subject = madlib_keras_predict
+
+        self.model = Sequential()
+        self.model.add(Conv2D(2, kernel_size=(1, 1), activation='relu',
+                              input_shape=(1,1,1,), padding='same'))
+        self.model.add(Flatten())
+
+        self.all_seg_ids = [0,1,2]
+
+        self.independent_var = [[[240]]]
+        self.total_images_per_seg = [3,3,4]
+        self.subject.K.set_session = Mock()
+        self.subject.clear_keras_session = Mock()
+
+
+    def tearDown(self):
+        self.module_patcher.stop()
+
+    def test_predict_first_image_pass_gpdb(self):
+        self.subject.is_platform_pg = Mock(return_value = False)
+        model_weights = [1, 2, 3, 4]
+        serialized_weights = np.array(model_weights, dtype=np.float32).tostring()
+
+        k = {'SD': {}}
+        is_response = True
+        result = self.subject.internal_keras_predict(
+            self.independent_var, self.model.to_json(),
+            serialized_weights, is_response, 255, 0, self.all_seg_ids,
+            self.total_images_per_seg, False, 0, 4, **k)
+        self.assertEqual(1, len(result))
+        self.assertEqual(1,  k['SD']['row_count'])
+        self.assertEqual(True, 'segment_model_predict' in k['SD'])
+
+    def test_predict_middle_image_pass_gpdb(self):
+        self.subject.is_platform_pg = Mock(return_value = False)
+
+        k = {'SD': { 'row_count': 1}}
+        k['SD']['segment_model_predict'] = self.model
+        is_response = True
+        result = self.subject.internal_keras_predict(
+            self.independent_var, None, None, is_response, 255, 0,
+            self.all_seg_ids, self.total_images_per_seg, False, 0, 4, **k)
+        self.assertEqual(1, len(result))
+        self.assertEqual(2,  k['SD']['row_count'])
+        self.assertEqual(True, 'segment_model_predict' in k['SD'])
+
+    def test_predict_last_image_pass_gpdb(self):
+        self.subject.is_platform_pg = Mock(return_value = False)
+        self.model.add(Dense(3))
+
+        k = {'SD': { 'row_count': 2}}
+        k['SD']['segment_model_predict'] = self.model
+        is_response = True
+        result = self.subject.internal_keras_predict(
+            self.independent_var, None, None, is_response, 255, 0,
+            self.all_seg_ids, self.total_images_per_seg, False, 0, 4, **k)
+        self.assertEqual(1, len(result))
+        self.assertEqual(False, 'row_count' in k['SD'])
+        self.assertEqual(False, 'segment_model_predict' in k['SD'])
+
+        k = {'SD': { 'row_count': 2}}
+        k['SD']['segment_model_predict'] = self.model
+        is_response = False
+        result = self.subject.internal_keras_predict(
+            self.independent_var, None, None, is_response, 255, 0,
+            self.all_seg_ids, self.total_images_per_seg, False, 0, 4, **k)
+
+        # we except len(result) to be 3 because we have 3 dense layers in the
+        # architecture
+        self.assertEqual(3, len(result))
+        self.assertEqual(False, 'row_count' in k['SD'])
+        self.assertEqual(False, 'segment_model_predict' in k['SD'])
+
+
+    def test_predict_error_should_clear_sd(self):
+        self.subject.is_platform_pg = Mock(return_value = False)
+        self.model.add(Dense(3))
+
+        # inject error by passing 0 as the normalizing const so that we get a
+        # divide by zero error
+        normalizing_const = 0
+        k = {'SD':{}}
+        is_response = True
+        with self.assertRaises(plpy.PLPYException):
+            self.subject.internal_keras_predict(
+                self.independent_var, None, None, is_response, normalizing_const,
+                0, self.all_seg_ids, self.total_images_per_seg, False, 0, 4, **k)
+        self.assertEqual(False, 'row_count' in k['SD'])
+        self.assertEqual(False, 'segment_model_predict' in k['SD'])
+
+
+class MadlibKerasPredictBYOMTestCase(unittest.TestCase):
+    def setUp(self):
+        self.plpy_mock = Mock(spec='error')
+        patches = {
+            'plpy': plpy
+        }
+
+        self.plpy_mock_execute = MagicMock()
+        plpy.execute = self.plpy_mock_execute
+
+        self.module_patcher = patch.dict('sys.modules', patches)
+        self.module_patcher.start()
+        self.num_classes = 5
+        self.model = Sequential()
+        self.model.add(Conv2D(2, kernel_size=(1, 1), activation='relu',
+                              input_shape=(1,1,1,), padding='same'))
+        self.model.add(Dense(self.num_classes))
+
+        self.pred_type = 'prob'
+        self.use_gpus = False
+        self.class_values = ['foo', 'bar', 'baaz', 'foo2', 'bar2']
+        self.normalizing_const = 255.0
+
+        import madlib_keras_predict
+        self.module = madlib_keras_predict
+        self.module.get_model_arch_weights = Mock(return_value=(
+            self.model.to_json(), 'weights'))
+        self.module.InputValidator.validate_predict_byom_tables = Mock()
+        self.module.InputValidator.validate_input_shape = Mock()
+        self.module.BasePredict.call_internal_keras = Mock()
+
+    def tearDown(self):
+        self.module_patcher.stop()
+
+    def test_predictbyom_defaults_1(self):
+        self.module.get_accessible_gpus_for_seg = Mock(return_value = [2,2,2])
+        res = self.module.PredictBYOM('schema_madlib', 'model_arch_table',
+                                 'model_id', 'test_table', 'id_col',
+                                 'independent_varname', 'output_table', None,
+                                 True, None, None)
+        self.assertEqual('response', res.pred_type)
+        self.assertEqual(2, res.gpus_per_host)
+        self.assertEqual([0,1,2,3,4], res.class_values)
+        self.assertEqual(1.0, res.normalizing_const)
+        self.assertEqual('text', res.dependent_vartype)
+
+    def test_predictbyom_defaults_2(self):
+        res = self.module.PredictBYOM('schema_madlib', 'model_arch_table',
+                                       'model_id', 'test_table', 'id_col',
+                                       'independent_varname', 'output_table',
+                                       self.pred_type, self.use_gpus,
+                                       self.class_values, self.normalizing_const)
+        self.assertEqual('prob', res.pred_type)
+        self.assertEqual(0, res.gpus_per_host)
+        self.assertEqual(['foo', 'bar', 'baaz', 'foo2', 'bar2'], res.class_values)
+        self.assertEqual(255.0, res.normalizing_const)
+        self.assertEqual('double precision', res.dependent_vartype)
+
+    def test_predictbyom_exception_invalid_params(self):
+        with self.assertRaises(plpy.PLPYException) as error:
+            self.module.PredictBYOM('schema_madlib', 'model_arch_table',
+                                     'model_id', 'test_table', 'id_col',
+                                     'independent_varname', 'output_table',
+                                     'invalid_pred_type', self.use_gpus,
+                                     self.class_values, self.normalizing_const)
+        self.assertIn('invalid_pred_type', str(error.exception))
+
+        with self.assertRaises(plpy.PLPYException) as error:
+            self.module.PredictBYOM('schema_madlib', 'model_arch_table',
+                                     'model_id', 'test_table', 'id_col',
+                                     'independent_varname', 'output_table',
+                                     self.pred_type, self.use_gpus,
+                                     ["foo", "bar", "baaz"], self.normalizing_const)
+        self.assertIn('class values', str(error.exception).lower())
+
+        with self.assertRaises(plpy.PLPYException) as error:
+            self.module.PredictBYOM('schema_madlib', 'model_arch_table',
+                                     'model_id', 'test_table', 'id_col',
+                                     'independent_varname', 'output_table',
+                                     self.pred_type, self.use_gpus,
+                                     self.class_values, 0)
+        self.assertIn('normalizing const', str(error.exception).lower())
+
+
+class MadlibKerasWrapperTestCase(unittest.TestCase):
+    def setUp(self):
+        self.plpy_mock = Mock(spec='error')
+        patches = {
+            'plpy': plpy
+        }
+
+        self.plpy_mock_execute = MagicMock()
+        plpy.execute = self.plpy_mock_execute
+
+        self.module_patcher = patch.dict('sys.modules', patches)
+        self.module_patcher.start()
+
+        import madlib_keras_wrapper
+        self.subject = madlib_keras_wrapper
+
+        self.use_gpus = False
+
+    def tearDown(self):
+        self.module_patcher.stop()
+
+    def test_get_gpu_memory_fraction(self):
+
+        gpus_per_host = 4
+        segments_per_host = 4
+        result = self.subject.get_gpu_memory_fraction(gpus_per_host, segments_per_host)
+        self.assertEqual(result, 0.9)
+
+        gpus_per_host = 10
+        segments_per_host = 4
+        result = self.subject.get_gpu_memory_fraction(gpus_per_host, segments_per_host)
+        self.assertEqual(result, 0.9)
+
+        gpus_per_host = 2
+        segments_per_host = 6
+        result = self.subject.get_gpu_memory_fraction(gpus_per_host, segments_per_host)
+        self.assertEqual(result, 0.3)
+
+        gpus_per_host = 1
+        segments_per_host = 4
+        result = self.subject.get_gpu_memory_fraction(gpus_per_host, segments_per_host)
+        self.assertEqual(result, 0.225)
+
+    def test_get_device_name_and_set_cuda_env_postgres(self):
+        self.subject.is_platform_pg = Mock(return_value = True)
+
+        seg_id = -1
+        gpus_per_host = 3
+
+        self.assertEqual('/gpu:0', self.subject.get_device_name_and_set_cuda_env(
+            gpus_per_host, seg_id ))
+        self.assertEqual('0,1,2', os.environ['CUDA_VISIBLE_DEVICES'])
+
+        gpus_per_host = 0
+        self.assertEqual('/cpu:0', self.subject.get_device_name_and_set_cuda_env(
+            gpus_per_host, seg_id ))
+        self.assertEqual('-1', os.environ['CUDA_VISIBLE_DEVICES'])
+
+    def test_get_device_name_and_set_cuda_env_gpdb(self):
+        self.subject.is_platform_pg = Mock(return_value = False)
+
+        seg_id=3
+        gpus_per_host=2
+        self.assertEqual('/gpu:0', self.subject.get_device_name_and_set_cuda_env(
+            gpus_per_host, seg_id))
+        self.assertEqual('1', os.environ['CUDA_VISIBLE_DEVICES'])
+
+        gpus_per_host=0
+        self.assertEqual('/cpu:0', self.subject.get_device_name_and_set_cuda_env(
+            gpus_per_host, seg_id))
+        self.assertEqual('-1', os.environ['CUDA_VISIBLE_DEVICES'])
+
+
+    def test_split_and_strip(self):
+        self.assertEqual(('a','b'), self.subject.split_and_strip(' a = b '))
+
+    def test_parse_optimizer(self):
+        opt_name = 'SGD'
+        final_args = {'lr':0.01, 'decay':1e-6, 'nesterov':True}
+        compile_dict = {}
+        compile_dict['optimizer']='SGD(lr=0.01, decay=1e-6, nesterov=True)'
+        result_name, result_params = self.subject.parse_optimizer(compile_dict)
+
+        self.assertEqual(result_name, opt_name)
+        self.assertDictEqual(result_params, final_args)
+
+    def test_validate_and_literal_eval_keys(self):
+        test_dict = {'batch_size':'2', 'epochs':'1', 'verbose':'0'}
+        target_dict = {'batch_size':2, 'epochs':1, 'verbose':0}
+        literal_eval_fit_params = ['batch_size','epochs','verbose','shuffle',
+                           'class_weight','initial_epoch','steps_per_epoch']
+        accepted_fit_params = literal_eval_fit_params + ['shuffle']
+        result_params = self.subject.validate_and_literal_eval_keys(
+                            test_dict,
+                            literal_eval_fit_params,
+                            accepted_fit_params)
+        self.assertDictEqual(result_params, target_dict)
+
+    def test_parse_and_validate_fit_params(self):
+        result = {'batch_size':2, 'epochs':1, 'verbose':0}
+        self.assertDictEqual(result, self.subject.parse_and_validate_fit_params('batch_size=2, epochs=1, verbose=0'))
+
+    def test_parse_and_validate_fit_params(self):
+        test_str = "batch_size=2, epochs=1, verbose=0"
+        fit_dict = {'batch_size':2, 'epochs':1, 'verbose':0}
+        result_params = self.subject.parse_and_validate_fit_params(test_str)
+        self.assertDictEqual(result_params, fit_dict)
+
+        test_str = "batch_size=2, epochs=1, verbose=0, shuffle = 'batch'"
+        fit_dict = {'batch_size':2, 'epochs':1, 'verbose':0, 'shuffle':'batch'}
+        result_params = self.subject.parse_and_validate_fit_params(test_str)
+        self.assertDictEqual(result_params, fit_dict)
+
+        test_str = "batch_size=2, epochs=1, verbose=0, shuffle = True"
+        fit_dict = {'batch_size':2, 'epochs':1, 'verbose':0, 'shuffle':True}
+        result_params = self.subject.parse_and_validate_fit_params(test_str)
+        self.assertDictEqual(result_params, fit_dict)
+
+        test_str = ""
+        fit_dict = {}
+        result_params = self.subject.parse_and_validate_fit_params(test_str)
+        self.assertDictEqual(result_params, fit_dict)
+
+    def test_parse_and_validate_fit_params_duplicate_params(self):
+        test_str = "batch_size=1, batch_size=10, verbose=0"
+        fit_dict = {'batch_size':10, 'verbose':0}
+        result_params = self.subject.parse_and_validate_fit_params(test_str)
+        self.assertDictEqual(result_params, fit_dict)
+
+    def test_parse_and_validate_fit_params_invalid_fit_param_fail(self):
+        test_str = "does_not_exist=2, epochs=1, verbose=0"
+        with self.assertRaises(plpy.PLPYException) as error:
+            self.subject.parse_and_validate_fit_params(test_str)
+
+        self.assertIn('not currently accepted', str(error.exception))
+
+        test_str = "batch_size=not_lit_eval(1), epochs=1, verbose=0"
+        with self.assertRaises(plpy.PLPYException) as error:
+            self.subject.parse_and_validate_fit_params(test_str)
+
+        self.assertIn('invalid input value', str(error.exception))
+
+    def test_parse_and_validate_compile_params(self):
+        test_str = "optimizer=SGD(lr=0.01, decay=1e-6, nesterov=True), " \
+                   "loss='categorical_crossentropy', metrics=['accuracy']"
+        compile_dict = {'optimizer':'SGD(lr=0.01, decay=1e-6, nesterov=True)',
+                        'metrics':['accuracy'], 'loss':'categorical_crossentropy'}
+        opt_name,opt_args,result_params = self.subject.parse_and_validate_compile_params(test_str)
+        self.assertDictEqual(result_params, compile_dict)
+
+        # Test without the metrics
+        test_str = "optimizer=SGD(lr=0.01, decay=1e-6, nesterov=True), " \
+                   "loss='categorical_crossentropy'"
+        compile_dict = {'optimizer':'SGD(lr=0.01, decay=1e-6, nesterov=True)',
+                        'loss':'categorical_crossentropy'}
+        opt_name,opt_args,result_params = self.subject.parse_and_validate_compile_params(test_str)
+        self.assertDictEqual(result_params, compile_dict)
+
+    def test_validate_metrics_None_pass(self):
+        compile_dict = {'optimizer':'SGD(lr=0.01, decay=1e-6, nesterov=True)',
+                        'metrics':['accuracy'], 'loss':'categorical_crossentropy'}
+        self.subject._validate_metrics(compile_dict)
+
+    def test_validate_metrics_empty_pass(self):
+        compile_dict = {'optimizer':'SGD(lr=0.01, decay=1e-6, nesterov=True)',
+                        'metrics':[], 'loss':'categorical_crossentropy'}
+        self.subject._validate_metrics(compile_dict)
+
+    def test_validate_metrics_two_params_fail(self):
+        compile_dict = {'optimizer':'SGD(lr=0.01, decay=1e-6, nesterov=True)',
+                        'metrics':['accuracy','mae'], 'loss':'categorical_crossentropy'}
+        with self.assertRaises(plpy.PLPYException) as error:
+            self.subject._validate_metrics(compile_dict)
+
+    def test_validate_metrics_one_unsupported_fail(self):
+        compile_dict = {'optimizer':'SGD(lr=0.01, decay=1e-6, nesterov=True)',
+                        'metrics':['sparse_categorical_accuracy'], 'loss':'categorical_crossentropy'}
+        with self.assertRaises(plpy.PLPYException) as error:
+            self.subject._validate_metrics(compile_dict)
+
+    def test_validate_metrics_two_unsupported_fail(self):
+        compile_dict = {'optimizer':'SGD(lr=0.01, decay=1e-6, nesterov=True)',
+                        'metrics':['sparse_categorical_accuracy', 'sparse_categorical_crossentropy'], 'loss':'categorical_crossentropy'}
+        with self.assertRaises(plpy.PLPYException) as error:
+            self.subject._validate_metrics(compile_dict)
+
+    def test_validate_metrics_one_supported_one_unsupported_fail(self):
+        compile_dict = {'optimizer':'SGD(lr=0.01, decay=1e-6, nesterov=True)',
+                        'metrics':['accuracy', 'sparse_categorical_crossentropy'], 'loss':'categorical_crossentropy'}
+        with self.assertRaises(plpy.PLPYException) as error:
+            self.subject._validate_metrics(compile_dict)
+
+    def test_parse_and_validate_compile_params_default_optimizer_pass(self):
+        test_str = "optimizer='SGD', loss='categorical_crossentropy'"
+        _,_,result_dict = self.subject.parse_and_validate_compile_params(test_str)
+        self.assertEqual('SGD', result_dict['optimizer'])
+
+        test_str = "optimizer='sgd()', loss='categorical_crossentropy'"
+        _,_,result_dict = self.subject.parse_and_validate_compile_params(test_str)
+        self.assertEqual('sgd()', result_dict['optimizer'])
+
+    def test_parse_and_validate_compile_params_duplicate_loss(self):
+        test_str = "optimizer='SGD', loss='loss1', metrics=['accuracy'], loss='loss2'"
+        _,_,result_dict = self.subject.parse_and_validate_compile_params(test_str)
+        self.assertEqual('loss2', result_dict['loss'])
+
+    def test_parse_and_validate_compile_params_no_optimizer_fail(self):
+        test_str = "loss='categorical_crossentropy', metrics=['accuracy']"
+
+        with self.assertRaises(plpy.PLPYException):
+            self.subject.parse_and_validate_compile_params(test_str)
+
+    def test_parse_and_validate_compile_params_no_loss_fail(self):
+        test_str = "optimizer=SGD(lr=0.01, decay=1e-6, nesterov=True), " \
+                   "metrics=['accuracy']"
+
+        with self.assertRaises(plpy.PLPYException):
+            self.subject.parse_and_validate_compile_params(test_str)
+
+    def test_parse_and_validate_compile_params_dict_metrics_fail(self):
+        test_str = "optimizer=SGD(lr=0.01, decay=1e-6, nesterov=True), " \
+                   "loss='categorical_crossentropy', metrics={'0':'accuracy'}"
+
+        with self.assertRaises(plpy.PLPYException):
+            self.subject.parse_and_validate_compile_params(test_str)
+
+    def test_parse_and_validate_compile_params_tensor_loss_weights_fail(self):
+
+        test_str = "optimizer=SGD(lr=0.01, decay=1e-6, nesterov=True)," \
+                   " loss='categorical_crossentropy', metrics=['accuracy']," \
+                   " loss_weights = keras.layers.Input(shape=(32,))"
+
+        with self.assertRaises(plpy.PLPYException):
+            self.subject.parse_and_validate_compile_params(test_str)
+
+    def test_parse_and_validate_compile_params_list_dict_sample_weight_mode_fail(self):
+        test_str = "optimizer=SGD(lr=0.01, decay=1e-6, nesterov=True)," \
+                   " loss='categorical_crossentropy', metrics=['accuracy']," \
+                   " sample_weight_mode = [0,1]"
+
+        with self.assertRaises(plpy.PLPYException):
+            self.subject.parse_and_validate_compile_params(test_str)
+
+        test_str = "optimizer=SGD(lr=0.01, decay=1e-6, nesterov=True)," \
+                   " loss='categorical_crossentropy', metrics=['accuracy']," \
+                   " sample_weight_mode = {'0':'1'}"
+
+        with self.assertRaises(plpy.PLPYException):
+            self.subject.parse_and_validate_compile_params(test_str)
+
+
+    def test_parse_and_validate_compile_params_target_tensors_fail(self):
+        test_str = "optimizer=SGD(lr=0.01, decay=1e-6, nesterov=True)," \
+                   " loss='categorical_crossentropy', metrics=['accuracy']," \
+                   " target_tensors = keras.layers.Input(shape=(32,))"
+
+        with self.assertRaises(plpy.PLPYException):
+            self.subject.parse_and_validate_compile_params(test_str)
+
+    def test_parse_and_validate_fit_params_callbacks_fail(self):
+
+        test_str = "batch_size=2, epochs=1, verbose=0, callbacks=keras.callbacks.Callback()"
+        with self.assertRaises(plpy.PLPYException):
+            self.subject.parse_and_validate_fit_params(test_str)
+
+    def test_parse_and_validate_fit_params_validation_split_fail(self):
+
+        test_str = "batch_size=2, epochs=1, verbose=0, validation_split=0.1"
+        with self.assertRaises(plpy.PLPYException):
+            self.subject.parse_and_validate_fit_params(test_str)
+
+    def test_parse_and_validate_fit_params_validation_data_fail(self):
+
+        test_str = "batch_size=2, epochs=1, verbose=0, validation_data=(1,2,3)"
+        with self.assertRaises(plpy.PLPYException):
+            self.subject.parse_and_validate_fit_params(test_str)
+
+    def test_parse_and_validate_fit_params_sample_weight_fail(self):
+
+        test_str = "batch_size=2, epochs=1, verbose=0, sample_weight=np.array([1,2,3])"
+        with self.assertRaises(plpy.PLPYException):
+            self.subject.parse_and_validate_fit_params(test_str)
+
+    def test_parse_and_validate_fit_params_validation_steps_fail(self):
+
+        test_str = "batch_size=2, epochs=1, verbose=0, validation_steps=1"
+        with self.assertRaises(plpy.PLPYException):
+            self.subject.parse_and_validate_fit_params(test_str)
+
+    def test_parse_and_validate_fit_params_validation_freq_fail(self):
+        test_str = "batch_size=2, epochs=1, verbose=0, validation_freq=1"
+        with self.assertRaises(plpy.PLPYException):
+            self.subject.parse_and_validate_fit_params(test_str)
+
+        test_str = "batch_size=2, epochs=1, verbose=0, validation_freq=[1]"
+        with self.assertRaises(plpy.PLPYException):
+            self.subject.parse_and_validate_fit_params(test_str)
+
+    def test_parse_and_validate_compile_params_syntax_error_fail(self):
+        #missing end parentheses
+        test_str = "optimizer=SGD(lr=0.01, decay=1e-6, nesterov=True"
+        with self.assertRaises(ValueError) as error:
+            self.subject.parse_and_validate_compile_params(test_str)
+        self.assertIn('could not convert string to float', str(error.exception))
+
+        #missing beginning parentheses
+        test_str = "optimizer=SGDlr=0.01, decay=1e-6, nesterov=True)," \
+                   " loss='categorical_crossentropy'"
+        with self.assertRaises(plpy.PLPYException) as error:
+            self.subject.parse_and_validate_compile_params(test_str)
+        self.assertIn('not currently accepted', str(error.exception))
+
+        #missing comma
+        test_str = "optimizer=SGD(lr=0.01 decay=1e-6, nesterov=True)," \
+                   " loss='categorical_crossentropy'"
+        with self.assertRaises(ValueError) as error:
+            self.subject.parse_and_validate_compile_params(test_str)
+        self.assertIn('invalid literal for float', str(error.exception))
+
+    def test_parse_and_validate_fit_params_invalid_optimizer_fail(self):
+        test_str = "optimizer='SGD1', loss='categorical_crossentropy'"
+        with self.assertRaises(plpy.PLPYException) as error:
+            self.subject.parse_and_validate_compile_params(test_str)
+        self.assertIn('invalid optimizer', str(error.exception))
+
+
+class MadlibKerasFitCommonValidatorTestCase(unittest.TestCase):
+    def setUp(self):
+        self.plpy_mock = Mock(spec='error')
+        patches = {
+            'plpy': plpy
+        }
+
+        self.plpy_mock_execute = MagicMock()
+        plpy.execute = self.plpy_mock_execute
+
+        self.module_patcher = patch.dict('sys.modules', patches)
+        self.module_patcher.start()
+        import madlib_keras_validator
+        self.subject = madlib_keras_validator
+
+    def tearDown(self):
+        self.module_patcher.stop()
+
+
+    def test_is_valid_metrics_compute_frequency_True_None(self):
+        self.subject.FitCommonValidator._validate_common_args = Mock()
+        obj = self.subject.FitCommonValidator(
+            'test_table', 'val_table', 'model_table', 'model_arch_table', 2,
+            'dep_varname', 'independent_varname', 5, None, False, False, [0],
+            'module_name', None)
+        self.assertEqual(True, obj._is_valid_metrics_compute_frequency())
+
+    def test_is_valid_metrics_compute_frequency_True_num(self):
+        self.subject.FitCommonValidator._validate_common_args = Mock()
+        obj = self.subject.FitCommonValidator(
+            'test_table', 'val_table', 'model_table', 'model_arch_table', 2,
+            'dep_varname', 'independent_varname', 5, 3, False, False, [0],
+            'module_name', None)
+        self.assertEqual(True, obj._is_valid_metrics_compute_frequency())
+
+    def test_is_valid_metrics_compute_frequency_False_zero(self):
+        self.subject.FitCommonValidator._validate_common_args = Mock()
+        obj = self.subject.FitCommonValidator(
+            'test_table', 'val_table', 'model_table', 'model_arch_table', 2,
+            'dep_varname', 'independent_varname', 5, 0, False, False, [0],
+            'module_name', None)
+        self.assertEqual(False, obj._is_valid_metrics_compute_frequency())
+
+    def test_is_valid_metrics_compute_frequency_False_greater(self):
+        self.subject.FitCommonValidator._validate_common_args = Mock()
+        obj = self.subject.FitCommonValidator(
+            'test_table', 'val_table', 'model_table', 'model_arch_table', 2,
+            'dep_varname', 'independent_varname', 5, 6, False, False, [0],
+            'module_name', None)
+        self.assertEqual(False, obj._is_valid_metrics_compute_frequency())
+
+
+class InputValidatorTestCase(unittest.TestCase):
+    def setUp(self):
+        self.plpy_mock = Mock(spec='error')
+        patches = {
+            'plpy': plpy
+        }
+
+        self.plpy_mock_execute = MagicMock()
+        plpy.execute = self.plpy_mock_execute
+
+        self.module_patcher = patch.dict('sys.modules', patches)
+        self.module_patcher.start()
+        import madlib_keras_validator
+        self.module = madlib_keras_validator
+        self.subject = self.module.InputValidator
+
+        self.module_name = 'module'
+        self.test_table = 'test_table'
+        self.model_table = 'model_table'
+        self.id_col = 'id_col'
+        self.ind_var = 'ind_var'
+        self.model_arch_table = 'model_arch_table'
+        self.model_id = 2
+        self.num_classes = 1598
+        self.model = Sequential()
+        self.model.add(Conv2D(2, kernel_size=(1, 1), activation='relu',
+                              input_shape=(1,1,1,), padding='same'))
+        self.model.add(Dense(self.num_classes))
+        self.classes = ['train', 'boat', 'car', 'airplane']
+
+    def tearDown(self):
+        self.module_patcher.stop()
+
+    def test_validate_pred_type_invalid_pred_type(self):
+        with self.assertRaises(plpy.PLPYException) as error:
+            self.subject.validate_pred_type(
+                self.module_name, 'invalid_pred_type', ['cat', 'dog'])
+        self.assertIn('type', str(error.exception).lower())
+
+    def test_validate_class_values_greater_than_1600_class_values(self):
+        self.model.add(Dense(1599))
+        with self.assertRaises(plpy.PLPYException) as error:
+            self.subject.validate_class_values(
+                self.module_name, range(1599), 'prob', self.model.to_json())
+        self.assertIn('1600', str(error.exception))
+
+    def test_validate_class_values_valid_class_values_prob(self):
+        self.subject.validate_class_values(
+            self.module_name, range(self.num_classes), 'prob', self.model.to_json())
+        self.subject.validate_class_values(
+            self.module_name, None, 'prob', self.model.to_json())
+
+    def test_validate_class_values_valid_pred_type_valid_class_values_response(self):
+        self.subject.validate_class_values(
+            self.module_name, range(self.num_classes), 'response', self.model.to_json())
+        self.subject.validate_class_values(
+            self.module_name, None, 'response', self.model.to_json())
+
+    def test_validate_input_shape_shapes_do_not_match(self):
+        # minibatched data
+        self.plpy_mock_execute.return_value = [{'shape': [1,3,32,32]}]
+        with self.assertRaises(plpy.PLPYException):
+            self.subject.validate_input_shape(
+                self.test_table, self.ind_var, [32,32,3], 2, True)
+        # non-minibatched data
+        self.plpy_mock_execute.return_value = [{'n_0': 1,'n_1': 32,'n_2': 32,'n_3': 3}]
+        with self.assertRaises(plpy.PLPYException):
+            self.subject.validate_input_shape(
+                self.test_table, self.ind_var, [32,32,3], 1)
+        self.plpy_mock_execute.return_value = [{'n_0': 1,'n_1': 3}]
+        with self.assertRaises(plpy.PLPYException):
+            self.subject.validate_input_shape(
+                self.test_table, self.ind_var, [3,32], 1)
+
+    def test_validate_input_shape_shapes_match(self):
+        # minibatched data
+        self.plpy_mock_execute.return_value = [{'shape': [1,32,32,3]}]
+        self.subject.validate_input_shape(
+            self.test_table, self.ind_var, [32,32,3], 2, True)
+        # non-minibatched data
+        self.plpy_mock_execute.return_value = [{'n_0': 32,'n_1': 32,'n_2': 3}]
+        self.subject.validate_input_shape(
+            self.test_table, self.ind_var, [32,32,3], 1)
+
+    def test_validate_model_arch_table_none_values(self):
+        with self.assertRaises(plpy.PLPYException) as error:
+            obj = self.subject.validate_model_arch_table(
+                self.module_name, None, self.model_id)
+        self.assertIn('null', str(error.exception).lower())
+
+        self.module.input_tbl_valid = Mock()
+        with self.assertRaises(plpy.PLPYException) as error:
+            obj = self.subject.validate_model_arch_table(
+                self.module_name, self.model_arch_table, None)
+        self.assertIn('id', str(error.exception).lower())
+
+    def test_validate_gpu_config_with_gpu_all_segments(self):
+
+        self.plpy_mock_execute.return_value = [{'__internal_gpu_config__': 'all_segments'}]
+        obj = self.subject._validate_gpu_config(self.module_name, 'foo', [1])
+
+    def test_validate_gpu_config_no_gpu_all_segments(self):
+
+        self.plpy_mock_execute.return_value = [{'__internal_gpu_config__': 'all_segments'}]
+        with self.assertRaises(plpy.PLPYException) as error:
+            obj = self.subject._validate_gpu_config(self.module_name, 'foo', [0])
+        self.assertIn('missing gpus', str(error.exception).lower())
+
+    def test_validate_gpu_config_with_gpu_valid_seg_list(self):
+
+        self.plpy_mock_execute.return_value = [{'__internal_gpu_config__': [0,1]}]
+        obj = self.subject._validate_gpu_config(self.module_name, 'foo', [1,1,0,1])
+
+    def test_validate_gpu_config_with_gpu_invalid_seg_list(self):
+
+        self.plpy_mock_execute.return_value = [{'__internal_gpu_config__': [0,1]}]
+        with self.assertRaises(plpy.PLPYException) as error:
+            obj = self.subject._validate_gpu_config(self.module_name, 'foo', [1,0,0,1])
+        self.assertIn('does not have gpu', str(error.exception).lower())
+
+class MadlibSerializerTestCase(unittest.TestCase):
+    def setUp(self):
+        self.plpy_mock = Mock(spec='error')
+        patches = {
+            'plpy': plpy
+        }
+
+        self.plpy_mock_execute = MagicMock()
+        plpy.execute = self.plpy_mock_execute
+
+        self.module_patcher = patch.dict('sys.modules', patches)
+        self.module_patcher.start()
+        import madlib_keras_serializer
+        self.subject = madlib_keras_serializer
+
+    def tearDown(self):
+        self.module_patcher.stop()
+
+    def test_deserialize_image_1d_weights_null_state_returns_none(self):
+        self.assertEqual(None, self.subject.deserialize_as_image_1d_weights(None))
+
+    def test_deserialize_image_1d_weights_returns_not_none(self):
+        dummy_state = np.array([2,3,4,5,6], dtype=np.float32)
+        res = self.subject.deserialize_as_image_1d_weights(dummy_state.tostring())
+        self.assertEqual(2, res[0])
+        self.assertEqual([3,4,5,6], res[1].tolist())
+
+    def test_deserialize_nd_weights_null_input_returns_none(self):
+        dummy_state = np.array([0,1,2,3,4,5,6], dtype=np.float32)
+        self.assertEqual(None, self.subject.deserialize_as_nd_weights(dummy_state.tostring(), None))
+        self.assertEqual(None, self.subject.deserialize_as_nd_weights(None, [1, 2, 3]))
+        self.assertEqual(None, self.subject.deserialize_as_nd_weights(None, None))
+
+    def test_deserialize_nd_weights_valid_input_returns_not_none(self):
+        dummy_model_weights = np.array([3,4,5], dtype=np.float32)
+        dummy_model_shape = [(2, 1, 1, 1), (1,)]
+        res = self.subject.deserialize_as_nd_weights(dummy_model_weights.tostring(),
+                                                     dummy_model_shape)
+        self.assertEqual([[[[3.0]]], [[[4.0]]]], res[0].tolist())
+        self.assertEqual([5], res[1].tolist())
+
+    def test_deserialize_nd_weights_invalid_input_fails(self):
+        # pass an invalid state with missing model weights
+        invalid_model_weights = np.array([1,2], dtype=np.float32)
+        dummy_model_shape = [(2, 1, 1, 1), (1,)]
+
+        # we expect raise exception because we cannot reshape
+        # model weights of size 0 into shape (2,2,3,1)
+        with self.assertRaises(plpy.PLPYException) as error:
+            self.subject.deserialize_as_nd_weights(invalid_model_weights.tostring(),
+                                                   dummy_model_shape)
+
+        invalid_model_weights = np.array([1,2,3,4], dtype=np.float32)
+        dummy_model_shape = [(2, 2, 3, 1), (1,)]
+        # we expect raise exception because we cannot reshape
+        # model weights of size 2 into shape (2,2,3,1)
+        with self.assertRaises(plpy.PLPYException) as error:
+            self.subject.deserialize_as_nd_weights(invalid_model_weights.tostring(),
+                                                   dummy_model_shape)
+
+        invalid_model_weights = np.array([0,1,2,3,4], dtype=np.float32)
+        dummy_model_shape = [(2, 1), (1,)]
+        # we expect to raise exception because we cannot reshape
+        # model weights of size 2 into shape (1,)
+        with self.assertRaises(plpy.PLPYException) as error:
+            self.subject.deserialize_as_nd_weights(invalid_model_weights.tostring(),
+                                                   dummy_model_shape)
+
+    def test_serialize_image_nd_weights_none_weights_returns_none(self):
+        res = self.subject.serialize_state_with_nd_weights(0, None)
+        self.assertEqual(None , res)
+
+    def test_serialize_image_nd_weights_valid_output(self):
+        res = self.subject.serialize_state_with_nd_weights(0, [np.array([1, 3]),
+                                                               np.array([4,5])])
+        self.assertEqual(np.array([0,1,3,4,5], dtype=np.float32).tostring(),
+                         res)
+
+    def test_serialize_image_1d_weights_none_weights_returns_none(self):
+        res = self.subject.serialize_state_with_1d_weights(0, None)
+        self.assertEqual(None , res)
+
+    def test_serialize_image_1d_weights_valid_output(self):
+        res = self.subject.serialize_state_with_1d_weights(0, np.array([1, 3, 4, 5]))
+        self.assertEqual(np.array([0,1,3,4,5], dtype=np.float32).tostring(),
+                         res)
+
+
+class MadlibKerasHelperTestCase(unittest.TestCase):
+    def setUp(self):
+        self.plpy_mock = Mock(spec='error')
+        patches = {
+            'plpy': plpy
+        }
+
+        self.plpy_mock_execute = MagicMock()
+        plpy.execute = self.plpy_mock_execute
+
+        self.module_patcher = patch.dict('sys.modules', patches)
+        self.module_patcher.start()
+        import madlib_keras_helper
+        self.subject = madlib_keras_helper
+        self.input_data = [32, 32, 3]
+
+    def tearDown(self):
+        self.module_patcher.stop()
+
+    def test_expand_input_dims(self):
+        self.assertEqual(np.array(self.input_data).shape, (3,))
+        res = self.subject.expand_input_dims(self.input_data)
+        self.assertEqual(res.shape, (1, 3))
+
+    def test_strip_trailing_nulls_from_class_values(self):
+        self.assertEqual(['cat', 'dog'],
+                         self.subject.strip_trailing_nulls_from_class_values(
+                ['cat', 'dog']))
+        self.assertEqual([None, 'cat', 'dog'],
+                         self.subject.strip_trailing_nulls_from_class_values(
+                [None, 'cat', 'dog']))
+        self.assertEqual([None, 'cat', 'dog'],
+                         self.subject.strip_trailing_nulls_from_class_values(
+                [None, 'cat', 'dog', None, None]))
+        self.assertEqual(['cat', 'dog'],
+                         self.subject.strip_trailing_nulls_from_class_values(
+                ['cat', 'dog', None, None]))
+        self.assertEqual([None],
+                         self.subject.strip_trailing_nulls_from_class_values(
+                [None, None]))
+
+    def test_get_gpus_per_one_seg_gpu_gpdb(self):
+
+        self.subject.is_platform_pg = Mock(return_value = False)
+
+        self.plpy_mock_execute.side_effect = \
+            [ [],
+            [ {'hostname': 'mdw0', 'count' : 1}],
+            [],
+            [ {'hostname': 'mdw0', 'segment_id' : 0},
+              {'hostname': 'mdw1', 'segment_id' : 1},
+              {'hostname': 'mdw2', 'segment_id' : 2}
+            ]]
+
+        self.assertEqual([1,0,0], self.subject.get_accessible_gpus_for_seg(
+            'schema_madlib', 2, 'foo'))
+
+    def test_get_gpus_per_mult_seg_gpu_gpdb(self):
+
+        self.subject.is_platform_pg = Mock(return_value = False)
+
+        self.plpy_mock_execute.side_effect = \
+            [[],
+            [ {'hostname': 'mdw0', 'count' : 1}],
+            [],
+            [ {'hostname': 'mdw0', 'segment_id' : 0},
+              {'hostname': 'mdw0', 'segment_id' : 1},
+              {'hostname': 'mdw1', 'segment_id' : 2},
+              {'hostname': 'mdw1', 'segment_id' : 3}
+            ]]
+
+        self.assertEqual([1,1,0,0], self.subject.get_accessible_gpus_for_seg(
+            'schema_madlib', 2, 'foo'))
+
+    def test_get_gpus_per_no_gpu_gpdb(self):
+
+        self.subject.is_platform_pg = Mock(return_value = False)
+
+        self.plpy_mock_execute.side_effect = [[],[],[]]
+        with self.assertRaises(plpy.PLPYException) as error:
+            self.subject.get_accessible_gpus_for_seg('schema_madlib', 2, 'foo')
+        self.assertIn('no gpus configured on hosts', str(error.exception).lower())
+
+class MadlibKerasEvaluationTestCase(unittest.TestCase):
+    def setUp(self):
+        self.plpy_mock = Mock(spec='error')
+        patches = {
+            'plpy': plpy
+        }
+
+        self.plpy_mock_execute = MagicMock()
+        plpy.execute = self.plpy_mock_execute
+
+        self.module_patcher = patch.dict('sys.modules', patches)
+        self.module_patcher.start()
+        import madlib_keras
+        self.subject = madlib_keras
+
+        self.model = Sequential()
+        self.model.add(Conv2D(2, kernel_size=(1, 1), activation='relu',
+                         input_shape=(1,1,1,), padding='same'))
+        self.model.add(Flatten())
+
+        self.compile_params = "optimizer=SGD(lr=0.01, decay=1e-6, nesterov=True), loss='categorical_crossentropy', metrics=['accuracy']"
+        self.model_weights = [3,4,5,6]
+        self.serialized_weights = np.array(self.model_weights, dtype='float32'
+                                           ).tostring()
+        self.loss = 0.5947071313858032
+        self.accuracy = 1.0
+        self.dist_key_mapping = [0,1,2]
+        self.accessible_gpus_for_seg = [0]
+
+        #self.model.evaluate = Mock(return_value = [self.loss, self.accuracy])
+
+        self.independent_var_real = [[[[0.5]]]] * 10
+        self.dependent_var_int = [[0,1]] * 10
+
+        # Params as bytea
+        self.independent_var = np.array(self.independent_var_real, dtype=np.float32).tobytes()
+        self.dependent_var = np.array(self.dependent_var_int, dtype=np.int16).tobytes()
+
+        self.independent_var_shape = [10,1,1,1]
+        self.dependent_var_shape = [10,2]
+        # We test on segment 0, which has 3 buffers filled with 10 identical
+        #  images each, or 30 images total
+        self.total_images_per_seg = [3*len(self.dependent_var_int),20,40]
+
+    def tearDown(self):
+        self.module_patcher.stop()
+
+    def _test_internal_keras_eval_transition_first_buffer(self, is_platform_pg):
+        self.subject.K.set_session = Mock()
+        self.subject.K.clear_session = Mock()
+        self.subject.is_platform_pg = Mock(return_value = is_platform_pg)
+        starting_image_count = 0
+        ending_image_count = len(self.dependent_var_int)
+
+        # last iteration call
+
+        k = {'SD' : {}}
+        state = [0,0,0]
+        new_state = self.subject.internal_keras_eval_transition(
+            state, self.dependent_var , self.independent_var,
+            self.dependent_var_shape, self.independent_var_shape,
+            self.model.to_json(),
+            self.serialized_weights, self.compile_params, 0,
+            self.dist_key_mapping, 0, 4,
+            self.total_images_per_seg, False, self.accessible_gpus_for_seg, True, **k)
+
+        agg_loss, agg_accuracy, image_count = new_state
+
+        self.assertEqual(ending_image_count, image_count)
+        # Call set_session once for gpdb (but not for postgres)
+        self.assertEqual(1, self.subject.K.set_session.call_count)
+        # loss and accuracy should be unchanged
+        self.assertAlmostEqual(self.loss * image_count, agg_loss, 4)
+        self.assertAlmostEqual(self.accuracy * image_count, agg_accuracy, 4)
+        # Clear session and sess.close must not get called for the first buffer
+        self.assertEqual(0, self.subject.K.clear_session.call_count)
+        self.assertTrue(k['SD']['segment_model'])
+
+        # Non-final call
+
+        self.subject.K.set_session.reset_mock()
+        self.subject.K.clear_session.reset_mock()
+        k = {'SD' : {}}
+        state = [0,0,0]
+
+        new_state = self.subject.internal_keras_eval_transition(
+            state, self.dependent_var , self.independent_var,
+            self.dependent_var_shape, self.independent_var_shape,
+            self.model.to_json(),
+            self.serialized_weights, self.compile_params, 0,
+            self.dist_key_mapping, 0, 4,
+            self.total_images_per_seg, False, self.accessible_gpus_for_seg, False, **k)
+        agg_loss, agg_accuracy, image_count = new_state
+
+        self.assertEqual(ending_image_count, image_count)
+        # set_session must not get called for the first buffer
+        self.assertEqual(1, self.subject.K.set_session.call_count)
+        # loss and accuracy should be unchanged
+        self.assertAlmostEqual(self.loss * image_count, agg_loss, 4)
+        self.assertAlmostEqual(self.accuracy * image_count, agg_accuracy, 4)
+        # Clear session and sess.close must not get called for the first buffer
+        self.assertEqual(0, self.subject.K.clear_session.call_count)
+        self.assertTrue(k['SD']['segment_model'])
+
+    def _test_internal_keras_eval_transition_middle_buffer(self, is_platform_pg):
+        #TODO should we mock tensorflow's close_session and keras'
+        # clear_session instead of mocking the function `K.clear_session`
+        self.subject.K.set_session = Mock()
+        self.subject.K.clear_session = Mock()
+        self.subject.is_platform_pg = Mock(return_value = is_platform_pg)
+
+        starting_image_count = len(self.dependent_var_int)
+        ending_image_count = starting_image_count + len(self.dependent_var_int)
+
+        # last iteration call
+
+        k = {'SD' : {}}
+
+        self.subject.compile_and_set_weights(self.model, self.compile_params,
+                                             '/cpu:0', self.serialized_weights)
+
+        state = [self.loss * starting_image_count, self.accuracy * starting_image_count, starting_image_count]
+        k['SD']['segment_model'] = self.model
+        k['SD']['sess'] = Mock()
+
+        new_state = self.subject.internal_keras_eval_transition(
+            state, self.dependent_var , self.independent_var,
+            self.dependent_var_shape, self.independent_var_shape,
+            self.model.to_json(),
+            'dummy_model_weights', None, 0,
+            self.dist_key_mapping, 0, 4,
+            self.total_images_per_seg, False, self.accessible_gpus_for_seg, True, **k)
+
+        agg_loss, agg_accuracy, image_count = new_state
+
+        self.assertEqual(ending_image_count, image_count)
+        # set_session is always called
+        self.assertEqual(1, self.subject.K.set_session.call_count)
+         # loss and accuracy should be unchanged
+        self.assertAlmostEqual(self.loss * ending_image_count, agg_loss, 4)
+        self.assertAlmostEqual(self.accuracy * ending_image_count, agg_accuracy, 4)
+        # Clear session and sess.close must not get called for the middle buffer
+        self.assertEqual(0, self.subject.K.clear_session.call_count)
+
+        # Non-last iteration call
+
+        self.subject.K.set_session.reset_mock()
+        self.subject.K.clear_session.reset_mock()
+        k = {'SD' : {}}
+
+        self.subject.compile_and_set_weights(self.model, self.compile_params,
+                                             '/cpu:0', self.serialized_weights)
+
+        state = [self.loss * starting_image_count, self.accuracy * starting_image_count, starting_image_count]
+        k['SD']['segment_model'] = self.model
+        k['SD']['sess'] = Mock()
+
+        new_state = self.subject.internal_keras_eval_transition(
+            state, self.dependent_var , self.independent_var,
+            self.dependent_var_shape, self.independent_var_shape,
+            self.model.to_json(),
+            'dummy_model_weights', None, 0,
+            self.dist_key_mapping, 0, 4,
+            self.total_images_per_seg, False, self.accessible_gpus_for_seg, False, **k)
+        agg_loss, agg_accuracy, image_count = new_state
+
+        self.assertEqual(ending_image_count, image_count)
+        # set_session is always called
+        self.assertEqual(1, self.subject.K.set_session.call_count)
+         # loss and accuracy should be unchanged
+        self.assertAlmostEqual(self.loss * ending_image_count, agg_loss, 4)
+        self.assertAlmostEqual(self.accuracy * ending_image_count, agg_accuracy, 4)
+        # Clear session and sess.close must not get called for the middle buffer
+        self.assertEqual(0, self.subject.K.clear_session.call_count)
+
+    def _test_internal_keras_eval_transition_last_buffer(self, is_platform_pg):
+        #TODO should we mock tensorflow's close_session and keras'
+        # clear_session instead of mocking the function `K.clear_session`
+        self.subject.K.set_session = Mock()
+        self.subject.K.clear_session = Mock()
+        self.subject.is_platform_pg = Mock(return_value = is_platform_pg)
+
+        starting_image_count = 2*len(self.dependent_var_int)
+        ending_image_count = starting_image_count + len(self.dependent_var_int)
+
+        k = {'SD' : {}}
+
+        self.subject.compile_and_set_weights(self.model, self.compile_params,
+                                             '/cpu:0', self.serialized_weights)
+
+        state = [self.loss * starting_image_count,
+                 self.accuracy * starting_image_count,
+                 starting_image_count]
+
+        k['SD']['segment_model'] = self.model
+        k['SD']['sess'] = Mock()
+
+        new_state = self.subject.internal_keras_eval_transition(
+            state, self.dependent_var , self.independent_var,
+            self.dependent_var_shape, self.independent_var_shape,
+            self.model.to_json(),
+            'dummy_model_weights', None, 0,
+            self.dist_key_mapping, 0, 4,
+            self.total_images_per_seg, False, self.accessible_gpus_for_seg, True, **k)
+        agg_loss, agg_accuracy, image_count = new_state
+
+        self.assertEqual(ending_image_count, image_count)
+        # set_session is always called
+        self.assertEqual(1, self.subject.K.set_session.call_count)
+        # loss and accuracy should be unchanged
+        self.assertAlmostEqual(self.loss * ending_image_count, agg_loss, 4)
+        self.assertAlmostEqual(self.accuracy * ending_image_count, agg_accuracy, 4)
+        # Clear session and sess.close must get called for the last buffer in gpdb,
+        #  but not in postgres
+        self.assertEqual(1, self.subject.K.clear_session.call_count)
+
+        # Non-final call
+
+        self.subject.K.set_session.reset_mock()
+        self.subject.K.clear_session.reset_mock()
+        k = {'SD' : {}}
+
+        self.subject.compile_and_set_weights(self.model, self.compile_params,
+                                             '/cpu:0', self.serialized_weights)
+
+        state = [self.loss * starting_image_count,
+                 self.accuracy * starting_image_count,
+                 starting_image_count]
+
+        k['SD']['segment_model'] = self.model
+        k['SD']['sess'] = Mock()
+
+        new_state = self.subject.internal_keras_eval_transition(
+            state, self.dependent_var , self.independent_var,
+            self.dependent_var_shape, self.independent_var_shape,
+            self.model.to_json(),
+            'dummy_model_weights', None, 0,
+            self.dist_key_mapping, 0, 4,
+            self.total_images_per_seg, False, self.accessible_gpus_for_seg, False, **k)
+
+        agg_loss, agg_accuracy, image_count = new_state
+
+        self.assertEqual(ending_image_count, image_count)
+        # set_session is always called
+        self.assertEqual(1, self.subject.K.set_session.call_count)
+        # loss and accuracy should be unchanged
+        self.assertAlmostEqual(self.loss * ending_image_count, agg_loss, 4)
+        self.assertAlmostEqual(self.accuracy * ending_image_count, agg_accuracy, 4)
+        # Clear session and sess.close must not get called in non-final iterations
+        self.assertEqual(0, self.subject.K.clear_session.call_count)
+
+    def test_internal_keras_eval_transition_first_buffer_pg(self):
+        self._test_internal_keras_eval_transition_first_buffer(True)
+
+    def test_internal_keras_eval_transition_first_buffer_gpdb(self):
+        self._test_internal_keras_eval_transition_first_buffer(False)
+
+    def test_internal_keras_eval_transition_middle_buffer_pg(self):
+        self._test_internal_keras_eval_transition_middle_buffer(True)
+
+    def test_internal_keras_eval_transition_middle_buffer_gpdb(self):
+        self._test_internal_keras_eval_transition_middle_buffer(False)
+
+    def test_internal_keras_eval_transition_last_buffer_pg(self):
+        self._test_internal_keras_eval_transition_last_buffer(True)
+
+    def test_internal_keras_eval_transition_last_buffer_gpdb(self):
+        self._test_internal_keras_eval_transition_last_buffer(False)
+
+    def test_internal_keras_eval_merge(self):
+        image_count = self.total_images_per_seg[0]
+        state1 = [3.0*self.loss, 3.0*self.accuracy, image_count]
+        state1 = state1
+        state2 = [2.0*self.loss, 2.0*self.accuracy, image_count+30]
+        state2 = state2
+        merged_state = self.subject.internal_keras_eval_merge(state1,state2)
+        agg_loss = merged_state[0]
+        agg_accuracy = merged_state[1]
+        image_count_total = merged_state[2]
+
+        self.assertEqual( 2*image_count+30 , image_count_total )
+        self.assertAlmostEqual( 5.0*self.loss, agg_loss, 2)
+        self.assertAlmostEqual( 5.0*self.accuracy, agg_accuracy, 2)
+
+    def test_internal_keras_eval_merge_none_first(self):
+        image_count = self.total_images_per_seg[0]
+        input_state = [self.loss, self.accuracy, image_count]
+        merged_state = self.subject.internal_keras_eval_merge(None, input_state)
+        agg_loss = merged_state[0]
+        agg_accuracy = merged_state[1]
+        image_count_total = merged_state[2]
+
+        self.assertEqual(image_count, image_count_total)
+        self.assertAlmostEqual(self.loss, agg_loss, 2)
+        self.assertAlmostEqual(self.accuracy, agg_accuracy, 2)
+
+    def test_internal_keras_eval_merge_none_second(self):
+        image_count = self.total_images_per_seg[0]
+        input_state = [self.loss, self.accuracy, image_count]
+        merged_state = self.subject.internal_keras_eval_merge(input_state, None)
+        agg_loss = merged_state[0]
+        agg_accuracy = merged_state[1]
+        image_count_total = merged_state[2]
+
+        self.assertEqual(image_count, image_count_total)
+        self.assertAlmostEqual(self.loss, agg_loss, 2)
+        self.assertAlmostEqual(self.accuracy, agg_accuracy, 2)
+
+    def test_internal_keras_eval_merge_both_none(self):
+        result = self.subject.internal_keras_eval_merge(None,None)
+        self.assertEqual(None, result)
+
+    def test_internal_keras_eval_final(self):
+        image_count = self.total_images_per_seg[0]
+        input_state = [image_count*self.loss, image_count*self.accuracy, image_count]
+
+        output_state = self.subject.internal_keras_eval_final(input_state)
+        self.assertEqual(len(output_state), 2)
+        agg_loss = output_state[0]
+        agg_accuracy = output_state[1]
+
+        self.assertAlmostEqual(self.loss, agg_loss,2)
+        self.assertAlmostEqual(self.accuracy, agg_accuracy,2)
+
+    def internal_keras_eval_final_none(self):
+        result = self.subject.internal_keras_eval_final(None)
+        self.assertEqual(result, None)
+
+    def test_internal_keras_eval_final_image_count_zero(self):
+        input_state = [0, 0, 0]
+
+        with self.assertRaises(plpy.PLPYException):
+            result = self.subject.internal_keras_eval_final(input_state)
+
+    def tearDown(self):
+        self.module_patcher.stop()
+
+if __name__ == '__main__':
+    unittest.main()
+# ---------------------------------------------------------------------

@@ -1,0 +1,105 @@
+# -*- coding:utf-8 -*-
+# Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms
+# and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS,
+# WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+# ----------------------------------------------------------------------------
+
+from collections import defaultdict
+from operator import itemgetter
+import math
+import random
+import plpy
+import json
+
+import numpy as np
+from sklearn import preprocessing
+from sklearn.cluster import AgglomerativeClustering
+from sklearn.metrics import silhouette_score ,calinski_harabaz_score,davies_bouldin_score
+
+from utilities.validate_args import quote_ident
+
+def validate_input1(train_table, output_table, id_column, point_column):
+    if not train_table or not output_table or not id_column or not point_column:
+        plpy.error("The input parameters are invalid.")
+
+def validate_input2(n_cluster, affinity, linkage, point_num):
+    if not n_cluster:
+        n_cluster = 2
+    elif n_cluster <= 1 or n_cluster >= point_num:
+        plpy.error("ValueError: Valid values of n_cluster are 2 to n_samples - 1 (inclusive).")
+    
+    if not affinity:
+        affinity = 'euclidean'
+    elif affinity not in ['euclidean', 'l1', 'l2', 'manhattan', 'cosine']:
+        plpy.error("ValueError: Valid values of affinity are in ['euclidean', 'l1', 'l2', 'manhattan', 'cosine'].")
+    
+    if not linkage:
+        linkage = 'ward'
+    elif linkage not in ['ward', 'complete', 'average', 'single']:
+        plpy.error("ValueError: Valid values of linkage are in ['ward', 'complete', 'average', 'single'].")
+
+    if linkage == 'ward' and affinity != 'euclidean':
+        plpy.error("ValueError: If linkage is 'ward', only 'euclidean' is accepted.")
+
+    return n_cluster, affinity, linkage
+
+def agglomerative_clustering(schema_madlib, train_table, output_table, 
+            id_column, point_column, n_cluster, affinity, linkage, **kwargs):
+    
+    validate_input1(train_table, output_table, id_column, point_column)
+
+    sql = """select {id_column}, {point_column} from {train_table} order by {id_column};""".format(
+            id_column=quote_ident(id_column),
+            point_column=quote_ident(point_column),
+            train_table=train_table
+        )
+    results = plpy.execute(sql)
+
+    points = []
+    ids = []
+    for result in results:
+        point = [x for x in result[point_column]]
+        points.append(point)
+        ids.append(result[id_column])
+
+    n_cluster, affinity, linkage = validate_input2(n_cluster, affinity, linkage, len(ids))
+
+    data = np.array(points)
+    min_max_scaler = preprocessing.MinMaxScaler()
+    data_M = min_max_scaler.fit_transform(data)
+
+    ac = AgglomerativeClustering(n_clusters=n_cluster, affinity=affinity, linkage=linkage)
+    labels = ac.fit_predict(data_M)
+
+    sql = """drop table if exists {output_table};
+                create table {output_table} (id integer, label integer, point double precision[]);""".format(
+                output_table=output_table
+                )
+    plpy.execute(sql)
+    plpy.info(sql)
+
+    for i in range(len(ids)):
+        sql = """insert into {output_table} values ({id}, {label}, ARRAY{point});""".format(
+            output_table=output_table,
+            id=ids[i],
+            label=labels[i],
+            point=points[i]
+        )
+        plpy.execute(sql)
+    
+    s1=silhouette_score(data_M, labels, metric='euclidean')
+    s2=calinski_harabaz_score(data_M,labels)
+    s3=davies_bouldin_score(data_M,labels)
+
+    plpy.info('Training finish! silhouette_score:', s1, 'calinski_harabaz_score:', s2, 'davies_bouldin_score:', s3)

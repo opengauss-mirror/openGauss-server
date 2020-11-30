@@ -1,0 +1,107 @@
+# -*- coding:utf-8 -*-
+# Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms
+# and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS,
+# WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+# ----------------------------------------------------------------------------
+
+import re
+import ast
+import plpy
+
+import pandas as pd
+import cPickle as pickle 
+from fbprophet import Prophet
+
+from utilities.validate_args import get_expr_type
+
+
+support_type_list = ('TINYINT', 'SMALLINT', 'INTEGER', 'BINARY_INTEGER', 'BIGINT',
+                    'NUMERIC', 'DECIMAL',
+                    'SMALLSERIAL', 'SERIAL', 'BIGSERIAL',
+                    'REAL', 'FLOAT4', 'DOUBLE PRECISION', 'FLOAT8', 'FLOAT', 'BINARY_DOUBLE', 'DEC',
+                    'BOOLEAN')
+
+
+def get_fbmodel(schema_madlib, input_table, column_map, params_str, verbose, **kwargs):
+    """
+        train prophet model and return as bytea
+        Args:
+        @param input_table,              -- name of input table
+        @param column_map,               -- map relationship of specified name of column and current name
+        @param params_str,               -- paramater of prophet fit function
+        @param verbose                   -- display log
+    """
+    if params_str is None or params_str is "" or ":" not in params_str:
+        params_str = "{}"
+        plpy.info("prophet_fit() params_str type is: " + params_str)
+
+    if column_map is None or column_map is "" or ":" not in column_map:
+        column_map = "{'ds': 'ds', 'y': 'y'}"
+        plpy.info("Prophet_fit() column_map relation is: " + column_map)
+
+    params = ast.literal_eval(re.sub("[\\t]", "", params_str).strip())
+    column_map_dict = ast.literal_eval(re.sub("[\\t]", "", column_map).strip())
+
+    y_type = check_input_type(schema_madlib, input_table, column_map_dict)
+
+    if 'holidays' in params.keys():
+        holidays = pd.DataFrame()
+        holiday_tables = params['holidays']
+        sql = """select * from {holiday_table}"""
+        for holiday_table in holiday_tables:
+            sql = sql.format(holiday_table=holiday_table)
+            if verbose:
+                plpy.info(sql)
+            result = plpy.execute(sql)
+            holiday_df = pd.DataFrame.from_records(result)
+            holidays = pd.concat((holidays, holiday_df))
+        params['holidays'] = holidays
+
+    real_columns = ', '.join([value for value in column_map_dict.values()])
+    sql = """select {real_columns} from {input_table};""".format(input_table=input_table, real_columns=real_columns)
+    if verbose:
+        plpy.info(sql)
+    
+    result = plpy.execute(sql)
+    df = pd.DataFrame.from_records(result)
+
+    # change column name to accord with prophet requirement
+    for s_name, c_name in column_map_dict.items():
+        if s_name != c_name:
+            df.rename(columns={c_name: s_name}, inplace=True)
+    model = Prophet(**params)
+    model.fit(df)
+
+    return (y_type, pickle.dumps(model), str(params))
+
+
+# ------------------------------------------------------------------------------
+# -- validate column type of input table  ------------------------------------------------------------
+# ------------------------------------------------------------------------------
+def check_input_type(schema_madlib, input_table, column_map_dict):
+    """
+    func: check the column type of input_table
+    """
+    for s_col, c_col in column_map_dict.items():
+        col_type = get_expr_type(c_col, input_table)
+        if s_col == 'ds':
+            if 'time' not in col_type.lower() and 'date' not in col_type.lower():
+                plpy.error("prophet Error: the type of {column} must be DATE".format(column=c_col))
+        else:
+            if col_type.upper() not in support_type_list:
+                plpy.error("prophet Error: the type of {column} is not supported".format(column=c_col))
+    
+    y_type = get_expr_type(column_map_dict['y'], input_table) 
+
+    return y_type

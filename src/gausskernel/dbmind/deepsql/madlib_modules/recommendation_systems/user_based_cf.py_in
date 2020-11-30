@@ -1,0 +1,262 @@
+# -*- coding:utf-8 -*-
+# Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms
+# and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS,
+# WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+# ----------------------------------------------------------------------------
+
+from collections import defaultdict
+from operator import itemgetter
+import math
+import random
+import plpy
+import json
+
+from utilities.validate_args import quote_ident
+from utilities.validate_args import table_exists
+
+def train_validate(train_table, user_varname, item_varname,
+            rating_varname, k_sim_user, use_iif_similarity, 
+            test_table, n_rec_item):
+    if not train_table or not user_varname or not item_varname or not rating_varname or not k_sim_user or k_sim_user < 1:
+        plpy.error("The input parameters are invalid.")
+    if not use_iif_similarity:
+        use_iif_similarity = False
+    if not test_table:
+        test_table = None
+    if not n_rec_item and n_rec_item != 0:
+        n_rec_item = 10
+    elif n_rec_item <= 0:
+        plpy.error("The input parameters are invalid.")
+    return use_iif_similarity, test_table, n_rec_item
+
+def train(schema_madlib, train_table, user_varname, item_varname,
+            rating_varname, k_sim_user, use_iif_similarity, 
+            test_table, n_rec_item, **kwargs):
+    
+    # 0) Validate input parameter
+    use_iif_similarity, test_table, n_rec_item=train_validate(train_table, 
+            user_varname, item_varname, rating_varname, k_sim_user, 
+            use_iif_similarity, test_table, n_rec_item)
+    
+    # 1) Generate user-item-rating matrix
+    sql = """select {user_varname}, {item_varname}, {rating_varname} from {train_table};""".format(
+            user_varname=quote_ident(user_varname),
+            item_varname=quote_ident(item_varname),
+            rating_varname=quote_ident(rating_varname),
+            train_table=train_table
+        )
+    results = plpy.execute(sql)
+    
+    user_item_rating_mat = defaultdict(dict)
+    for result in results:
+        user_item_rating_mat[result[user_varname]][result[item_varname]] = result[rating_varname]
+
+    # 2) Generate user-user-similarity matrix 
+    # 2.1) Set user_user_sim_table name
+    if use_iif_similarity:
+        user_user_sim_table = train_table+'_usercf_iif_sim'
+    else:
+        user_user_sim_table = train_table+'_usercf_sim'
+
+    # 2.2) First time generate user_user_sim_table
+    if not table_exists(user_user_sim_table):
+        # 2.2.1) Make item_user reverse set
+        item_user_set = defaultdict(set)
+        for user, items in user_item_rating_mat.items():
+            for item in items:
+                item_user_set[item].add(user)
+
+        # 2.2.2) Make user_user_sim_mat
+        user_user_sim_mat_val = {}
+        user_user_sim_mat_sum = {}
+        for item, users in item_user_set.items():
+            for useri in users:
+                user_user_sim_mat_val.setdefault(useri, defaultdict(float))
+                user_user_sim_mat_sum.setdefault(useri, defaultdict(float))
+                len_useri = len(user_item_rating_mat[useri])
+                for userj in users:
+                    len_userj = len(user_item_rating_mat[userj])
+                    if useri == userj:
+                        continue
+                    if use_iif_similarity:
+                        user_user_sim_mat_val[useri][userj] += 1 / math.log(1 + len(users))
+                        user_user_sim_mat_sum[useri][userj] = user_user_sim_mat_val[useri][userj] / math.sqrt(len_useri * len_userj)
+                    else:
+                        user_user_sim_mat_val[useri][userj] += 1
+                        user_user_sim_mat_sum[useri][userj] = user_user_sim_mat_val[useri][userj] / math.sqrt(len_useri * len_userj)
+        
+        # 2.2.3) store user_user_sim_mat
+        sql = """drop table if exists {user_user_sim_table};
+                create table {user_user_sim_table} (userid integer, sim_user json);""".format(
+                user_user_sim_table=user_user_sim_table
+                )
+        plpy.execute(sql)
+        
+        for userid, users in user_user_sim_mat_sum.items():
+            users_json = json.dumps(users)
+            sql = """insert into {user_user_sim_table} values ({userid}, $${users_json}$$);""".format(
+                user_user_sim_table=user_user_sim_table,
+                userid=userid,
+                users_json=users_json
+            )
+            plpy.execute(sql)
+    
+    # 2.3) Read user_user_sim_table
+    sql = """select * from {user_user_sim_table};""".format(
+                user_user_sim_table=user_user_sim_table,
+            )
+    results = plpy.execute(sql)
+    
+    user_user_sim_mat = {}
+    for result in results:
+        useri = result['userid']
+        user_user_sim_mat.setdefault(useri, defaultdict(float))
+        users_json = json.loads(result['sim_user'])
+        for userj, useri_userj_sim in users_json.items():
+            user_user_sim_mat[useri][int(userj)] = useri_userj_sim
+    
+    # 3) Generate user-item-score matrix
+    # 3.1) Make user_item_score table 
+    user_item_score_mat = {}
+    for useri, users in user_user_sim_mat.items():
+        interacted_items = user_item_rating_mat[useri]
+        user_item_score_mat.setdefault(useri, defaultdict(float))
+        for userj, similarity in sorted(users.items(), key=itemgetter(1), reverse=True)[:k_sim_user]:
+            for item, rating in user_item_rating_mat[userj].items():
+                if item in interacted_items:
+                    continue
+                user_item_score_mat[useri][item] += similarity * rating
+    
+    # 3.2) Store user_item_score_mat
+    user_item_score_table = train_table + '_usercf_score'
+    sql = """drop table if exists {user_item_score_table};
+                create table {user_item_score_table} (userid integer, scored_item json);""".format(
+                user_item_score_table=user_item_score_table
+                )
+    plpy.execute(sql)
+    
+    for userid, items in user_item_score_mat.items():
+        items_json = json.dumps(items)
+        sql = """insert into {user_item_score_table} values ({userid}, $${items_json}$$);""".format(
+            user_item_score_table=user_item_score_table,
+            userid=userid,
+            items_json=items_json
+        )
+        plpy.execute(sql)
+
+    plpy.info('Training finish! Users\' scored items are stored in table ' + user_item_score_table)
+
+    # 4) Test recommendation results
+    if test_table:
+        # 4.1) Do statistic 
+        item_set = set()
+        item_popular = defaultdict(int)
+        for user, items in user_item_rating_mat.items():
+            for item in items:
+                item_set.add(item)
+                item_popular[item] += 1
+        item_count = len(item_set)
+
+        # 4.2) Read true data  
+        sql = """select {user_varname}, {item_varname} from {test_table};""".format(
+            user_varname=quote_ident(user_varname),
+            item_varname=quote_ident(item_varname),
+            test_table=test_table
+        )
+        results = plpy.execute(sql)
+    
+        user_item_true_mat = defaultdict(set)
+        for result in results:
+            user_item_true_mat[result[user_varname]].add(result[item_varname])
+
+        # 4.3) Test
+        hit_count = 0
+        rec_count = 0
+        test_count = 0
+        all_rec_items = set()
+        popular_sum = 0
+        for user in user_item_rating_mat:
+            if user not in user_item_true_mat:
+                continue
+            true_items = user_item_true_mat[user]
+            scored_items = user_item_score_mat[user]
+            for item, _ in sorted(scored_items.items(), key=itemgetter(1), reverse=True)[:n_rec_item]:
+                if item in true_items:
+                    hit_count += 1
+                all_rec_items.add(item)
+                popular_sum += math.log(1 + item_popular[item])
+            rec_count += n_rec_item
+            test_count += len(true_items)
+        precision = hit_count / (1.0 * rec_count)
+        recall = hit_count / (1.0 * test_count)
+        coverage = len(all_rec_items) / (1.0 * item_count)
+        popularity = popular_sum / (1.0 * rec_count)
+        plpy.info('Testing finish! Precision:', precision, 'Recall:', recall, 'Coverage:', coverage, 'Popularity:', popularity)
+
+def predict_validate(train_table, predict_table, user_varname, recommend_table, n_rec_item):
+    if not train_table or not predict_table or not user_varname or not recommend_table or not n_rec_item or n_rec_item < 1:
+        plpy.error("The input parameters are invalid.")
+
+def predict(schema_madlib, train_table, predict_table, user_varname, recommend_table, n_rec_item, **kwargs):
+    
+    # 0) Validate input parameters
+    predict_validate(train_table, predict_table, user_varname, recommend_table, n_rec_item)
+    
+    # 1) Read user-item-score table
+    sql = """select userid, scored_item from {user_item_score_table};""".format(
+            user_item_score_table=train_table+'_usercf_score'
+        )
+    results = plpy.execute(sql)
+
+    user_item_score_mat = {}
+    for result in results:
+        userid = result['userid']
+        user_item_score_mat.setdefault(userid, [])
+        scored_items = json.loads(result['scored_item'])
+        for itemid, _ in sorted(scored_items.items(), key=itemgetter(1), reverse=True)[:n_rec_item]:
+            user_item_score_mat[userid].append(itemid)
+    
+    # 2) Read predict table
+    sql = """select {user_varname} from {predict_table};""".format(
+            user_varname=quote_ident(user_varname),
+            predict_table=predict_table
+        )
+    results = plpy.execute(sql)
+
+    users = set()
+    for result in results:
+        users.add(result[user_varname])
+    
+    # 3) Generate recommend table
+    sql = """drop table if exists {recommend_table};
+                create table {recommend_table} (userid integer, recommend_item integer[]);""".format(
+                recommend_table=recommend_table
+                )
+    plpy.execute(sql)
+    
+    for user in users:
+        if user not in user_item_score_mat:
+            plpy.info("Userid", user, "is a cold-start user!")
+            continue
+        recommend_item = [int(x) for x in user_item_score_mat[user]]
+        sql = """insert into {recommend_table} values ({userid}, array{recommend_item});""".format(
+            recommend_table=recommend_table,
+            userid=user,
+            recommend_item=recommend_item
+        )
+        plpy.execute(sql)
+
+    plpy.info('Recommending finish! Users\' recommended items are stored in table ' + recommend_table)
+
+                

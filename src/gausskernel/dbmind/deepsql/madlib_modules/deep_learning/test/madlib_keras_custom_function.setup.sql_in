@@ -1,0 +1,93 @@
+/* ---------------------------------------------------------------------*//**
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ *
+ ** ---------------------------------------------------------------------*/
+
+---- utility for creating valid dill objects ----
+CREATE OR REPLACE FUNCTION custom_function_object()
+RETURNS BYTEA AS
+$$
+import dill
+def test_sum_fn(a, b):
+	return a+b
+
+pb=dill.dumps(test_sum_fn)
+return pb
+$$ language plpythonu;
+
+CREATE OR REPLACE FUNCTION read_custom_function(pb bytea, arg1 int, arg2 int)
+RETURNS INTEGER AS
+$$
+import dill
+obj=dill.loads(pb)
+res=obj(arg1, arg2)
+return res
+$$ language plpythonu;
+
+---- loss:huber_loss ----
+CREATE OR REPLACE FUNCTION custom_function_huber_loss()
+RETURNS BYTEA AS
+$$
+import dill
+import tensorflow as tf
+def huber_loss(true, pred,delta=0.5):
+    #delta = 1.5
+    loss = tf.where(tf.abs(true-pred)<delta,0.5*((true-pred)**2),delta*tf.abs(true-pred)-0.5*(delta**2))
+    return loss
+pb_huber_loss=dill.dumps(huber_loss)
+return pb_huber_loss
+$$ language plpythonu;
+
+---- loss&metric:root_mean_squared_error ----
+CREATE OR REPLACE FUNCTION custom_function_RMSE()
+RETURNS BYTEA AS
+$$
+import dill
+from keras import backend as K
+def RMSE(y_true, y_pred): 
+    return K.sqrt(K.mean(K.square(y_pred - y_true), axis=-1))
+pb_RMSE=dill.dumps(RMSE)
+return pb_RMSE
+$$language plpythonu;
+
+---- metric:top_k_categorical_accuracy ----
+CREATE OR REPLACE FUNCTION custom_function_top_k_categorical_accuracy_metric()
+RETURNS BYTEA AS
+$$
+import dill
+from keras import metrics
+def top_k_categorical_accuracy(y_true,y_pred,k=1):
+    return metrics.top_k_categorical_accuracy(y_true,y_pred,k)
+pb_top_k_categorical_accuracy=dill.dumps(top_k_categorical_accuracy)
+return pb_top_k_categorical_accuracy
+$$language plpythonu;
+
+---- metric:categorical_hinge ----
+CREATE OR REPLACE FUNCTION custom_function_categorical_hinge_metric()
+RETURNS BYTEA AS
+$$
+import dill
+from keras import backend as K
+def categorical_hinge(y_true, y_pred):
+    pos = K.sum(y_true * y_pred, axis=-1)
+    neg = K.max((1. - y_true) * y_pred, axis=-1)
+    return K.maximum(0., neg - pos + 1.)
+pb_categorical_hinge=dill.dumps(categorical_hinge)
+return pb_categorical_hinge
+$$language plpythonu;

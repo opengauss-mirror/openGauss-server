@@ -1,0 +1,12 @@
+\i m4_regexp(MODULE_PATHNAME,
+             `\(.*\)libmadlib\.so',
+             `\1../../modules/recommendation_systems/test/movielens100k_dataset.setup.sql_in'
+)
+
+m4_include(`SQLCommon.m4')
+
+
+
+-- train & test & predict --
+select madlib.LFM_train('public.test_movielens100k_train','UserId','ItemId','Rating',200,20,0.02,0.01,'public.test_movielens100k_test',10);
+select madlib.LFM_predict('public.test_movielens100k_train','public.test_movielens100k_test','UserId','public.test_movielens100k_recommend',10);

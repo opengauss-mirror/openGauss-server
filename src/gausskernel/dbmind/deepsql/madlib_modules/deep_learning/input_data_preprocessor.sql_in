@@ -1,0 +1,1056 @@
+/* ----------------------------------------------------------------------- */
+/**
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ *
+ * @file input_preprocessor_dl.sql_in
+ * @brief Utilities to prepare input image data for use by deep learning modules.
+ * @date December 2018
+ *
+ */
+/* ----------------------------------------------------------------------- */
+
+m4_include(`SQLCommon.m4')
+
+/**
+@addtogroup grp_input_preprocessor_dl
+
+@brief Utilities that prepare input image data for use by deep learning
+modules.
+
+\warning <em> This MADlib method is still in early stage development.
+Interface and implementation are subject to change. </em>
+
+<div class="toc"><b>Contents</b><ul>
+<li class="level1"><a href="#training_preprocessor_dl">Preprocessor for Training Image Data</a></li>
+<li class="level1"><a href="#validation_preprocessor_dl">Preprocessor for Validation Image Data</a></li>
+<li class="level1"><a href="#output">Output Tables</a></li>
+<li class="level1"><a href="#example">Examples</a></li>
+<li class="level1"><a href="#references">References</a></li>
+<li class="level1"><a href="#related">Related Topics</a></li>
+</ul></div>
+
+This preprocessor is a utility that prepares image data for use
+by frameworks like Keras and TensorFlow that support mini-batching
+as an optimization option.  The advantage of using mini-batching is that
+it can perform better than stochastic gradient descent
+because it uses more than one training example at a time, typically
+resulting in faster and smoother convergence [1].
+
+Images can be
+represented as an array of numbers
+where each element represents grayscale,
+RGB or other channel values for each
+pixel in the image. It is standard practice to
+normalize the image data before training.
+The normalizing constant in this module is parameterized,
+so it can be set depending on
+the format of image data used.
+
+There are two versions of the preprocessor:
+training_preprocessor_dl() preprocesses input image data to be
+used for training a deep learning model, while
+validation_preprocessor_dl() preprocesses validation
+image data used for model evaluation.
+
+@anchor training_preprocessor_dl
+@par Preprocessor for Training Image Data
+
+<pre class="syntax">
+training_preprocessor_dl(source_table,
+                         output_table,
+                         dependent_varname,
+                         independent_varname,
+                         buffer_size,
+                         normalizing_const,
+                         num_classes,
+                         distribution_rules
+                        )
+</pre>
+
+\b Arguments
+<dl class="arglist">
+  <dt>source_table</dt>
+  <dd>TEXT. Name of the table containing training dataset.
+  Can also be a view.
+  </dd>
+
+  <dt>output_table</dt>
+  <dd>TEXT.  Name of the output table from the training preprocessor which
+  will be used as input to algorithms that support mini-batching.
+  Note that the arrays packed into the output table are shuffled
+  and normalized, by dividing each element in the independent variable array
+  by the optional 'normalizing_const' parameter. For performance reasons,
+  packed arrays are converted to PostgreSQL bytea format, which is a
+  variable-length binary string.
+
+  In the case a validation data set is used (see
+  later on this page), this output table is also used
+  as an input to the validation preprocessor
+  so that the validation and training image data are
+  both preprocessed in an identical manner.
+  </dd>
+
+  <dt>dependent_varname</dt>
+  <dd>TEXT. Name of the dependent variable column.
+  @note The mini-batch preprocessor automatically 1-hot encodes
+  dependent variables of all types.  The exception is numeric array types
+  (integer and float), where we assume these are already 1-hot encoded,
+  so these will just be passed through as is.
+  </dd>
+
+  <dt>independent_varname</dt>
+  <dd>TEXT. Name of the independent variable column. The column must be
+  a numeric array type.
+  </dd>
+
+  <dt>buffer_size (optional)</dt>
+  <dd>INTEGER, default: computed. Buffer size is the number of rows from
+  the source table that are packed into one row of the preprocessor output
+  table. In the case of images, the source table will have one image per row,
+  and the output table will have multiple images per row. The default value is
+  computed considering the sizes of the source table and images and the number
+  of segments in the database cluster.
+  @note Using the default for 'buffer_size' will produce buffers that are relatively
+  large, which generally results in the fastest fit() runtime with Keras. Setting a
+  smaller buffer size may cause the preprocessor to run faster (although this is not
+  guaranteed, since it depends on database cluster size, data set, and other factors).
+  But since preprocessing is usually a one-time operation and fit() is called many times,
+  by default buffer sizes are optimized to make fit() as fast as possible.  Note that
+  specifying a 'buffer_size' does not guarantee that exact value will be used. Actual buffer
+  size is adjusted to avoid data skew, which adversely impacts fit() runtime.
+  </dd>
+
+  <dt>normalizing_const (optional)</dt>
+  <dd>REAL, default: 1.0. The normalizing constant to divide
+  each value in the 'independent_varname' array by.  For example,
+  you would use 255 for this value if the image data is in the form 0-255.
+  </dd>
+
+  <dt>num_classes (optional)</dt>
+  <dd>INTEGER, default: NULL. Number of class labels for 1-hot
+  encoding. If NULL, the 1-hot encoded array
+  length will be equal to the number
+  of distinct class values found in the input table.
+  </dd>
+
+  <dt>distribution_rules (optional)</dt>
+  <dd>TEXT, default: 'all_segments'. Specifies how to distribute the
+  'output_table'.  This is important for how the fit function will use
+  resources on the cluster.  The default 'all_segments' means the
+  'output_table' will be distributed to all segments in the database
+  cluster.
+
+  If you specify 'gpu_segments' then the 'output_table' will be distributed
+  to all segments that are on hosts that have GPUs attached. This will make
+  maximum use of GPU resources when training a deep learning model.
+
+  You can also specify the name of a resources table containing the segments
+  to be used for training.  This table must contain a column called 'dbid' that
+  specifies the segment id from the 'gp_segment_configuration' table [2].
+  Refer to the utility function <a href="group__grp__gpu__configuration.html">GPU Configuration</a>
+  for more information on how to
+  identify segments attached to hosts that are GPU enabled.
+  </dd>
+</dl>
+
+@anchor validation_preprocessor_dl
+@par Preprocessor for Validation Image Data
+<pre class="syntax">
+validation_preprocessor_dl(source_table,
+                           output_table,
+                           dependent_varname,
+                           independent_varname,
+                           training_preprocessor_table,
+                           buffer_size,
+                           distribution_rules
+                          )
+</pre>
+
+\b Arguments
+<dl class="arglist">
+  <dt>source_table</dt>
+  <dd>TEXT. Name of the table containing validation dataset.
+  Can also be a view.
+  </dd>
+
+  <dt>output_table</dt>
+  <dd>TEXT.  Name of the output table from the validation
+  preprocessor which will be used as input to algorithms that support mini-batching.
+  The arrays packed into the output table are
+  normalized using the same normalizing constant from the
+  training preprocessor as specified in
+  the 'training_preprocessor_table' parameter described below.
+  Validation data is not shuffled.
+  For performance reasons,
+  packed arrays are converted to PostgreSQL bytea format, which is a
+  variable-length binary string.
+  </dd>
+
+  <dt>dependent_varname</dt>
+  <dd>TEXT. Name of the dependent variable column.
+  @note The mini-batch preprocessor automatically 1-hot encodes
+  dependent variables of all types.  The exception is numeric array types
+  (integer and float), where we assume these are already 1-hot encoded,
+  so these will just be passed through as is.
+  </dd>
+
+  <dt>independent_varname</dt>
+  <dd>TEXT. Name of the independent variable column. The column must be
+  a numeric array type.
+  </dd>
+
+  <dt>training_preprocessor_table</dt>
+  <dd>TEXT. The output table obtained by
+  running training_preprocessor_dl().
+  Validation data is preprocessed in the same way as
+  training data, i.e., same normalizing constant and dependent
+  variable class values.
+  </dd>
+
+ <dt>buffer_size (optional)</dt>
+  <dd>INTEGER, default: computed. Buffer size is the number of rows from
+  the source table that are packed into one row of the preprocessor output
+  table. In the case of images, the source table will have one image per row,
+  and the output table will have multiple images per row. The default value is
+  computed considering the sizes of the source table and images and the number
+  of segments in the database cluster.
+  @note Using the default for 'buffer_size' will produce buffers that are relatively
+  large, which generally results in the fastest fit() runtime with Keras. Setting a
+  smaller buffer size may cause the preprocessor to run faster (although this is not
+  guaranteed, since it depends on database cluster size, data set, and other factors).
+  But since preprocessing is usually a one-time operation and fit() is called many times,
+  by default buffer sizes are optimized to make fit() as fast as possible.  Note that
+  specifying a 'buffer_size' does not guarantee that exact value will be used. Actual buffer
+  size is adjusted to avoid data skew, which adversely impacts fit() runtime.
+  </dd>
+
+ <dt>distribution_rules (optional)</dt>
+  <dd>TEXT, default: 'all_segments'. Specifies how to distribute the
+  'output_table'.  This is important for how the fit function will use
+  resources on the cluster.  The default 'all_segments' means the
+  'output_table' will be distributed to all segments in the database
+  cluster.
+
+  If you specify 'gpu_segments' then the 'output_table' will be distributed
+  to all segments that are on hosts that have GPUs attached. This will make
+  maximum use of GPU resources when training a deep learning model.
+
+  You can also specify the name of a resources table containing the segments
+  to be used for training.  This table must contain a column called 'dbid' that
+  specifies the segment id from the 'gp_segment_configuration' table [2].
+  Refer to the utility function <a href="group__grp__gpu__configuration.html">GPU Configuration</a>
+  for more information on how to
+  identify segments attached to hosts that are GPU enabled.
+  </dd>
+
+</dl>
+
+@anchor output
+@par Output Tables
+<br>
+    The output tables produced by both training_preprocessor_dl() and
+    validation_preprocessor_dl() contain the following columns:
+    <table class="output">
+      <tr>
+        <th>independent_var</th>
+        <td>BYTEA. Packed array of independent variables in PostgreSQL bytea format.
+        Arrays of independent variables packed into the output table are
+        normalized by dividing each element in the independent variable array by the
+        optional 'normalizing_const' parameter.  Training data is shuffled, but
+        validation data is not.
+        </td>
+      </tr>
+      <tr>
+        <th>dependent_var</th>
+        <td>BYTEA. Packed array of dependent variables in PostgreSQL bytea format.
+        The dependent variable is always one-hot encoded as an
+        integer array. For now, we are assuming that
+        input_preprocessor_dl() will be used
+        only for classification problems using deep learning. So
+        the dependent variable is one-hot encoded, unless it's already a
+        numeric array in which case we assume it's already one-hot
+        encoded and just cast it to an integer array.
+        </td>
+      </tr>
+      <tr>
+        <th>independent_var_shape</th>
+        <td>INTEGER[]. Shape of the independent variable array after preprocessing.
+        The first element is the number of images packed per row, and subsequent
+        elements will depend on how the image is described (e.g., channels first or last).
+        </td>
+      </tr>
+      <tr>
+        <th>dependent_var_shape</th>
+        <td>INTEGER[]. Shape of the dependent variable array after preprocessing.
+        The first element is the number of images packed per row, and the second
+        element is the number of class values.
+        </td>
+      </tr>
+      <tr>
+        <th>buffer_id</th>
+        <td>INTEGER. Unique id for each row in the packed table.
+        </td>
+      </tr>
+    </table>
+
+A summary table named \<output_table\>_summary is also created, which
+has the following columns (the columns are the same for
+both validation_preprocessor_dl() and training_preprocessor_dl() ):
+    <table class="output">
+    <tr>
+        <th>source_table</th>
+        <td>Name of the source table.</td>
+    </tr>
+    <tr>
+        <th>output_table</th>
+        <td>Name of output table generated by preprocessor.</td>
+    </tr>
+    <tr>
+        <th>dependent_varname</th>
+        <td>Dependent variable from the source table.</td>
+    </tr>
+    <tr>
+        <th>independent_varname</th>
+        <td>Independent variable from the source table.</td>
+    </tr>
+    <tr>
+        <th>dependent_vartype</th>
+        <td>Type of the dependent variable from the source table.</td>
+    </tr>
+    <tr>
+        <th>class_values</th>
+        <td>The dependent level values that one-hot encoding maps to.</td>
+    </tr>
+    <tr>
+        <th>buffer_size</th>
+        <td>Buffer size used in preprocessing step.</td>
+    </tr>
+    <tr>
+        <th>normalizing_const</th>
+        <td>The value used to normalize the input image data.</td>
+    </tr>
+    <tr>
+        <th>num_classes</th>
+        <td>Number of dependent levels the one-hot encoding is created
+        for. NULLs are padded at the end if the number of distinct class
+        levels found in the input data is less than the 'num_classes' parameter
+        specified in training_preprocessor_dl().</td>
+    </tr>
+    <tr>
+        <th>distribution_rules</th>
+        <td>This is the list of segment id's in the form of 'dbid'
+        describing how the 'output_table' is distributed,
+        as per the 'distribution_rules' input parameter.
+        If the 'distribution_rules' parameter is set to 'all_segments', then
+        this will also be set to 'all_segments'.</td>
+    </tr>
+    <tr>
+        <th>__internal_gpu_config__</th>
+        <td>For internal use.  (Note: this is the list of segment id's
+        where data is distributed in the form of 'content' id, which
+        is different from 'dbid' [2].)</td>
+    </tr>
+   </table>
+
+@anchor example
+@par Examples
+-#  Create an artificial 2x2 resolution color image data set with 3 possible classifications.
+The RGB values are per-pixel arrays:
+<pre class="example">
+DROP TABLE IF EXISTS image_data;
+CREATE TABLE image_data AS (
+    SELECT ARRAY[
+        ARRAY[
+            ARRAY[(random() * 256)::integer, -- pixel (1,1)
+                (random() * 256)::integer,
+                (random() * 256)::integer],
+            ARRAY[(random() * 256)::integer, -- pixel (2,1)
+                (random() * 256)::integer,
+                (random() * 256)::integer]
+        ],
+        ARRAY[
+            ARRAY[(random() * 256)::integer, -- pixel (1,2)
+                (random() * 256)::integer,
+                (random() * 256)::integer],
+            ARRAY[(random() * 256)::integer, -- pixel (2,1)
+                (random() * 256)::integer,
+                (random() * 256)::integer]
+        ]
+    ] as rgb, ('{cat,dog,bird}'::text[])[ceil(random()*3)] as species
+    FROM generate_series(1, 52)
+);
+SELECT * FROM image_data;
+</pre>
+<pre class="result">
+                             rgb                              | species
+--------------------------------------------------------------+---------
+ {{{124,198,44},{91,47,130}},{{24,175,69},{196,189,166}}}     | dog
+ {{{111,202,129},{198,249,254}},{{141,37,88},{187,167,113}}}  | dog
+ {{{235,53,39},{145,167,209}},{{197,147,222},{55,218,53}}}    | dog
+ {{{231,48,125},{248,233,151}},{{63,125,230},{33,24,70}}}     | dog
+ {{{92,146,121},{163,241,110}},{{75,88,72},{218,90,12}}}      | bird
+ {{{88,114,59},{202,211,152}},{{92,76,58},{77,186,134}}}      | dog
+ {{{2,96,255},{14,48,19}},{{240,55,115},{137,255,245}}}       | dog
+ {{{165,122,98},{16,115,240}},{{4,106,116},{108,242,210}}}    | dog
+ {{{155,207,101},{214,167,24}},{{118,240,228},{199,230,21}}}  | dog
+ {{{94,212,15},{48,66,170}},{{255,167,128},{166,191,246}}}    | dog
+ {{{169,69,131},{16,98,225}},{{228,113,17},{38,27,17}}}       | bird
+ {{{156,183,139},{146,77,46}},{{80,202,230},{146,84,239}}}    | dog
+ {{{190,210,147},{227,31,66}},{{229,251,84},{51,118,240}}}    | bird
+ {{{253,175,200},{237,151,107}},{{207,56,162},{133,39,35}}}   | cat
+ {{{146,185,108},{14,10,105}},{{188,210,86},{83,61,36}}}      | dog
+ {{{223,169,177},{3,200,250}},{{112,91,16},{193,32,151}}}     | cat
+ {{{249,145,240},{144,153,58}},{{131,156,230},{56,50,75}}}    | dog
+ {{{212,186,229},{52,251,197}},{{230,121,201},{35,215,119}}}  | cat
+ {{{234,94,23},{114,196,94}},{{242,249,90},{223,24,109}}}     | bird
+ {{{111,36,145},{77,135,123}},{{171,158,237},{111,252,222}}}  | dog
+ {{{90,74,240},{231,133,95}},{{11,21,173},{146,144,88}}}      | cat
+ {{{170,52,237},{13,114,71}},{{87,99,46},{220,194,56}}}       | bird
+ {{{8,17,92},{64,2,203}},{{10,131,145},{4,129,30}}}           | cat
+ {{{217,218,207},{74,68,186}},{{127,107,76},{38,60,16}}}      | bird
+ {{{193,34,83},{203,99,58}},{{251,224,50},{228,118,113}}}     | dog
+ {{{146,218,155},{32,159,243}},{{146,218,189},{101,114,25}}}  | bird
+ {{{179,160,74},{204,81,246}},{{50,189,39},{60,42,185}}}      | cat
+ {{{13,82,174},{198,151,84}},{{65,249,100},{179,234,104}}}    | cat
+ {{{162,190,124},{184,66,138}},{{10,240,80},{161,68,145}}}    | dog
+ {{{164,144,199},{53,42,111}},{{122,174,128},{220,143,100}}}  | cat
+ {{{160,138,104},{177,86,3}},{{104,226,149},{181,16,229}}}    | dog
+ {{{246,119,211},{229,249,119}},{{117,192,172},{159,47,38}}}  | cat
+ {{{175,1,220},{18,78,124}},{{156,181,45},{242,185,148}}}     | bird
+ {{{50,113,246},{101,213,180}},{{56,103,151},{87,169,124}}}   | cat
+ {{{73,109,147},{22,81,197}},{{135,71,42},{91,251,98}}}       | bird
+ {{{206,61,255},{25,151,211}},{{211,124,7},{206,64,237}}}     | cat
+ {{{201,71,34},{182,142,43}},{{198,172,171},{230,1,23}}}      | bird
+ {{{142,158,2},{223,45,205}},{{118,177,223},{232,178,141}}}   | cat
+ {{{86,190,128},{195,172,14}},{{97,173,237},{142,123,99}}}    | cat
+ {{{26,72,148},{79,226,156}},{{96,62,220},{99,9,230}}}        | bird
+ {{{154,234,103},{184,18,65}},{{146,225,139},{214,156,10}}}   | cat
+ {{{244,169,103},{218,143,2}},{{196,246,186},{214,55,76}}}    | bird
+ {{{20,226,7},{96,153,200}},{{130,236,147},{229,38,142}}}     | bird
+ {{{172,102,107},{50,11,109}},{{145,9,123},{193,28,107}}}     | bird
+ {{{143,243,247},{132,104,137}},{{94,3,169},{253,246,59}}}    | bird
+ {{{78,74,228},{51,200,218}},{{170,155,190},{164,18,51}}}     | dog
+ {{{163,226,161},{56,182,239}},{{129,154,35},{73,116,205}}}   | bird
+ {{{74,243,3},{172,182,149}},{{101,34,163},{111,138,95}}}     | cat
+ {{{224,178,126},{4,61,93}},{{174,238,96},{118,232,208}}}     | bird
+ {{{55,236,249},{7,189,242}},{{151,173,130},{49,232,5}}}      | bird
+ {{{9,16,30},{128,32,85}},{{108,25,91},{41,11,243}}}          | bird
+ {{{141,35,191},{146,240,141}},{{207,239,166},{102,194,121}}} | bird
+(52 rows)
+</pre>
+-#  Run the preprocessor for training image data:
+<pre class="example">
+DROP TABLE IF EXISTS image_data_packed, image_data_packed_summary;
+SELECT madlib.training_preprocessor_dl('image_data',         -- Source table
+                                        'image_data_packed',  -- Output table
+                                        'species',            -- Dependent variable
+                                        'rgb',                -- Independent variable
+                                        NULL,                 -- Buffer size
+                                        255                   -- Normalizing constant
+                                        );
+</pre>
+For small datasets like in this example, buffer size is mainly determined
+by the number of segments in the database. For a Greenplum database with 2 segments,
+there will be 2 rows with a buffer size of 26. For PostgresSQL, there would
+be only one row with a buffer size of 52 since it is a single node database.
+For larger data sets, other factors go into computing buffers size besides
+number of segments.
+Here is the packed output table of training data for our simple example:
+<pre class="example">
+SELECT independent_var_shape, dependent_var_shape, buffer_id FROM image_data_packed ORDER BY buffer_id;
+</pre>
+<pre class="result">
+ independent_var_shape | dependent_var_shape | buffer_id
+-----------------------+---------------------+-----------
+ {26,2,2,3}            | {26,3}              |         0
+ {26,2,2,3}            | {26,3}              |         1
+(2 rows)
+</pre>
+Review the output summary table:
+<pre class="example">
+\\x on
+SELECT * FROM image_data_packed_summary;
+</pre>
+<pre class="result">
+-[ RECORD 1 ]-----------+------------------
+source_table            | image_data
+output_table            | image_data_packed
+dependent_varname       | species
+independent_varname     | rgb
+dependent_vartype       | text
+class_values            | {bird,cat,dog}
+buffer_size             | 26
+normalizing_const       | 255
+num_classes             | 3
+distribution_rules      | all_segments
+__internal_gpu_config__ | all_segments
+</pre>
+
+-#  Run the preprocessor for the validation dataset.
+In this example, we use the same images for
+validation to demonstrate, but normally validation data
+is different than training data:
+<pre class="example">
+DROP TABLE IF EXISTS val_image_data_packed, val_image_data_packed_summary;
+SELECT madlib.validation_preprocessor_dl(
+      'image_data',             -- Source table
+      'val_image_data_packed',  -- Output table
+      'species',                -- Dependent variable
+      'rgb',                    -- Independent variable
+      'image_data_packed',      -- From training preprocessor step
+      NULL                      -- Buffer size
+      );
+</pre>
+We could choose to use a different buffer size compared to the
+training_preprocessor_dl run (but generally don't need to).
+Other parameters such as num_classes and
+normalizing_const that were passed to training_preprocessor_dl are
+automatically inferred using the image_data_packed param that is passed.
+Here is the packed output table of validation data for our simple example:
+<pre class="example">
+SELECT independent_var_shape, dependent_var_shape, buffer_id FROM val_image_data_packed ORDER BY buffer_id;
+</pre>
+<pre class="result">
+ independent_var_shape | dependent_var_shape | buffer_id
+-----------------------+---------------------+-----------
+ {26,2,2,3}            | {26,3}              |         0
+ {26,2,2,3}            | {26,3}              |         1
+(2 rows)
+</pre>
+Review the output summary table:
+<pre class="example">
+\\x on
+SELECT * FROM val_image_data_packed_summary;
+</pre>
+<pre class="result">
+-[ RECORD 1 ]-----------+----------------------
+source_table            | image_data
+output_table            | val_image_data_packed
+dependent_varname       | species
+independent_varname     | rgb
+dependent_vartype       | text
+class_values            | {bird,cat,dog}
+buffer_size             | 26
+normalizing_const       | 255
+num_classes             | 3
+distribution_rules      | all_segments
+__internal_gpu_config__ | all_segments
+</pre>
+
+-#  Load data in another format.  Create an artificial 2x2 resolution color image
+data set with 3 possible classifications. The RGB values are unrolled into a flat array:
+<pre class="example">
+DROP TABLE IF EXISTS image_data;
+CREATE TABLE image_data AS (
+SELECT ARRAY[
+        (random() * 256)::integer, -- R values
+        (random() * 256)::integer,
+        (random() * 256)::integer,
+        (random() * 256)::integer,
+        (random() * 256)::integer, -- G values
+        (random() * 256)::integer,
+        (random() * 256)::integer,
+        (random() * 256)::integer,
+        (random() * 256)::integer, -- B values
+        (random() * 256)::integer,
+        (random() * 256)::integer,
+        (random() * 256)::integer
+    ] as rgb, ('{cat,dog,bird}'::text[])[ceil(random()*3)] as species
+FROM generate_series(1, 52)
+);
+SELECT * FROM image_data;
+</pre>
+<pre class="result">
+                       rgb                        | species
+--------------------------------------------------+---------
+ {26,150,191,113,235,57,145,143,44,145,85,25}     | dog
+ {240,43,225,15,220,136,186,209,49,130,55,111}    | bird
+ {25,191,37,77,193,62,249,228,97,33,81,7}         | cat
+ {141,223,46,195,201,19,207,78,160,130,157,89}    | cat
+ {39,249,168,164,223,193,99,4,14,37,66,7}         | cat
+ {159,250,127,44,151,254,11,211,247,137,79,233}   | cat
+ {19,230,76,253,42,175,230,143,184,133,27,215}    | cat
+ {199,224,144,5,64,19,200,186,109,218,108,70}     | bird
+ {148,136,4,41,185,104,203,253,113,151,166,76}    | bird
+ {230,132,114,213,210,139,91,199,240,142,203,75}  | bird
+ {166,188,96,217,135,70,93,249,27,47,132,118}     | bird
+ {118,120,222,236,110,83,240,47,19,206,222,51}    | bird
+ {230,3,26,47,93,144,167,59,123,21,142,107}       | cat
+ {250,224,62,136,112,142,88,187,24,1,168,216}     | bird
+ {52,144,231,12,76,1,162,11,114,141,69,3}         | cat
+ {166,172,246,169,200,102,62,57,239,75,165,88}    | dog
+ {151,50,112,227,199,97,47,4,43,123,116,133}      | bird
+ {39,185,96,127,80,248,177,191,218,120,32,9}      | dog
+ {25,172,34,34,40,109,166,23,60,216,246,54}       | bird
+ {163,39,89,170,95,230,137,141,169,82,159,121}    | dog
+ {131,143,183,138,151,90,177,240,4,16,214,141}    | dog
+ {99,233,100,9,159,140,30,202,29,169,120,62}      | bird
+ {99,162,69,10,204,169,219,20,106,170,111,16}     | bird
+ {16,246,27,32,187,226,0,75,231,64,94,175}        | bird
+ {25,135,244,101,50,4,91,77,36,22,47,37}          | dog
+ {22,101,191,197,96,138,78,198,155,138,193,51}    | bird
+ {236,22,110,30,181,20,218,21,236,97,91,73}       | dog
+ {160,57,34,212,239,197,233,174,164,97,88,153}    | cat
+ {226,170,192,123,242,224,190,51,163,192,91,105}  | bird
+ {149,174,12,72,112,1,37,153,118,201,79,121}      | bird
+ {34,250,232,222,218,221,234,201,138,66,186,58}   | bird
+ {162,55,85,159,247,234,77,3,50,189,4,87}         | dog
+ {122,32,164,243,0,198,237,232,164,199,197,142}   | dog
+ {80,209,75,138,169,236,193,254,140,184,232,217}  | bird
+ {112,148,114,137,13,107,105,75,243,218,218,75}   | dog
+ {241,76,61,202,76,112,90,51,125,166,52,30}       | bird
+ {75,132,239,207,49,224,250,19,238,214,154,169}   | dog
+ {203,43,222,58,231,5,243,71,131,67,63,52}        | cat
+ {229,12,133,142,179,80,185,145,138,160,149,125}  | bird
+ {64,251,61,153,13,100,145,181,8,112,118,107}     | dog
+ {128,223,60,248,126,124,243,188,20,0,31,166}     | bird
+ {39,22,43,146,138,174,33,65,56,184,155,234}      | dog
+ {177,247,133,154,159,37,148,30,81,43,29,92}      | bird
+ {56,127,199,118,105,120,109,239,18,12,20,166}    | cat
+ {101,209,72,193,207,91,166,27,88,209,203,62}     | dog
+ {131,195,122,90,18,178,217,217,40,66,81,149}     | cat
+ {203,137,103,17,60,251,152,64,36,81,168,239}     | cat
+ {239,97,10,20,194,32,121,129,228,217,11,50}      | dog
+ {117,4,193,192,223,176,33,232,196,226,8,61}      | dog
+ {162,21,190,223,120,170,245,230,200,170,250,163} | bird
+ {32,67,65,195,2,39,198,28,86,35,172,254}         | dog
+ {39,19,236,146,87,140,203,121,96,187,62,73}      | dog
+(52 rows)
+</pre>
+
+-#  Run the preprocessor for training image data:
+<pre class="example">
+DROP TABLE IF EXISTS image_data_packed, image_data_packed_summary;
+SELECT madlib.training_preprocessor_dl('image_data',         -- Source table
+                                        'image_data_packed',  -- Output table
+                                        'species',            -- Dependent variable
+                                        'rgb',                -- Independent variable
+                                        NULL,                 -- Buffer size
+                                        255                   -- Normalizing constant
+                                        );
+</pre>
+Here is a sample of the packed output table:
+<pre class="example">
+SELECT independent_var_shape, dependent_var_shape, buffer_id FROM image_data_packed ORDER BY buffer_id;
+</pre>
+<pre class="result">
+ independent_var_shape | dependent_var_shape | buffer_id
+-----------------------+---------------------+-----------
+ {26,12}               | {26,3}              |         0
+ {26,12}               | {26,3}              |         1
+(2 rows)
+</pre>
+
+-#  Run the preprocessor for the validation dataset.
+In this example, we use the same images for
+validation to demonstrate, but normally validation data
+is different than training data:
+<pre class="example">
+DROP TABLE IF EXISTS val_image_data_packed, val_image_data_packed_summary;
+SELECT madlib.validation_preprocessor_dl(
+    'image_data',             -- Source table
+    'val_image_data_packed',  -- Output table
+    'species',                -- Dependent variable
+    'rgb',                    -- Independent variable
+    'image_data_packed',      -- From training preprocessor step
+    NULL                      -- Buffer size
+    );
+</pre>
+Here is a sample of the packed output summary table:
+<pre class="example">
+SELECT independent_var_shape, dependent_var_shape, buffer_id FROM val_image_data_packed ORDER BY buffer_id;
+</pre>
+<pre class="result">
+ independent_var_shape | dependent_var_shape | buffer_id
+-----------------------+---------------------+-----------
+ {26,12}               | {26,3}              |         0
+ {26,12}               | {26,3}              |         1
+(2 rows)
+</pre>
+
+-# Generally the default buffer size will work well,
+but if you have occasion to change it:
+<pre class="example">
+DROP TABLE IF EXISTS image_data_packed, image_data_packed_summary;
+SELECT madlib.training_preprocessor_dl('image_data',         -- Source table
+                                       'image_data_packed',  -- Output table
+                                       'species',            -- Dependent variable
+                                       'rgb',                -- Independent variable
+                                        10,                   -- Buffer size
+                                        255                   -- Normalizing constant
+                                        );
+SELECT independent_var_shape, dependent_var_shape, buffer_id FROM image_data_packed ORDER BY buffer_id;
+</pre>
+<pre class="result">
+ independent_var_shape | dependent_var_shape | buffer_id
+-----------------------+---------------------+-----------
+ {8,12}                | {8,3}               |         0
+ {9,12}                | {9,3}               |         1
+ {9,12}                | {9,3}               |         2
+ {9,12}                | {9,3}               |         3
+ {9,12}                | {9,3}               |         4
+ {8,12}                | {8,3}               |         5
+(6 rows)
+</pre>
+Review the output summary table:
+<pre class="example">
+\\x on
+SELECT * FROM image_data_packed_summary;
+</pre>
+<pre class="result">
+-[ RECORD 1 ]-----------+------------------
+source_table            | image_data
+output_table            | image_data_packed
+dependent_varname       | species
+independent_varname     | rgb
+dependent_vartype       | text
+class_values            | {bird,cat,dog}
+buffer_size             | 10
+normalizing_const       | 255
+num_classes             | 3
+distribution_rules      | all_segments
+__internal_gpu_config__ | all_segments
+</pre>
+
+-#  Run the preprocessor for image data with num_classes greater than 3 (distinct class values found in table):
+<pre class="example">
+DROP TABLE IF EXISTS image_data_packed, image_data_packed_summary;
+SELECT madlib.training_preprocessor_dl('image_data',         -- Source table
+                                        'image_data_packed',  -- Output table
+                                        'species',            -- Dependent variable
+                                        'rgb',                -- Independent variable
+                                        NULL,                 -- Buffer size
+                                        255,                  -- Normalizing constant
+                                        5                     -- Number of desired class values
+                                        );
+</pre>
+Here is a sample of the packed output table with the padded 1-hot vector:
+<pre class="example">
+SELECT independent_var_shape, dependent_var_shape, buffer_id FROM image_data_packed ORDER BY buffer_id;
+</pre>
+<pre class="result">
+ independent_var_shape | dependent_var_shape | buffer_id
+-----------------------+---------------------+-----------
+ {26,12}               | {26,5}              |         0
+ {26,12}               | {26,5}              |         1
+(2 rows)
+</pre>
+Review the output summary table:
+<pre class="example">
+\\x on
+SELECT * FROM image_data_packed_summary;
+</pre>
+<pre class="result">
+-[ RECORD 1 ]-----------+-------------------------
+source_table            | image_data
+output_table            | image_data_packed
+dependent_varname       | species
+independent_varname     | rgb
+dependent_vartype       | text
+class_values            | {bird,cat,dog,NULL,NULL}
+buffer_size             | 26
+normalizing_const       | 255
+num_classes             | 5
+distribution_rules      | all_segments
+__internal_gpu_config__ | all_segments
+</pre>
+
+-#  Using distribution rules to specify how to distribute
+the 'output_table'. This is important for how the fit function
+will use resources on the cluster. To distribute to all segments
+on hosts with GPUs attached:
+<pre class="example">
+DROP TABLE IF EXISTS image_data_packed, image_data_packed_summary;
+SELECT madlib.training_preprocessor_dl('image_data',          -- Source table
+                                        'image_data_packed',  -- Output table
+                                        'species',            -- Dependent variable
+                                        'rgb',                -- Independent variable
+                                        NULL,                 -- Buffer size
+                                        255,                  -- Normalizing constant
+                                        NULL,                 -- Number of classes
+                                        'gpu_segments'        -- Distribution rules
+                                        );
+\\x on
+SELECT * FROM image_data_packed_summary;
+</pre>
+<pre class="result">
+-[ RECORD 1 ]-----------+------------------
+source_table            | image_data
+output_table            | image_data_packed
+dependent_varname       | species
+independent_varname     | rgb
+dependent_vartype       | text
+class_values            | {bird,cat,dog}
+buffer_size             | 26
+normalizing_const       | 255
+num_classes             | 3
+distribution_rules      | {2,3,4,5}
+__internal_gpu_config__ | {0,1,2,3}
+</pre>
+To distribute to only specified segments, create a
+distribution table with a column called 'dbid' that
+lists the segments you want:
+<pre class="example">
+DROP TABLE IF EXISTS segments_to_use;
+CREATE TABLE segments_to_use(
+    dbid INTEGER,
+    hostname TEXT
+);
+INSERT INTO segments_to_use VALUES
+(2, 'hostname-01'),
+(3, 'hostname-01');
+DROP TABLE IF EXISTS image_data_packed, image_data_packed_summary;
+SELECT madlib.training_preprocessor_dl('image_data',          -- Source table
+                                        'image_data_packed',  -- Output table
+                                        'species',            -- Dependent variable
+                                        'rgb',                -- Independent variable
+                                        NULL,                 -- Buffer size
+                                        255,                  -- Normalizing constant
+                                        NULL,                 -- Number of classes
+                                        'segments_to_use'     -- Distribution rules
+                                        );
+\\x on
+SELECT * FROM image_data_packed_summary;
+</pre>
+<pre class="result">
+-[ RECORD 1 ]-----------+------------------
+source_table            | image_data
+output_table            | image_data_packed
+dependent_varname       | species
+independent_varname     | rgb
+dependent_vartype       | text
+class_values            | {bird,cat,dog}
+buffer_size             | 26
+normalizing_const       | 255
+num_classes             | 3
+distribution_rules      | {2,3}
+__internal_gpu_config__ | {0,1}
+</pre>
+
+@anchor references
+@par References
+
+[1] "Neural Networks for Machine Learning", Lectures 6a and 6b on mini-batch gradient descent,
+Geoffrey Hinton with Nitish Srivastava and Kevin Swersky, http://www.cs.toronto.edu/~tijmen/csc321/slides/lecture_slides_lec6.pdf
+
+[2] Greenplum 'gp_segment_configuration' table https://gpdb.docs.pivotal.io/latest/ref_guide/system_catalogs/gp_segment_configuration.html
+
+@anchor related
+@par Related Topics
+
+training_preprocessor_dl()
+
+validation_preprocessor_dl()
+
+gpu_configuration()
+
+*/
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.validation_preprocessor_dl(
+    source_table                VARCHAR,
+    output_table                VARCHAR,
+    dependent_varname           VARCHAR,
+    independent_varname         VARCHAR,
+    training_preprocessor_table VARCHAR,
+    buffer_size                 INTEGER,
+    distribution_rules          TEXT
+) RETURNS VOID AS $$
+    PythonFunctionBodyOnly(deep_learning, input_data_preprocessor)
+    from utilities.control import MinWarning
+    with AOControl(False):
+        with MinWarning('error'):
+            validation_preprocessor_obj = input_data_preprocessor.ValidationDataPreprocessorDL(**globals())
+            validation_preprocessor_obj.validation_preprocessor_dl()
+$$ LANGUAGE plpythonu VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.validation_preprocessor_dl(
+    source_table                VARCHAR,
+    output_table                VARCHAR,
+    dependent_varname           VARCHAR,
+    independent_varname         VARCHAR,
+    training_preprocessor_table VARCHAR,
+    buffer_size                 INTEGER
+) RETURNS VOID AS $$
+  SELECT MADLIB_SCHEMA.validation_preprocessor_dl($1, $2, $3, $4, $5, $6, NULL);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.validation_preprocessor_dl(
+    source_table                VARCHAR,
+    output_table                VARCHAR,
+    dependent_varname           VARCHAR,
+    independent_varname         VARCHAR,
+    training_preprocessor_table VARCHAR
+) RETURNS VOID AS $$
+  SELECT MADLIB_SCHEMA.validation_preprocessor_dl($1, $2, $3, $4, $5, NULL, NULL);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.validation_preprocessor_dl(
+    message VARCHAR
+) RETURNS VARCHAR AS $$
+    PythonFunctionBodyOnly(deep_learning, input_data_preprocessor)
+    return input_data_preprocessor.InputDataPreprocessorDocumentation.validation_preprocessor_dl_help(schema_madlib, message)
+$$ LANGUAGE plpythonu VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.validation_preprocessor_dl()
+RETURNS VARCHAR AS $$
+    PythonFunctionBodyOnly(deep_learning, input_data_preprocessor)
+    return input_data_preprocessor.InputDataPreprocessorDocumentation.validation_preprocessor_dl_help(schema_madlib, '')
+$$ LANGUAGE plpythonu VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA', `');
+
+-------------------------------------------------------------------------------
+
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.training_preprocessor_dl(
+    source_table                VARCHAR,
+    output_table                VARCHAR,
+    dependent_varname           VARCHAR,
+    independent_varname         VARCHAR,
+    buffer_size                 INTEGER,
+    normalizing_const           REAL,
+    num_classes                 INTEGER,
+    distribution_rules          TEXT
+) RETURNS VOID AS $$
+    PythonFunctionBodyOnly(deep_learning, input_data_preprocessor)
+    from utilities.control import MinWarning
+    with AOControl(False):
+        with MinWarning('error'):
+            training_preprocessor_obj = input_data_preprocessor.TrainingDataPreprocessorDL(**globals())
+            training_preprocessor_obj.training_preprocessor_dl()
+$$ LANGUAGE plpythonu VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.training_preprocessor_dl(
+    source_table            VARCHAR,
+    output_table            VARCHAR,
+    dependent_varname       VARCHAR,
+    independent_varname     VARCHAR,
+    buffer_size             INTEGER,
+    normalizing_const       REAL,
+    num_classes             INTEGER
+) RETURNS VOID AS $$
+  SELECT MADLIB_SCHEMA.training_preprocessor_dl($1, $2, $3, $4, $5, $6, $7, NULL);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.training_preprocessor_dl(
+    source_table            VARCHAR,
+    output_table            VARCHAR,
+    dependent_varname       VARCHAR,
+    independent_varname     VARCHAR,
+    buffer_size             INTEGER,
+    normalizing_const       REAL
+) RETURNS VOID AS $$
+  SELECT MADLIB_SCHEMA.training_preprocessor_dl($1, $2, $3, $4, $5, $6, NULL, NULL);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.training_preprocessor_dl(
+    source_table            VARCHAR,
+    output_table            VARCHAR,
+    dependent_varname       VARCHAR,
+    independent_varname     VARCHAR,
+    buffer_size             INTEGER
+) RETURNS VOID AS $$
+  SELECT MADLIB_SCHEMA.training_preprocessor_dl($1, $2, $3, $4, $5, 1.0, NULL, NULL);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.training_preprocessor_dl(
+    source_table            VARCHAR,
+    output_table            VARCHAR,
+    dependent_varname       VARCHAR,
+    independent_varname     VARCHAR
+) RETURNS VOID AS $$
+  SELECT MADLIB_SCHEMA.training_preprocessor_dl($1, $2, $3, $4, NULL, 1.0, NULL, NULL);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.training_preprocessor_dl(
+    message VARCHAR
+) RETURNS VARCHAR AS $$
+    PythonFunctionBodyOnly(deep_learning, input_data_preprocessor)
+    return input_data_preprocessor.InputDataPreprocessorDocumentation.training_preprocessor_dl_help(schema_madlib, message)
+$$ LANGUAGE plpythonu VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.training_preprocessor_dl()
+RETURNS VARCHAR AS $$
+    PythonFunctionBodyOnly(deep_learning, input_data_preprocessor)
+    return input_data_preprocessor.InputDataPreprocessorDocumentation.training_preprocessor_dl_help(schema_madlib, '')
+$$ LANGUAGE plpythonu VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA', `');
+
+-- aggregation for independent var
+DROP AGGREGATE IF EXISTS MADLIB_SCHEMA.agg_array_concat(REAL[]);
+CREATE AGGREGATE MADLIB_SCHEMA.agg_array_concat(REAL[]) (
+   SFUNC = array_cat,
+   PREFUNC = array_cat,
+   STYPE = REAL[]
+   );
+
+-- aggregation for dependent var
+DROP AGGREGATE IF EXISTS MADLIB_SCHEMA.agg_array_concat(SMALLINT[]);
+CREATE AGGREGATE MADLIB_SCHEMA.agg_array_concat(SMALLINT[]) (
+   SFUNC = array_cat,
+   PREFUNC = array_cat,
+   STYPE = SMALLINT[]
+   );
+
+CREATE FUNCTION MADLIB_SCHEMA.convert_array_to_bytea(var REAL[])
+RETURNS BYTEA
+AS
+$$
+import numpy as np
+
+return np.array(var, dtype=np.float32).tobytes()
+$$ LANGUAGE plpythonu;
+
+CREATE FUNCTION MADLIB_SCHEMA.convert_array_to_bytea(var SMALLINT[])
+RETURNS BYTEA
+AS
+$$
+import numpy as np
+
+return np.array(var, dtype=np.int16).tobytes()
+$$ LANGUAGE plpythonu;
+
+
+CREATE FUNCTION MADLIB_SCHEMA.convert_bytea_to_real_array(var BYTEA)
+RETURNS REAL[]
+AS
+$$
+import numpy as np
+
+return np.frombuffer(var, dtype=np.float32)
+$$ LANGUAGE plpythonu;
+
+
+CREATE FUNCTION MADLIB_SCHEMA.convert_bytea_to_smallint_array(var BYTEA)
+RETURNS SMALLINT[]
+AS
+$$
+import numpy as np
+
+return np.frombuffer(var, dtype=np.int16)
+$$ LANGUAGE plpythonu;
+

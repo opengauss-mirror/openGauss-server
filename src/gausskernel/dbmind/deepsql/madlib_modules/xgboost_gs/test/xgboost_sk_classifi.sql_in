@@ -1,0 +1,257 @@
+/*
+ * Test case for sklearn-api xgboost.
+ */
+
+m4_include(`SQLCommon.m4')
+
+select MADLIB_SCHEMA.xgboost_sk_Classifier();
+select MADLIB_SCHEMA.xgboost_sk_Classifier('usage');
+
+DROP TABLE IF EXISTS iris;
+create table iris (id serial, a float, d float, c float, b float, label int);
+
+INSERT into iris (a, b, c, d, label) values (5.1, 3.5, 1.4, 0.2, 0);INSERT into iris (a, b, c, d, label) values (4.9, 3.0, 1.4, 0.2, 0);
+INSERT into iris (a, b, c, d, label) values (4.7, 3.2, 1.3, 0.2, 0);INSERT into iris (a, b, c, d, label) values (4.6, 3.1, 1.5, 0.2, 0);
+INSERT into iris (a, b, c, d, label) values (5.0, 3.6, 1.4, 0.2, 0);INSERT into iris (a, b, c, d, label) values (5.4, 3.9, 1.7, 0.4, 0);
+INSERT into iris (a, b, c, d, label) values (4.6, 3.4, 1.4, 0.3, 0);INSERT into iris (a, b, c, d, label) values (5.0, 3.4, 1.5, 0.2, 0);
+INSERT into iris (a, b, c, d, label) values (4.4, 2.9, 1.4, 0.2, 0);INSERT into iris (a, b, c, d, label) values (4.9, 3.1, 1.5, 0.1, 0);
+INSERT into iris (a, b, c, d, label) values (5.4, 3.7, 1.5, 0.2, 0);INSERT into iris (a, b, c, d, label) values (4.8, 3.4, 1.6, 0.2, 0);
+INSERT into iris (a, b, c, d, label) values (4.8, 3.0, 1.4, 0.1, 0);INSERT into iris (a, b, c, d, label) values (4.3, 3.0, 1.1, 0.1, 0);
+INSERT into iris (a, b, c, d, label) values (5.8, 4.0, 1.2, 0.2, 0);INSERT into iris (a, b, c, d, label) values (5.7, 4.4, 1.5, 0.4, 0);
+INSERT into iris (a, b, c, d, label) values (5.4, 3.9, 1.3, 0.4, 0);INSERT into iris (a, b, c, d, label) values (5.1, 3.5, 1.4, 0.3, 0);
+INSERT into iris (a, b, c, d, label) values (5.7, 3.8, 1.7, 0.3, 0);INSERT into iris (a, b, c, d, label) values (5.1, 3.8, 1.5, 0.3, 0);
+INSERT into iris (a, b, c, d, label) values (5.4, 3.4, 1.7, 0.2, 0);INSERT into iris (a, b, c, d, label) values (5.1, 3.7, 1.5, 0.4, 0);
+INSERT into iris (a, b, c, d, label) values (4.6, 3.6, 1.0, 0.2, 0);INSERT into iris (a, b, c, d, label) values (5.1, 3.3, 1.7, 0.5, 0);
+INSERT into iris (a, b, c, d, label) values (4.8, 3.4, 1.9, 0.2, 0);INSERT into iris (a, b, c, d, label) values (5.0, 3.0, 1.6, 0.2, 0);
+INSERT into iris (a, b, c, d, label) values (5.0, 3.4, 1.6, 0.4, 0);INSERT into iris (a, b, c, d, label) values (5.2, 3.5, 1.5, 0.2, 0);
+INSERT into iris (a, b, c, d, label) values (5.2, 3.4, 1.4, 0.2, 0);INSERT into iris (a, b, c, d, label) values (4.7, 3.2, 1.6, 0.2, 0);
+INSERT into iris (a, b, c, d, label) values (4.8, 3.1, 1.6, 0.2, 0);INSERT into iris (a, b, c, d, label) values (5.4, 3.4, 1.5, 0.4, 0);
+INSERT into iris (a, b, c, d, label) values (5.2, 4.1, 1.5, 0.1, 0);INSERT into iris (a, b, c, d, label) values (5.5, 4.2, 1.4, 0.2, 0);
+INSERT into iris (a, b, c, d, label) values (4.9, 3.1, 1.5, 0.2, 0);INSERT into iris (a, b, c, d, label) values (5.0, 3.2, 1.2, 0.2, 0);
+INSERT into iris (a, b, c, d, label) values (5.5, 3.5, 1.3, 0.2, 0);INSERT into iris (a, b, c, d, label) values (4.9, 3.6, 1.4, 0.1, 0);
+INSERT into iris (a, b, c, d, label) values (4.4, 3.0, 1.3, 0.2, 0);INSERT into iris (a, b, c, d, label) values (5.1, 3.4, 1.5, 0.2, 0);
+INSERT into iris (a, b, c, d, label) values (5.0, 3.5, 1.3, 0.3, 0);INSERT into iris (a, b, c, d, label) values (4.5, 2.3, 1.3, 0.3, 0);
+INSERT into iris (a, b, c, d, label) values (4.4, 3.2, 1.3, 0.2, 0);INSERT into iris (a, b, c, d, label) values (5.0, 3.5, 1.6, 0.6, 0);
+INSERT into iris (a, b, c, d, label) values (5.1, 3.8, 1.9, 0.4, 0);INSERT into iris (a, b, c, d, label) values (4.8, 3.0, 1.4, 0.3, 0);
+INSERT into iris (a, b, c, d, label) values (5.1, 3.8, 1.6, 0.2, 0);INSERT into iris (a, b, c, d, label) values (4.6, 3.2, 1.4, 0.2, 0);
+INSERT into iris (a, b, c, d, label) values (5.3, 3.7, 1.5, 0.2, 0);INSERT into iris (a, b, c, d, label) values (5.0, 3.3, 1.4, 0.2, 0);
+INSERT into iris (a, b, c, d, label) values (7.0, 3.2, 4.7, 1.4, 1);INSERT into iris (a, b, c, d, label) values (6.4, 3.2, 4.5, 1.5, 1);
+INSERT into iris (a, b, c, d, label) values (6.9, 3.1, 4.9, 1.5, 1);INSERT into iris (a, b, c, d, label) values (5.5, 2.3, 4.0, 1.3, 1);
+INSERT into iris (a, b, c, d, label) values (6.5, 2.8, 4.6, 1.5, 1);INSERT into iris (a, b, c, d, label) values (5.7, 2.8, 4.5, 1.3, 1);
+INSERT into iris (a, b, c, d, label) values (6.3, 3.3, 4.7, 1.6, 1);INSERT into iris (a, b, c, d, label) values (4.9, 2.4, 3.3, 1.0, 1);
+INSERT into iris (a, b, c, d, label) values (6.6, 2.9, 4.6, 1.3, 1);INSERT into iris (a, b, c, d, label) values (5.2, 2.7, 3.9, 1.4, 1);
+INSERT into iris (a, b, c, d, label) values (5.0, 2.0, 3.5, 1.0, 1);INSERT into iris (a, b, c, d, label) values (5.9, 3.0, 4.2, 1.5, 1);
+INSERT into iris (a, b, c, d, label) values (6.0, 2.2, 4.0, 1.0, 1);INSERT into iris (a, b, c, d, label) values (6.1, 2.9, 4.7, 1.4, 1);
+INSERT into iris (a, b, c, d, label) values (5.6, 2.9, 3.6, 1.3, 1);INSERT into iris (a, b, c, d, label) values (6.7, 3.1, 4.4, 1.4, 1);
+INSERT into iris (a, b, c, d, label) values (5.6, 3.0, 4.5, 1.5, 1);INSERT into iris (a, b, c, d, label) values (5.8, 2.7, 4.1, 1.0, 1);
+INSERT into iris (a, b, c, d, label) values (6.2, 2.2, 4.5, 1.5, 1);INSERT into iris (a, b, c, d, label) values (5.6, 2.5, 3.9, 1.1, 1);
+INSERT into iris (a, b, c, d, label) values (5.9, 3.2, 4.8, 1.8, 1);INSERT into iris (a, b, c, d, label) values (6.1, 2.8, 4.0, 1.3, 1);
+INSERT into iris (a, b, c, d, label) values (6.3, 2.5, 4.9, 1.5, 1);INSERT into iris (a, b, c, d, label) values (6.1, 2.8, 4.7, 1.2, 1);
+INSERT into iris (a, b, c, d, label) values (6.4, 2.9, 4.3, 1.3, 1);INSERT into iris (a, b, c, d, label) values (6.6, 3.0, 4.4, 1.4, 1);
+INSERT into iris (a, b, c, d, label) values (6.8, 2.8, 4.8, 1.4, 1);INSERT into iris (a, b, c, d, label) values (6.7, 3.0, 5.0, 1.7, 1);
+INSERT into iris (a, b, c, d, label) values (6.0, 2.9, 4.5, 1.5, 1);INSERT into iris (a, b, c, d, label) values (5.7, 2.6, 3.5, 1.0, 1);
+INSERT into iris (a, b, c, d, label) values (5.5, 2.4, 3.8, 1.1, 1);INSERT into iris (a, b, c, d, label) values (5.5, 2.4, 3.7, 1.0, 1);
+INSERT into iris (a, b, c, d, label) values (5.8, 2.7, 3.9, 1.2, 1);INSERT into iris (a, b, c, d, label) values (6.0, 2.7, 5.1, 1.6, 1);
+INSERT into iris (a, b, c, d, label) values (5.4, 3.0, 4.5, 1.5, 1);INSERT into iris (a, b, c, d, label) values (6.0, 3.4, 4.5, 1.6, 1);
+INSERT into iris (a, b, c, d, label) values (6.7, 3.1, 4.7, 1.5, 1);INSERT into iris (a, b, c, d, label) values (6.3, 2.3, 4.4, 1.3, 1);
+INSERT into iris (a, b, c, d, label) values (5.6, 3.0, 4.1, 1.3, 1);INSERT into iris (a, b, c, d, label) values (5.5, 2.5, 4.0, 1.3, 1);
+INSERT into iris (a, b, c, d, label) values (5.5, 2.6, 4.4, 1.2, 1);INSERT into iris (a, b, c, d, label) values (6.1, 3.0, 4.6, 1.4, 1);
+INSERT into iris (a, b, c, d, label) values (5.8, 2.6, 4.0, 1.2, 1);INSERT into iris (a, b, c, d, label) values (5.0, 2.3, 3.3, 1.0, 1);
+INSERT into iris (a, b, c, d, label) values (5.6, 2.7, 4.2, 1.3, 1);INSERT into iris (a, b, c, d, label) values (5.7, 3.0, 4.2, 1.2, 1);
+INSERT into iris (a, b, c, d, label) values (5.7, 2.9, 4.2, 1.3, 1);INSERT into iris (a, b, c, d, label) values (6.2, 2.9, 4.3, 1.3, 1);
+INSERT into iris (a, b, c, d, label) values (5.1, 2.5, 3.0, 1.1, 1);INSERT into iris (a, b, c, d, label) values (5.7, 2.8, 4.1, 1.3, 1);
+INSERT into iris (a, b, c, d, label) values (6.3, 3.3, 6.0, 2.5, 2);INSERT into iris (a, b, c, d, label) values (5.8, 2.7, 5.1, 1.9, 2);
+INSERT into iris (a, b, c, d, label) values (7.1, 3.0, 5.9, 2.1, 2);INSERT into iris (a, b, c, d, label) values (6.3, 2.9, 5.6, 1.8, 2);
+INSERT into iris (a, b, c, d, label) values (6.5, 3.0, 5.8, 2.2, 2);INSERT into iris (a, b, c, d, label) values (7.6, 3.0, 6.6, 2.1, 2);
+INSERT into iris (a, b, c, d, label) values (4.9, 2.5, 4.5, 1.7, 2);INSERT into iris (a, b, c, d, label) values (7.3, 2.9, 6.3, 1.8, 2);
+INSERT into iris (a, b, c, d, label) values (6.7, 2.5, 5.8, 1.8, 2);INSERT into iris (a, b, c, d, label) values (7.2, 3.6, 6.1, 2.5, 2);
+INSERT into iris (a, b, c, d, label) values (6.5, 3.2, 5.1, 2.0, 2);INSERT into iris (a, b, c, d, label) values (6.4, 2.7, 5.3, 1.9, 2);
+INSERT into iris (a, b, c, d, label) values (6.8, 3.0, 5.5, 2.1, 2);INSERT into iris (a, b, c, d, label) values (5.7, 2.5, 5.0, 2.0, 2);
+INSERT into iris (a, b, c, d, label) values (5.8, 2.8, 5.1, 2.4, 2);INSERT into iris (a, b, c, d, label) values (6.4, 3.2, 5.3, 2.3, 2);
+INSERT into iris (a, b, c, d, label) values (6.5, 3.0, 5.5, 1.8, 2);INSERT into iris (a, b, c, d, label) values (7.7, 3.8, 6.7, 2.2, 2);
+INSERT into iris (a, b, c, d, label) values (7.7, 2.6, 6.9, 2.3, 2);INSERT into iris (a, b, c, d, label) values (6.0, 2.2, 5.0, 1.5, 2);
+INSERT into iris (a, b, c, d, label) values (6.9, 3.2, 5.7, 2.3, 2);INSERT into iris (a, b, c, d, label) values (5.6, 2.8, 4.9, 2.0, 2);
+INSERT into iris (a, b, c, d, label) values (7.7, 2.8, 6.7, 2.0, 2);INSERT into iris (a, b, c, d, label) values (6.3, 2.7, 4.9, 1.8, 2);
+INSERT into iris (a, b, c, d, label) values (6.7, 3.3, 5.7, 2.1, 2);INSERT into iris (a, b, c, d, label) values (7.2, 3.2, 6.0, 1.8, 2);
+INSERT into iris (a, b, c, d, label) values (6.2, 2.8, 4.8, 1.8, 2);INSERT into iris (a, b, c, d, label) values (6.1, 3.0, 4.9, 1.8, 2);
+INSERT into iris (a, b, c, d, label) values (6.4, 2.8, 5.6, 2.1, 2);INSERT into iris (a, b, c, d, label) values (7.2, 3.0, 5.8, 1.6, 2);
+INSERT into iris (a, b, c, d, label) values (7.4, 2.8, 6.1, 1.9, 2);INSERT into iris (a, b, c, d, label) values (7.9, 3.8, 6.4, 2.0, 2);
+INSERT into iris (a, b, c, d, label) values (6.4, 2.8, 5.6, 2.2, 2);INSERT into iris (a, b, c, d, label) values (6.3, 2.8, 5.1, 1.5, 2);
+INSERT into iris (a, b, c, d, label) values (6.1, 2.6, 5.6, 1.4, 2);INSERT into iris (a, b, c, d, label) values (7.7, 3.0, 6.1, 2.3, 2);
+INSERT into iris (a, b, c, d, label) values (6.3, 3.4, 5.6, 2.4, 2);INSERT into iris (a, b, c, d, label) values (6.4, 3.1, 5.5, 1.8, 2);
+INSERT into iris (a, b, c, d, label) values (6.0, 3.0, 4.8, 1.8, 2);INSERT into iris (a, b, c, d, label) values (6.9, 3.1, 5.4, 2.1, 2);
+INSERT into iris (a, b, c, d, label) values (6.7, 3.1, 5.6, 2.4, 2);INSERT into iris (a, b, c, d, label) values (6.9, 3.1, 5.1, 2.3, 2);
+INSERT into iris (a, b, c, d, label) values (5.8, 2.7, 5.1, 1.9, 2);INSERT into iris (a, b, c, d, label) values (6.8, 3.2, 5.9, 2.3, 2);
+INSERT into iris (a, b, c, d, label) values (6.7, 3.3, 5.7, 2.5, 2);INSERT into iris (a, b, c, d, label) values (6.7, 3.0, 5.2, 2.3, 2);
+INSERT into iris (a, b, c, d, label) values (6.3, 2.5, 5.0, 1.9, 2);INSERT into iris (a, b, c, d, label) values (6.5, 3.0, 5.2, 2.0, 2);
+INSERT into iris (a, b, c, d, label) values (6.2, 3.4, 5.4, 2.3, 2);INSERT into iris (a, b, c, d, label) values (5.9, 3.0, 5.1, 1.8, 2);
+
+drop table if exists iris_model_xgbc;
+select MADLIB_SCHEMA.xgboost_sk_Classifier('iris', 'iris_model_xgbc', 'id', 'label', 'a,b,c,d', NULL, $${'booster': ['gbtree'], 'eta': (0.1, 0.9), 'max_depth': (5,1), 'objective': ('multi:softmax',)}$$);
+
+select id, train_timestamp, source_table, y_type, metrics, features, params from iris_model_xgbc;
+
+select assert(count(*) = 4, 'xgboost: xgboost parameter counts error') from iris_model_xgbc;
+
+select assert(metrics = 'evalution is OFF, no metrics', 'xgboost: xgboost metrics error') from iris_model_xgbc where id = 1;
+
+----------------
+drop table if exists iris_model_xgbc;
+select MADLIB_SCHEMA.xgboost_sk_Classifier('iris', 'iris_model_xgbc', 'id', 'label', 'a,b,c,d', NULL, $${'booster': ['gbtree'], 'eta': (0.1, 0.9), 'max_depth': (5,1), 'objective': ('multi:softmax',)}$$, TRUE);
+
+select id, train_timestamp, source_table, y_type, metrics, features, params from iris_model_xgbc;
+select assert(count(*) = 4, 'xgboost: xgboost parameter counts error') from iris_model_xgbc;
+select assert(metrics <> 'evalution is OFF, no metrics', 'xgboost: xgboost metrics error') from iris_model_xgbc where id = 1;
+
+-----------
+drop table if exists iris_xgbc_out;
+select MADLIB_SCHEMA.xgboost_sk_predict('iris', 'iris_model_xgbc', 'iris_xgbc_out', 'id');
+
+drop table if exists iris_model_xgbc;
+select xgboost_sk_Classifier('iris', 'iris_model_xgbc', 'id', 'label', '*', NULL, $${'booster': ('gbtree',), 'eta': [0.1, 0.9], 'max_depth': (5,1), 'objective': ['multi:softmax']}$$);
+
+SELECT assert(count(*) = 4, 'xgboost: Xgboost model output has incorrect number of rows')
+FROM (select train_timestamp, source_table, y_type, metrics, features, params, id from iris_model_xgbc) q;
+
+drop table if exists iris_xgbc_out;
+select MADLIB_SCHEMA.xgboost_sk_predict('iris', 'iris_model_xgbc', 'iris_xgbc_out', 'id');
+
+drop table if exists temp_iris;
+create table temp_iris as select t1.id, prediction, label from iris as t1, iris_xgbc_out as t2 where t1.id = t2.id order by t1.id;
+
+select assert(count(*) >135, 'xgboost: xgboost prediction incorrect')
+from (select * from temp_iris where prediction = label) q;
+
+
+-----------------------------------------------------------  binaryl classification ----------------------------------------------
+
+drop table if exists xgbctable;
+create table xgbctable(id serial, "X" float, Y float, label int);
+
+insert into xgbctable("X", y, label) values (1.349880, 3.503074, 0);insert into xgbctable("X", y, label) values (3.605580, 4.285024, 0);
+insert into xgbctable("X", y, label) values (2.537560, 5.671145, 0);insert into xgbctable("X", y, label) values (2.596382, 4.219879, 0);
+insert into xgbctable("X", y, label) values (3.043375, 3.425613, 0);insert into xgbctable("X", y, label) values (2.277542, 2.532572, 0);
+insert into xgbctable("X", y, label) values (4.036647, 3.891047, 0);insert into xgbctable("X", y, label) values (3.814163, 3.737898, 0);
+insert into xgbctable("X", y, label) values (2.674975, 4.340797, 0);insert into xgbctable("X", y, label) values (1.694112, 4.533308, 0);
+insert into xgbctable("X", y, label) values (2.623954, 4.337177, 0);insert into xgbctable("X", y, label) values (3.412750, 6.994476, 0);
+insert into xgbctable("X", y, label) values (3.562286, 3.827778, 0);insert into xgbctable("X", y, label) values (3.278937, 4.116019, 0);
+insert into xgbctable("X", y, label) values (2.691412, 3.482750, 0);insert into xgbctable("X", y, label) values (1.947223, 3.734410, 0);
+insert into xgbctable("X", y, label) values (1.376026, 3.232049, 0);insert into xgbctable("X", y, label) values (1.499600, 7.429014, 0);
+insert into xgbctable("X", y, label) values (3.971720, 4.967350, 0);insert into xgbctable("X", y, label) values (2.984960, 3.780627, 0);
+insert into xgbctable("X", y, label) values (3.493389, 3.693761, 0);insert into xgbctable("X", y, label) values (3.653253, 4.156218, 0);
+insert into xgbctable("X", y, label) values (2.552306, 3.436848, 0);insert into xgbctable("X", y, label) values (3.395667, 2.731429, 0);
+insert into xgbctable("X", y, label) values (4.356895, 3.604831, 0);insert into xgbctable("X", y, label) values (2.703829, 2.192765, 0);
+insert into xgbctable("X", y, label) values (2.507021, 4.329131, 0);insert into xgbctable("X", y, label) values (5.437925, 4.798840, 0);
+insert into xgbctable("X", y, label) values (4.275079, 4.472619, 0);insert into xgbctable("X", y, label) values (3.829493, 5.539909, 0);
+insert into xgbctable("X", y, label) values (2.148925, 4.254559, 0);insert into xgbctable("X", y, label) values (2.798221, 3.916840, 0);
+insert into xgbctable("X", y, label) values (3.388155, 3.060772, 0);insert into xgbctable("X", y, label) values (2.741393, 2.502708, 0);
+insert into xgbctable("X", y, label) values (3.930997, 3.435667, 0);insert into xgbctable("X", y, label) values (2.641057, 4.070123, 0);
+insert into xgbctable("X", y, label) values (1.631679, 5.890544, 0);insert into xgbctable("X", y, label) values (3.857039, 3.486820, 0);
+insert into xgbctable("X", y, label) values (4.009723, 5.215680, 0);insert into xgbctable("X", y, label) values (4.815413, 3.742883, 0);
+insert into xgbctable("X", y, label) values (2.010829, 3.793627, 0);insert into xgbctable("X", y, label) values (3.803213, 4.966541, 0);
+insert into xgbctable("X", y, label) values (3.074533, 3.769696, 0);insert into xgbctable("X", y, label) values (3.305067, 3.941329, 0);
+insert into xgbctable("X", y, label) values (4.255057, 2.714015, 0);insert into xgbctable("X", y, label) values (1.990719, 3.748694, 0);
+insert into xgbctable("X", y, label) values (3.271186, 1.932663, 0);insert into xgbctable("X", y, label) values (5.712751, 4.925150, 0);
+insert into xgbctable("X", y, label) values (4.436121, 1.918319, 0);insert into xgbctable("X", y, label) values (1.467938, 3.670151, 0);
+insert into xgbctable("X", y, label) values (2.986207, 4.793286, 0);insert into xgbctable("X", y, label) values (2.599137, 2.807718, 0);
+insert into xgbctable("X", y, label) values (3.108875, 2.852789, 0);insert into xgbctable("X", y, label) values (3.031777, 4.673723, 0);
+insert into xgbctable("X", y, label) values (3.262225, 2.773082, 0);insert into xgbctable("X", y, label) values (2.022650, 4.607023, 0);
+insert into xgbctable("X", y, label) values (3.147877, 3.796113, 0);insert into xgbctable("X", y, label) values (3.111487, 3.129382, 0);
+insert into xgbctable("X", y, label) values (2.982505, 4.189220, 0);insert into xgbctable("X", y, label) values (2.928811, 4.102743, 0);
+insert into xgbctable("X", y, label) values (3.121620, 5.194476, 0);insert into xgbctable("X", y, label) values (3.520649, 3.870720, 0);
+insert into xgbctable("X", y, label) values (1.329847, 4.796737, 0);insert into xgbctable("X", y, label) values (4.355449, 3.361799, 0);
+insert into xgbctable("X", y, label) values (3.125785, 4.588572, 0);insert into xgbctable("X", y, label) values (2.465354, 3.974886, 0);
+insert into xgbctable("X", y, label) values (4.031982, 3.994294, 0);insert into xgbctable("X", y, label) values (2.649743, 4.096057, 0);
+insert into xgbctable("X", y, label) values (3.613181, 3.801199, 0);insert into xgbctable("X", y, label) values (6.107873, 4.124081, 0);
+insert into xgbctable("X", y, label) values (3.574605, 4.029697, 0);insert into xgbctable("X", y, label) values (2.426873, 2.782740, 0);
+insert into xgbctable("X", y, label) values (2.159410, 3.899774, 0);insert into xgbctable("X", y, label) values (2.625650, 2.297274, 0);
+insert into xgbctable("X", y, label) values (3.069545, 4.923757, 0);insert into xgbctable("X", y, label) values (2.950428, 2.858376, 0);
+insert into xgbctable("X", y, label) values (3.601556, 2.587292, 0);insert into xgbctable("X", y, label) values (3.639818, 4.304443, 0);
+insert into xgbctable("X", y, label) values (2.759995, 2.999176, 0);insert into xgbctable("X", y, label) values (1.826029, 3.564573, 0);
+insert into xgbctable("X", y, label) values (4.016062, 3.730916, 0);insert into xgbctable("X", y, label) values (2.464892, 3.112348, 0);
+insert into xgbctable("X", y, label) values (4.325916, 5.596980, 0);insert into xgbctable("X", y, label) values (2.131952, 4.396857, 0);
+insert into xgbctable("X", y, label) values (3.473718, 4.673927, 0);insert into xgbctable("X", y, label) values (3.711892, 4.908759, 0);
+insert into xgbctable("X", y, label) values (3.700971, 3.462295, 0);insert into xgbctable("X", y, label) values (3.125731, 5.828338, 0);
+insert into xgbctable("X", y, label) values (3.957516, 5.104233, 0);insert into xgbctable("X", y, label) values (4.658009, 5.078593, 0);
+insert into xgbctable("X", y, label) values (2.576429, 3.274793, 0);insert into xgbctable("X", y, label) values (3.160974, 3.466810, 0);
+insert into xgbctable("X", y, label) values (2.613970, 2.838497, 0);insert into xgbctable("X", y, label) values (2.385694, 3.749695, 0);
+insert into xgbctable("X", y, label) values (2.640589, 2.259807, 0);insert into xgbctable("X", y, label) values (4.589973, 2.776422, 0);
+insert into xgbctable("X", y, label) values (1.875313, 3.571599, 0);insert into xgbctable("X", y, label) values (3.472463, 5.251267, 0);
+insert into xgbctable("X", y, label) values (2.638684, 4.845147, 0);insert into xgbctable("X", y, label) values (3.405707, 2.662543, 0);
+
+insert into xgbctable("X", y, label) values (3.092827, -0.757907, 1);insert into xgbctable("X", y, label) values (1.982449, 0.781236, 1);
+insert into xgbctable("X", y, label) values (1.880089, 3.638690, 1);insert into xgbctable("X", y, label) values (-0.143234, -0.823097, 1);
+insert into xgbctable("X", y, label) values (1.913393, 0.717394, 1);insert into xgbctable("X", y, label) values (-0.406319, 1.495522, 1);
+insert into xgbctable("X", y, label) values (1.982796, -0.043737, 1);insert into xgbctable("X", y, label) values (2.001371, 2.005737, 1);
+insert into xgbctable("X", y, label) values (1.683994, 2.722670, 1);insert into xgbctable("X", y, label) values (1.201483, -0.544765, 1);
+insert into xgbctable("X", y, label) values (1.054981, 0.857019, 1);insert into xgbctable("X", y, label) values (-1.137237, 0.769533, 1);
+insert into xgbctable("X", y, label) values (0.526662, -0.076017, 1);insert into xgbctable("X", y, label) values (0.431452, 1.018968, 1);
+insert into xgbctable("X", y, label) values (0.911789, -1.003597, 1);insert into xgbctable("X", y, label) values (0.271256, 0.749327, 1);
+insert into xgbctable("X", y, label) values (-0.141832, -1.478830, 1);insert into xgbctable("X", y, label) values (0.508604, 0.648365, 1);
+insert into xgbctable("X", y, label) values (1.903264, 0.034425, 1);insert into xgbctable("X", y, label) values (0.788896, 0.615347, 1);
+insert into xgbctable("X", y, label) values (3.350388, -0.238897, 1);insert into xgbctable("X", y, label) values (-0.632393, 0.605239, 1);
+insert into xgbctable("X", y, label) values (1.170017, 0.536877, 1);insert into xgbctable("X", y, label) values (1.381837, 0.453970, 1);
+insert into xgbctable("X", y, label) values (0.238530, 0.234563, 1);insert into xgbctable("X", y, label) values (-0.619639, -0.739849, 1);
+insert into xgbctable("X", y, label) values (1.782465, 2.802568, 1);insert into xgbctable("X", y, label) values (-1.690702, 0.989325, 1);
+insert into xgbctable("X", y, label) values (0.109266, 2.755468, 1);insert into xgbctable("X", y, label) values (1.670044, 1.392086, 1);
+insert into xgbctable("X", y, label) values (2.461095, -0.625544, 1);insert into xgbctable("X", y, label) values (1.580424, 1.225731, 1);
+insert into xgbctable("X", y, label) values (0.949291, 0.709720, 1);insert into xgbctable("X", y, label) values (1.919173, 0.810358, 1);
+insert into xgbctable("X", y, label) values (1.086786, 2.770693, 1);insert into xgbctable("X", y, label) values (0.955707, 1.763802, 1);
+insert into xgbctable("X", y, label) values (1.689414, 1.062906, 1);insert into xgbctable("X", y, label) values (1.438960, 1.282794, 1);
+insert into xgbctable("X", y, label) values (0.499648, 1.425253, 1);insert into xgbctable("X", y, label) values (0.712802, -0.080972, 1);
+insert into xgbctable("X", y, label) values (1.501847, 1.318616, 1);insert into xgbctable("X", y, label) values (-0.718307, 0.644610, 1);
+insert into xgbctable("X", y, label) values (-0.259394, 1.004450, 1);insert into xgbctable("X", y, label) values (1.822353, 1.461093, 1);
+insert into xgbctable("X", y, label) values (0.065569, 2.134341, 1);insert into xgbctable("X", y, label) values (1.137744, 1.431270, 1);
+insert into xgbctable("X", y, label) values (1.613366, -0.399205, 1);insert into xgbctable("X", y, label) values (2.780135, 0.523116, 1);
+insert into xgbctable("X", y, label) values (1.641254, 0.189915, 1);insert into xgbctable("X", y, label) values (0.224779, 0.320547, 1);
+insert into xgbctable("X", y, label) values (1.509881, 0.488949, 1);insert into xgbctable("X", y, label) values (2.742344, 1.078382, 1);
+insert into xgbctable("X", y, label) values (0.015037, 0.906546, 1);insert into xgbctable("X", y, label) values (0.790595, 0.721075, 1);
+insert into xgbctable("X", y, label) values (0.296409, 0.922898, 1);insert into xgbctable("X", y, label) values (1.116124, 2.510543, 1);
+insert into xgbctable("X", y, label) values (1.104642, 1.043124, 1);insert into xgbctable("X", y, label) values (1.261002, 1.275877, 1);
+insert into xgbctable("X", y, label) values (0.995230, 1.131128, 1);insert into xgbctable("X", y, label) values (0.500961, 1.053070, 1);
+insert into xgbctable("X", y, label) values (0.753316, 1.587285, 1);insert into xgbctable("X", y, label) values (1.415908, 1.080478, 1);
+insert into xgbctable("X", y, label) values (1.391515, 0.915593, 1);insert into xgbctable("X", y, label) values (1.309082, 0.667459, 1);
+insert into xgbctable("X", y, label) values (0.622153, 2.885750, 1);insert into xgbctable("X", y, label) values (2.499712, 1.917895, 1);
+insert into xgbctable("X", y, label) values (0.754728, 1.182577, 1);insert into xgbctable("X", y, label) values (1.653910, -0.448352, 1);
+insert into xgbctable("X", y, label) values (2.263763, -0.022151, 1);insert into xgbctable("X", y, label) values (-0.289203, 2.267931, 1);
+insert into xgbctable("X", y, label) values (2.117514, 0.852814, 1);insert into xgbctable("X", y, label) values (0.682405, 0.043468, 1);
+insert into xgbctable("X", y, label) values (1.304387, 1.649660, 1);insert into xgbctable("X", y, label) values (2.775033, 0.608014, 1);
+insert into xgbctable("X", y, label) values (0.695554, 1.631088, 1);insert into xgbctable("X", y, label) values (1.736803, 0.258182, 1);
+insert into xgbctable("X", y, label) values (1.369698, 1.281675, 1);insert into xgbctable("X", y, label) values (-0.461257, 2.632165, 1);
+insert into xgbctable("X", y, label) values (1.672385, 0.965322, 1);insert into xgbctable("X", y, label) values (0.527026, 0.849661, 1);
+insert into xgbctable("X", y, label) values (1.583187, 0.823039, 1);insert into xgbctable("X", y, label) values (1.217844, 1.465343, 1);
+insert into xgbctable("X", y, label) values (-0.190087, -0.190168, 1);insert into xgbctable("X", y, label) values (0.939329, -0.837490, 1);
+insert into xgbctable("X", y, label) values (0.421842, -1.023412, 1);insert into xgbctable("X", y, label) values (1.015774, 0.422640, 1);
+insert into xgbctable("X", y, label) values (0.036181, -1.399000, 1);insert into xgbctable("X", y, label) values (1.001890, 1.183682, 1);
+insert into xgbctable("X", y, label) values (3.219715, 1.811829, 1);insert into xgbctable("X", y, label) values (2.270468, 1.717835, 1);
+insert into xgbctable("X", y, label) values (0.354725, 0.918786, 1);insert into xgbctable("X", y, label) values (3.065704, 0.358424, 1);
+insert into xgbctable("X", y, label) values (-0.609859, 0.152997, 1);insert into xgbctable("X", y, label) values (0.476704, 0.071017, 1);
+insert into xgbctable("X", y, label) values (0.494553, 3.201871, 1);insert into xgbctable("X", y, label) values (3.430162, -0.834660, 1);
+insert into xgbctable("X", y, label) values (2.542903, 1.831189, 1);insert into xgbctable("X", y, label) values (1.973389, 0.079485, 1);
+insert into xgbctable("X", y, label) values (1.309454, 0.648461, 1);insert into xgbctable("X", y, label) values (0.841486, -0.177773, 1);
+
+drop table if exists xgbctable_model;
+select MADLIB_SCHEMA.xgboost_sk_Classifier('xgbctable', 'xgbctable_model', 'id', 'label', '"X", Y', NULL, $${'booster': ('gbtree',), 'eta': (0.1), 'max_depth': 5, 'objective': ('binary:logistic',)}$$, TRUE);
+
+select id, train_timestamp, source_table, y_type, metrics, features, params from xgbctable_model;
+select assert(count(*) = 1, 'xgboost: xgboost parameter counts error') from xgbctable_model;
+
+drop table if exists xgbctable_model;
+select MADLIB_SCHEMA.xgboost_sk_Classifier('xgbctable', 'xgbctable_model', 'id', 'label', '*', 'id, label', $${'booster': ['gbtree'], 'eta': 0.1, 'max_depth': (5), 'objective': ['binary:logistic']}$$);
+select assert(metrics = 'evalution is OFF, no metrics', 'xgboost: evalution error') from xgbctable_model;
+
+
+drop table if exists xgbctable_output;
+select MADLIB_SCHEMA.xgboost_sk_predict('xgbctable', 'xgbctable_model', 'xgbctable_output', 'id', TRUE);
+
+drop table if exists xgbctable_output_summary;
+create table xgbctable_output_summary as select t1.id, prediction, label from xgbctable_output as t1, xgbctable as t2 where t1.id = t2.id order by t1.id;
+
+drop table if exists xgbctable_aur;
+select MADLIB_SCHEMA.area_under_roc('xgbctable_output_summary', 'xgbctable_aur', 'prediction', 'label');
+select * from xgbctable_aur;
+select assert(area_under_roc > 0.9, 'xgbctable AUR error') from xgbctable_aur;
+
+drop table if exists xgbctable_cm;
+select MADLIB_SCHEMA.confusion_matrix('xgbctable_output_summary', 'xgbctable_cm', 'prediction', 'label');
+select * from xgbctable_cm;
