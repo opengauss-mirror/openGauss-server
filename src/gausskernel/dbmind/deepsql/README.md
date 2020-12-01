@@ -42,8 +42,6 @@ cp -r * YOUR_MADLIB_SOURCE_CODE/src/ports/postgres/modules
 THEN, add following to `src/config/Modules.yml` to register those modules.
 
 ```
-- name: recommendation_systems
-    depends: ['utilities']
 - name: agglomerative_clustering
     depends: ['utilities']
 - name: xgboost_gs
