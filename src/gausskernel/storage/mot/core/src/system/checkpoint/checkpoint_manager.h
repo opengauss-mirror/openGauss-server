@@ -387,9 +387,9 @@ private:
 
     /**
      * @brief Serializes inProcess transactions to disk
-     * @return Boolean value denoting success or failure.
+     * @return RC value denoting the status of the operation.
      */
-    bool SerializeInProcessTxns(int fd);
+    RC SerializeInProcessTxns(int fd);
 
     void ResetFlags();
 

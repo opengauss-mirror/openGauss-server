@@ -841,7 +841,7 @@ bool CheckpointManager::CreateTpcRecoveryFile()
             break;
         }
 
-        if (tpcFileHeader.m_numEntries > 0 && SerializeInProcessTxns(fd) == false) {
+        if (tpcFileHeader.m_numEntries > 0 && SerializeInProcessTxns(fd) != RC_OK) {
             MOT_LOG_ERROR("create2PCRecoveryFile: failed to serialize transactions [%d %s]", errno, gs_strerror(errno));
             break;
         }
@@ -861,11 +861,11 @@ bool CheckpointManager::CreateTpcRecoveryFile()
     return ret;
 }
 
-bool CheckpointManager::SerializeInProcessTxns(int fd)
+RC CheckpointManager::SerializeInProcessTxns(int fd)
 {
     if (fd == -1) {
         MOT_LOG_ERROR("SerializeInProcessTxns: bad fd");
-        return false;
+        return RC_ERROR;
     }
 
     auto serializeLambda = [this, fd](RedoLogTransactionSegments* segments, uint64_t) -> RC {
