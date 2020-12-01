@@ -2690,7 +2690,7 @@ typedef void (*check_client_encoding_hook_type)(void);
 typedef struct knl_t_autonomous_context {
     PLpgSQL_expr* sqlstmt;
     bool isnested;
-    BackgroundWorkerHandle* handle;
+    BackgroundWorkerHandle handle;
     check_client_encoding_hook_type check_client_encoding_hook;
 } knl_t_autonomous_context;
 

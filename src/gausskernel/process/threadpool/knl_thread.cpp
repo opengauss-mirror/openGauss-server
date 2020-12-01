@@ -1390,7 +1390,8 @@ static void knl_t_heartbeat_init(knl_t_heartbeat_context* heartbeat_cxt)
 static void knl_t_autonomous_init(knl_t_autonomous_context* autonomous_cxt)
 {
     autonomous_cxt->isnested = false;
-    autonomous_cxt->handle = NULL;
+    autonomous_cxt->handle.slot = -1;
+    autonomous_cxt->handle.generation = 0;
     autonomous_cxt->sqlstmt = NULL;
     autonomous_cxt->check_client_encoding_hook = NULL;
 }
