@@ -1540,15 +1540,27 @@ void knl_thread_init(knl_thread_role role)
     knl_t_msqueue_init(&t_thrd.msqueue_cxt);
 }
 
-void knl_thread_set_name(const char* name)
+void knl_thread_set_name(const char* name, bool isCommandTag)
 {
     t_thrd.proc_cxt.MyProgName = (char*)name;
     /*
      * The length of thread name is restricted to 16 characters,
      * including the terminating null byte ('\0').
      */
-    Assert(strlen(name) < MAX_THREAD_NAME_LENGTH);
-    pthread_setname_np(pthread_self(), name);
+    char dynamic_tag[MAX_THREAD_NAME_LENGTH];
+    int rc = 0;
+    if(isCommandTag) {
+        dynamic_tag[0] = '>';
+        /*
+         * MAX_THREAD_NAME_LENGTH - 1 means minus the length of '>'
+         * MAX_THREAD_NAME_LENGTH - 2 menas minus the length of '>'+'\0'
+        */
+        rc = strncpy_s(dynamic_tag + 1, MAX_THREAD_NAME_LENGTH - 1, name, MAX_THREAD_NAME_LENGTH - 2);
+    } else {
+        rc = strncpy_s(dynamic_tag, MAX_THREAD_NAME_LENGTH, name, MAX_THREAD_NAME_LENGTH - 1);
+    }
+    securec_check(rc, "\0", "\0");
+    pthread_setname_np(pthread_self(), dynamic_tag);
 }
 
 __attribute__ ((__used__)) knl_thrd_context *get_current_thread()

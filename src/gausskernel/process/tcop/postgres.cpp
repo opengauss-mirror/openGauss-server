@@ -1245,6 +1245,8 @@ void exec_simple_plan(PlannedStmt* plan)
          */
         commandTag = CreateCommandTagForPlan(plan->commandType);
 
+        knl_thread_set_name(commandTag, true);
+
         set_ps_display(commandTag, false);
 
         BeginCommand(commandTag, dest);
@@ -2158,6 +2160,8 @@ void exec_simple_query(const char* query_string, MessageType messageType, String
          */
         commandTag = CreateCommandTag(parsetree);
 
+        knl_thread_set_name(commandTag, true);
+
         set_ps_display(commandTag, false);
 
         BeginCommand(commandTag, dest);
@@ -2803,6 +2807,8 @@ static void exec_plan_with_params(StringInfo input_message)
         SetForceXidFromGTM(false);
 
         commandTag = "SELECT";
+
+        knl_thread_set_name(commandTag, true);
 
         set_ps_display(commandTag, false);
 
@@ -4446,6 +4452,8 @@ void exec_execute_message(const char* portal_name, long max_rows)
     t_thrd.postgres_cxt.debug_query_string = sourceText;
 
     pgstat_report_activity(STATE_RUNNING, sourceText);
+
+    knl_thread_set_name(portal->commandTag, true);
 
     set_ps_display(portal->commandTag, false);
 
@@ -6373,6 +6381,8 @@ static void execute_stream_plan(StreamProducer* producer)
     // For now plan shipping is used only for SELECTs, in future
     // we should remove this hard coding and get the tag automatically
     commandTag = "SELECT";
+
+    knl_thread_set_name(commandTag, true);
 
     set_ps_display(commandTag, false);
 
@@ -9453,6 +9463,8 @@ void exec_query_for_merge(const char* query_string)
          */
         commandTag = CreateCommandTag(parsetree);
 
+        knl_thread_set_name(commandTag, true);
+
         set_ps_display(commandTag, false);
 
         BeginCommand(commandTag, dest);
@@ -10278,6 +10290,8 @@ static void exec_batch_bind_execute(StringInfo input_message)
      */
     t_thrd.postgres_cxt.debug_query_string = psrc->query_string;
     pgstat_report_activity(STATE_RUNNING, psrc->query_string);
+
+    knl_thread_set_name(psrc->commandTag, true);
 
     set_ps_display(psrc->commandTag, false);
 
