@@ -1752,8 +1752,9 @@ static char* pg_get_tabledef_worker(Oid table_oid)
     appendStringInfo(&buf, "SET search_path = %s;", quote_identifier(get_namespace_name(table_info.spcid, true)));
 
     appendStringInfo(&buf,
-        "\nCREATE %s %s %s",
-        table_info.relpersistence == RELPERSISTENCE_UNLOGGED ? "UNLOGGED" : "",
+        "\nCREATE %s%s %s",
+        (table_info.relpersistence == RELPERSISTENCE_UNLOGGED) ? "UNLOGGED " :
+            ((table_info.relpersistence == RELPERSISTENCE_GLOBAL_TEMP) ? "GLOBAL TEMPORARY " : ""),
         rel_type_name,
         rel_name);
 
