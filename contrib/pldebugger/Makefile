@@ -45,5 +45,8 @@ uninstall distclean clean:
 define create_pldebugger_sources
         cd $(PLDEBUGGER_DIR); \
         sh patch.sh;  \
+        if [ $$? -eq 1 ]; then \
+            exit 1;
+        fi; \
         cd - ;
 endef
