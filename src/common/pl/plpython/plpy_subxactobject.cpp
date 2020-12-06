@@ -82,16 +82,21 @@ static PyTypeObject PLy_SubtransactionType = {
 
 void PLy_subtransaction_init_type(void)
 {
-    if (PyType_Ready(&PLy_SubtransactionType) < 0)
+    if (PyType_Ready(&PLy_SubtransactionType) < 0) {
         elog(ERROR, "could not initialize PLy_SubtransactionType");
+    }
 }
 
+/* s = plpy.subtransaction() */
 PyObject* PLy_subtransaction_new(PyObject* self, PyObject* unused)
 {
     PLySubtransactionObject* ob = NULL;
+
     ob = PyObject_New(PLySubtransactionObject, &PLy_SubtransactionType);
-    if (ob == NULL)
+
+    if (ob == NULL) {
         return NULL;
+    }
 
     ob->started = false;
     ob->exited = false;
@@ -134,11 +139,17 @@ static PyObject* PLy_subtransaction_enter(PyObject* self, PyObject* unused)
     subxactdata->oldcontext = oldcontext;
     subxactdata->oldowner = t_thrd.utils_cxt.CurrentResourceOwner;
 
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+        pgxc_node_remote_savepoint("Savepoint s1", EXEC_ON_ALL_NODES, true, true);
+    }
+#endif
+
     BeginInternalSubTransaction(NULL);
     /* Do not want to leave the previous memory context */
     MemoryContextSwitchTo(oldcontext);
 
-    plpy_t_context.explicit_subtransactions = lcons(subxactdata, plpy_t_context.explicit_subtransactions);
+    g_plpy_t_context.explicit_subtransactions = lcons(subxactdata, g_plpy_t_context.explicit_subtransactions);
 
     Py_INCREF(self);
     return self;
@@ -163,8 +174,9 @@ static PyObject* PLy_subtransaction_exit(PyObject* self, PyObject* args)
     PLySubtransactionData* subxactdata = NULL;
     PLySubtransactionObject* subxact = (PLySubtransactionObject*)self;
 
-    if (!PyArg_ParseTuple(args, "OOO", &type, &value, &traceback))
+    if (!PyArg_ParseTuple(args, "OOO", &type, &value, &traceback)) {
         return NULL;
+    }
 
     if (!subxact->started) {
         PLy_exception_set(PyExc_ValueError, "this subtransaction has not been entered");
@@ -176,7 +188,7 @@ static PyObject* PLy_subtransaction_exit(PyObject* self, PyObject* args)
         return NULL;
     }
 
-    if (plpy_t_context.explicit_subtransactions == NIL) {
+    if (g_plpy_t_context.explicit_subtransactions == NIL) {
         PLy_exception_set(PyExc_ValueError, "there is no subtransaction to exit from");
         return NULL;
     }
@@ -186,12 +198,27 @@ static PyObject* PLy_subtransaction_exit(PyObject* self, PyObject* args)
     if (type != Py_None) {
         /* Abort the inner transaction */
         RollbackAndReleaseCurrentSubTransaction();
+
+#ifdef ENABLE_MULTIPLE_NODES
+        if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+            pgxc_node_remote_savepoint("rollback to s1", EXEC_ON_ALL_NODES, false, false);
+
+            pgxc_node_remote_savepoint("release s1", EXEC_ON_ALL_NODES, true, false);
+        }
+#endif
+
     } else {
         ReleaseCurrentSubTransaction();
+
+#ifdef ENABLE_MULTIPLE_NODES
+        if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+            pgxc_node_remote_savepoint("release s1", EXEC_ON_ALL_NODES, true, false);
+        }
+#endif
     }
 
-    subxactdata = (PLySubtransactionData*)linitial(plpy_t_context.explicit_subtransactions);
-    plpy_t_context.explicit_subtransactions = list_delete_first(plpy_t_context.explicit_subtransactions);
+    subxactdata = (PLySubtransactionData*)linitial(g_plpy_t_context.explicit_subtransactions);
+    g_plpy_t_context.explicit_subtransactions = list_delete_first(g_plpy_t_context.explicit_subtransactions);
 
     MemoryContextSwitchTo(subxactdata->oldcontext);
     t_thrd.utils_cxt.CurrentResourceOwner = subxactdata->oldowner;

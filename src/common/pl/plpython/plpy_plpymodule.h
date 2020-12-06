@@ -1,5 +1,5 @@
 /*
- * src/pl/plpython/plpy_plpymodule.h
+ * src/common/pl/plpython/plpy_plpymodule.h
  */
 
 #ifndef PLPY_PLPYMODULE_H

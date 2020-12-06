@@ -1,7 +1,7 @@
 /*
  * utility functions
  *
- * src/pl/plpython/plpy_util.c
+ * src/common/pl/plpython/plpy_util.c
  */
 
 #include "postgres.h"
@@ -68,8 +68,9 @@ PyObject* PLyUnicode_Bytes(PyObject* unicode)
 
     /* First encode the Python unicode object with UTF-8. */
     bytes = PyUnicode_AsUTF8String(unicode);
-    if (bytes == NULL)
+    if (bytes == NULL) {
         PLy_elog(ERROR, "could not convert Python Unicode object to bytes");
+    }
 
     utf8string = PyBytes_AsString(bytes);
     if (utf8string == NULL) {
@@ -104,8 +105,9 @@ PyObject* PLyUnicode_Bytes(PyObject* unicode)
     rv = PyBytes_FromStringAndSize(encoded, strlen(encoded));
 
     /* if pg_do_encoding_conversion allocated memory, free it now */
-    if (utf8string != encoded)
+    if (utf8string != encoded) {
         pfree(encoded);
+    }
 
     Py_DECREF(bytes);
     return rv;
@@ -145,8 +147,9 @@ PyObject* PLyUnicode_FromString(const char* s)
 
     o = PyUnicode_FromString(utf8string);
 
-    if (utf8string != s)
+    if (utf8string != s) {
         pfree(utf8string);
+    }
 
     return o;
 }

@@ -9877,7 +9877,11 @@ static void printSubscripts(ArrayRef* aref, deparse_context* context)
         appendStringInfoChar(buf, '[');
         if (lowlist_item != NULL) {
             get_rule_expr((Node*)lfirst(lowlist_item), context, false);
-            appendStringInfoChar(buf, ':');
+            if (unlikely(u_sess->deepsql_cxt.enable_ai_env == true)) {
+                appendStringInfoChar(buf, ',');
+            } else {
+                appendStringInfoChar(buf, ':');
+            }
             lowlist_item = lnext(lowlist_item);
         }
         get_rule_expr((Node*)lfirst(uplist_item), context, false);

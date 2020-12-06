@@ -22,7 +22,6 @@
 #include "plpy_elog.h"
 #include "plpy_main.h"
 #include "plpy_planobject.h"
-#include "plpy_plpymodule.h"
 #include "plpy_procedure.h"
 #include "plpy_resultobject.h"
 
@@ -45,16 +44,18 @@ PyObject* PLy_spi_prepare(PyObject* self, PyObject* args)
     volatile ResourceOwner oldowner;
     volatile int nargs;
 
-    if (!PyArg_ParseTuple(args, "s|O", &query, &list))
+    if (!PyArg_ParseTuple(args, "s|O", &query, &list)) {
         return NULL;
+    }
 
     if (list && (!PySequence_Check(list))) {
         PLy_exception_set(PyExc_TypeError, "second argument of plpy.prepare must be a sequence");
         return NULL;
     }
 
-    if ((plan = (PLyPlanObject*)PLy_plan_new()) == NULL)
+    if ((plan = (PLyPlanObject*)PLy_plan_new()) == NULL) {
         return NULL;
+    }
 
     nargs = list ? PySequence_Length(list) : 0;
 
@@ -89,11 +90,11 @@ PyObject* PLy_spi_prepare(PyObject* self, PyObject* args)
             Form_pg_type typeStruct;
 
             optr = PySequence_GetItem(list, i);
-            if (PyString_Check(optr))
+            if (PyString_Check(optr)) {
                 sptr = PyString_AsString(optr);
-            else if (PyUnicode_Check(optr))
+            } else if (PyUnicode_Check(optr)) {
                 sptr = PLyUnicode_AsString(optr);
-            else {
+            } else {
                 ereport(ERROR, (errmsg("plpy.prepare: type name at ordinal position %d is not a string", i)));
                 sptr = NULL; /* keep compiler quiet */
             }
@@ -107,8 +108,9 @@ PyObject* PLy_spi_prepare(PyObject* self, PyObject* args)
             parseTypeString(sptr, &typeId, &typmod);
 
             typeTup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(typeId));
-            if (!HeapTupleIsValid(typeTup))
+            if (!HeapTupleIsValid(typeTup)) {
                 elog(ERROR, "cache lookup failed for type %u", typeId);
+            }
 
             Py_DECREF(optr);
 
@@ -120,22 +122,25 @@ PyObject* PLy_spi_prepare(PyObject* self, PyObject* args)
 
             plan->types[i] = typeId;
             typeStruct = (Form_pg_type)GETSTRUCT(typeTup);
-            if (typeStruct->typtype != TYPTYPE_COMPOSITE)
+            if (typeStruct->typtype != TYPTYPE_COMPOSITE) {
                 PLy_output_datum_func(&plan->args[i], typeTup);
-            else
+            } else {
                 ereport(ERROR,
                     (errcode(ERRCODE_FEATURE_NOT_SUPPORTED), errmsg("plpy.prepare does not support composite types")));
+            }
             ReleaseSysCache(typeTup);
         }
 
         pg_verifymbstr(query, strlen(query), false);
         plan->plan = SPI_prepare(query, plan->nargs, plan->types);
-        if (plan->plan == NULL)
+        if (plan->plan == NULL) {
             elog(ERROR, "SPI_prepare failed: %s", SPI_result_code_string(SPI_result));
+        }
 
         /* transfer plan from procCxt to topCxt */
-        if (SPI_keepplan(plan->plan))
+        if (SPI_keepplan(plan->plan)) {
             elog(ERROR, "SPI_keepplan failed");
+        }
 
         PLy_spi_subtransaction_commit(oldcontext, oldowner);
     }
@@ -153,7 +158,9 @@ PyObject* PLy_spi_prepare(PyObject* self, PyObject* args)
     return (PyObject*)plan;
 }
 
-/* execute(query="select * from foo", limit=5) */
+/* execute(query="select * from foo", limit=5)
+ * execute(plan=plan, values=(foo, bar), limit=5)
+ */
 PyObject* PLy_spi_execute(PyObject* self, PyObject* args)
 {
     char* query = NULL;
@@ -161,15 +168,23 @@ PyObject* PLy_spi_execute(PyObject* self, PyObject* args)
     PyObject* list = NULL;
     long limit = 0;
 
-    if (PyArg_ParseTuple(args, "s|l", &query, &limit))
+    /* PyArg_ParseTuple() will allocate a buffer of the needed size,
+     * copy the encoded data into this buffer and adjust *buffer to reference the newly allocated storage.
+     * The caller is responsible for calling PyMem_Free() to free the allocated buffer after use.
+     * Parse the parameters of a function that takes only positional parameters into local variables.
+     * Returns true on success; on failure, it returns false and raises the appropriate exception.
+     */
+    if (PyArg_ParseTuple(args, "s|l", &query, &limit)) {
         return PLy_spi_execute_query(query, limit);
+    }
 
     PyErr_Clear();
 
-    if (PyArg_ParseTuple(args, "O|Ol", &plan, &list, &limit) && is_PLyPlanObject(plan))
+    if (PyArg_ParseTuple(args, "O|Ol", &plan, &list, &limit) && is_PLyPlanObject(plan)) {
         return PLy_spi_execute_plan(plan, list, limit);
+    }
 
-    PLy_exception_set(plpy_t_context.PLy_exc_error, "plpy.execute expected a query or a plan");
+    PLy_exception_set(g_plpy_t_context.PLy_exc_error, "plpy.execute expected a query or a plan");
     return NULL;
 }
 
@@ -188,8 +203,9 @@ static PyObject* PLy_spi_execute_plan(PyObject* ob, PyObject* list, long limit)
             return NULL;
         }
         nargs = PySequence_Length(list);
-    } else
+    } else {
         nargs = 0;
+    }
 
     plan = (PLyPlanObject*)ob;
 
@@ -197,8 +213,9 @@ static PyObject* PLy_spi_execute_plan(PyObject* ob, PyObject* list, long limit)
         char* sv = NULL;
         PyObject* so = PyObject_Str(list);
 
-        if (so == NULL)
+        if (so == NULL) {
             PLy_elog(ERROR, "could not execute plan");
+        }
         sv = PyString_AsString(so);
         PLy_exception_set_plural(PyExc_TypeError,
             "Expected sequence of %d argument, got %d: %s",
@@ -223,10 +240,11 @@ static PyObject* PLy_spi_execute_plan(PyObject* ob, PyObject* list, long limit)
         char* volatile nulls = NULL;
         volatile int j;
 
-        if (nargs > 0)
+        if (nargs > 0) {
             nulls = (char*)palloc(nargs * sizeof(char));
-        else
+        } else {
             nulls = NULL;
+        }
 
         for (j = 0; j < nargs; j++) {
             PyObject* elem = NULL;
@@ -257,8 +275,9 @@ static PyObject* PLy_spi_execute_plan(PyObject* ob, PyObject* list, long limit)
         rv = SPI_execute_plan(plan->plan, plan->values, nulls, exec_ctx->curr_proc->fn_readonly, limit);
         ret = PLy_spi_execute_fetch_result(SPI_tuptable, SPI_processed, rv);
 
-        if (nargs > 0)
+        if (nargs > 0) {
             pfree(nulls);
+        }
 
         PLy_spi_subtransaction_commit(oldcontext, oldowner);
     }
@@ -289,7 +308,8 @@ static PyObject* PLy_spi_execute_plan(PyObject* ob, PyObject* list, long limit)
     }
 
     if (rv < 0) {
-        PLy_exception_set(plpy_t_context.PLy_exc_spi_error, "SPI_execute_plan failed: %s", SPI_result_code_string(rv));
+        PLy_exception_set(
+            g_plpy_t_context.PLy_exc_spi_error, "SPI_execute_plan failed: %s", SPI_result_code_string(rv));
         return NULL;
     }
 
@@ -327,7 +347,7 @@ static PyObject* PLy_spi_execute_query(char* query, long limit)
 
     if (rv < 0) {
         Py_XDECREF(ret);
-        PLy_exception_set(plpy_t_context.PLy_exc_spi_error, "SPI_execute failed: %s", SPI_result_code_string(rv));
+        PLy_exception_set(g_plpy_t_context.PLy_exc_spi_error, "SPI_execute failed: %s", SPI_result_code_string(rv));
         return NULL;
     }
 
@@ -385,8 +405,9 @@ static PyObject* PLy_spi_execute_fetch_result(SPITupleTable* tuptable, int rows,
         PG_CATCH();
         {
             MemoryContextSwitchTo(oldcontext);
-            if (!PyErr_Occurred())
-                PLy_exception_set(plpy_t_context.PLy_exc_error, "unrecognized error in PLy_spi_execute_fetch_result");
+            if (!PyErr_Occurred()) {
+                PLy_exception_set(g_plpy_t_context.PLy_exc_error, "unrecognized error in PLy_spi_execute_fetch_result");
+            }
             PLy_typeinfo_dealloc(&args);
             SPI_freetuptable(tuptable);
             Py_DECREF(result);
@@ -428,6 +449,12 @@ static PyObject* PLy_spi_execute_fetch_result(SPITupleTable* tuptable, int rows,
  */
 void PLy_spi_subtransaction_begin(MemoryContext oldcontext, ResourceOwner oldowner)
 {
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+        pgxc_node_remote_savepoint("Savepoint s1", EXEC_ON_ALL_NODES, true, true);
+    }
+#endif
+
     BeginInternalSubTransaction(NULL);
     /* Want to run inside function's memory context */
     MemoryContextSwitchTo(oldcontext);
@@ -437,6 +464,13 @@ void PLy_spi_subtransaction_commit(MemoryContext oldcontext, ResourceOwner oldow
 {
     /* Commit the inner transaction, return to outer xact context */
     ReleaseCurrentSubTransaction();
+
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+        pgxc_node_remote_savepoint("release s1", EXEC_ON_ALL_NODES, true, false);
+    }
+#endif
+
     MemoryContextSwitchTo(oldcontext);
     t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
 
@@ -460,6 +494,15 @@ void PLy_spi_subtransaction_abort(MemoryContext oldcontext, ResourceOwner oldown
 
     /* Abort the inner transaction */
     RollbackAndReleaseCurrentSubTransaction();
+
+#ifdef ENABLE_MULTIPLE_NODES
+    if (IS_PGXC_COORDINATOR && !IsConnFromCoord()) {
+        pgxc_node_remote_savepoint("rollback to s1", EXEC_ON_ALL_NODES, false, false);
+
+        pgxc_node_remote_savepoint("release s1", EXEC_ON_ALL_NODES, true, false);
+    }
+#endif
+
     MemoryContextSwitchTo(oldcontext);
     t_thrd.utils_cxt.CurrentResourceOwner = oldowner;
 
@@ -471,10 +514,10 @@ void PLy_spi_subtransaction_abort(MemoryContext oldcontext, ResourceOwner oldown
     SPI_restore_connection();
 
     /* Look up the correct exception */
-    entry = (PLyExceptionEntry*)hash_search(plpy_t_context.PLy_spi_exceptions, &(edata->sqlerrcode), HASH_FIND, NULL);
+    entry = (PLyExceptionEntry*)hash_search(g_plpy_t_context.PLy_spi_exceptions, &(edata->sqlerrcode), HASH_FIND, NULL);
     /* We really should find it, but just in case have a fallback */
     Assert(entry != NULL);
-    exc = entry ? entry->exc : plpy_t_context.PLy_exc_spi_error;
+    exc = entry ? entry->exc : g_plpy_t_context.PLy_exc_spi_error;
     /* Make Python raise the exception */
     PLy_spi_exception_set(exc, edata);
     FreeErrorData(edata);
@@ -491,21 +534,25 @@ static void PLy_spi_exception_set(PyObject* excclass, ErrorData* edata)
     PyObject* spidata = NULL;
 
     args = Py_BuildValue("(s)", edata->message);
-    if (args == NULL)
+    if (args == NULL) {
         goto failure;
+    }
 
     /* create a new SPI exception with the error message as the parameter */
     spierror = PyObject_CallObject(excclass, args);
-    if (spierror == NULL)
+    if (spierror == NULL) {
         goto failure;
+    }
 
     spidata = Py_BuildValue(
         "(izzzi)", edata->sqlerrcode, edata->detail, edata->hint, edata->internalquery, edata->internalpos);
-    if (spidata == NULL)
+    if (spidata == NULL) {
         goto failure;
+    }
 
-    if (PyObject_SetAttrString(spierror, "spidata", spidata) == -1)
+    if (PyObject_SetAttrString(spierror, "spidata", spidata) == -1) {
         goto failure;
+    }
 
     PyErr_SetObject(excclass, spierror);
 

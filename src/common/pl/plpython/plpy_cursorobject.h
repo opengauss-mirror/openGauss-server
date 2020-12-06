@@ -1,5 +1,5 @@
 /*
- * src/pl/plpython/plpy_cursorobject.h
+ * src/common/pl/plpython/plpy_cursorobject.h
  */
 
 #ifndef PLPY_CURSOROBJECT_H

@@ -1,0 +1,81 @@
+/*
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ *
+ * openGauss is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ * See the Mulan PSL v2 for more details.
+ * -------------------------------------------------------------------------
+ */
+ 
+m4_include(`SQLCommon.m4')
+
+----------------------------------------------------------------------------------------------
+------ xgboost grid search Algorithm
+----------------------------------------------------------------------------------------------
+
+------------------------------------------------
+-- Prepare Dataset BY pandas
+------------------------------------------------
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.__save_table_as_bytea__(
+    input_table TEXT,           /* dataset table  */
+    id_column TEXT,             /* id column      */
+    dependent_varname TEXT,     /* class label    */
+    features_list text[],       /* independent_v  */
+    verbose BOOL
+)
+RETURNS bytea AS $$
+PythonFunction(xgboost_gs, xgboost_utilities, save_table_as_bytea)
+$$ LANGUAGE plpythonu;
+
+
+------------------------------------------------
+-- Type for internal train results
+------------------------------------------------
+DROP TYPE IF EXISTS MADLIB_SCHEMA.xgb_train_results_type cascade;
+CREATE TYPE MADLIB_SCHEMA.xgb_train_results_type AS(
+    metrics TEXT,         /* save metrices info, e.g. mae, mse */
+    features TEXT[],      /* save X */
+    model bytea,          /* dump model */
+    params TEXT           /* parameters used */
+);
+
+------------------------------------------------
+-- UDF to train XGBoost
+------------------------------------------------
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.__xgboost_train_parallel__(
+    dframe bytea,                 /* df from pandas */
+    dependent_varname TEXT,       /* class label    */
+    features_list text[],         /* independent_v  */
+    xgb_type CHAR,                /* Classifier or Regression */
+    params TEXT,                  /* special param  */
+    evaluation BOOL,              /* evaluation the model? default FALSE */
+    verbose BOOL
+)
+RETURNS MADLIB_SCHEMA.xgb_train_results_type AS $$
+PythonFunction(xgboost_gs, xgboost_utilities, xgboost_train_parallel)
+$$ LANGUAGE plpythonu;
+
+------------------------------------------------
+-- XGBoost grid search
+------------------------------------------------
+
+CREATE OR REPLACE function MADLIB_SCHEMA.xgboost_grid_search(
+    input_table TEXT,
+    grid_search_results_tbl TEXT,
+    id_column TEXT,
+    dependent_varname TEXT,
+    features_list TEXT[],
+    xgb_type CHAR,                /* Classifier or Regressor */
+    params_str TEXT,
+    evaluation BOOL,
+    verbose BOOL
+)RETURNS TEXT AS $$
+PythonFunction(xgboost_gs, xgboost_utilities, xgboost_grid_search)
+$$ LANGUAGE plpythonu;

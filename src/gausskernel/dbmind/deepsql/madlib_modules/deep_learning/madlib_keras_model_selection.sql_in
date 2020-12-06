@@ -1,0 +1,465 @@
+/* ----------------------------------------------------------------------- *//**
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ *
+ *
+ * @file madlib_keras_model_selection.sql_in
+ *
+ * @brief SQL functions for model hopper distributed training
+ * @date August 2019
+ *
+ *
+ *//* ----------------------------------------------------------------------- */
+
+m4_include(`SQLCommon.m4')
+/**
+@addtogroup grp_keras_setup_model_selection
+
+@brief Utility function to set up a model selection table for model architecture search
+and hyperparameter tuning.
+
+\warning <em> This MADlib method is still in early stage development.
+Interface and implementation are subject to change. </em>
+
+<div class="toc"><b>Contents</b><ul>
+<li class="level1"><a href="#load_mst_table">Load Model Selection Table</a></li>
+<li class="level1"><a href="#example">Examples</a></li>
+<li class="level1"><a href="#notes">Notes</a></li>
+<li class="level1"><a href="#related">Related Topics</a></li>
+</ul></div>
+
+This utility function sets up a model selection table
+for use by the multiple model Keras fit feature of MADlib.
+By model selection we mean both hyperparameter tuning and
+model architecture search.  The table defines the unique combinations
+of model architectures, compile and fit parameters
+to run on a massively parallel processing database cluster.
+
+@anchor load_mst_table
+@par Load Model Selection Table
+
+<pre class="syntax">
+load_model_selection_table(
+    model_arch_table,
+    model_selection_table,
+    model_id_list,
+    compile_params_list,
+    fit_params_list,
+    object_table
+    )
+</pre>
+
+\b Arguments
+<dl class="arglist">
+  <dt>model_arch_table</dt>
+  <dd>VARCHAR. Table containing model architectures and weights.
+  For more information on this table
+  refer to <a href="group__grp__keras__model__arch.html">Load Model</a>.
+  </dd>
+
+  <dt>model_selection_table</dt>
+  <dd>VARCHAR. Model selection table created by this utility.  A summary table
+  named <model_selection_table>_summary is also created.  Contents of both output
+  tables are described below.
+  </dd>
+
+  <dt>model_id_list</dt>
+  <dd>INTEGER[]. Array of model IDs from the 'model_arch_table' to be included
+  in the run combinations.  For hyperparameter search, this will typically be
+  one model ID.  For model architecture search, this will be the different model IDs
+  that you want to test.
+  </dd>
+
+  <dt>compile_params_list</dt>
+  <dd>VARCHAR[]. Array of compile parameters to be tested.  Each element
+  of the array should consist of a string of compile parameters
+  exactly as it is to be passed to Keras. For custom loss functions or custom metrics,
+  list the custom function name in the usual way, and also provide the name of the
+  table where the serialized objects reside in the parameter 'object_table'
+  below.
+  </dd>
+
+  <dt>fit_params_list</dt>
+  <dd>VARCHAR[].  Array of fit parameters to be tested.  Each element
+  of the array should consist of a string of fit parameters
+  exactly as it is to be passed to Keras.
+  </dd>
+
+  <dt>object_table (optional)</dt>
+  <dd>VARCHAR, default: NULL. Name of the table containing Python objects in the case that
+  custom loss functions or custom metrics are specified in the
+  parameter 'compile_params_list'.
+  </dd>
+
+</dl>
+
+<b>Output table</b>
+<br>
+    The model selection output table contains the following columns:
+    <table class="output">
+      <tr>
+        <th>mst_key</th>
+        <td>INTEGER. ID that defines a unique tuple for
+        model architecture-compile parameters-fit parameters.
+        </td>
+      </tr>
+      <tr>
+        <th>model_id</th>
+        <td>VARCHAR. Model architecture ID from the 'model_arch_table'.
+        </td>
+      </tr>
+      <tr>
+        <th>compile_params</th>
+        <td>VARCHAR. Keras compile parameters.
+        </td>
+      </tr>
+      <tr>
+        <th>fit_params</th>
+        <td>VARCHAR. Keras fit parameters.
+        </td>
+      </tr>
+    </table>
+    A summary table named <model_selection_table>_summary is
+    also created, which contains the following column:
+    <table class="output">
+      <tr>
+        <th>model_arch_table</th>
+        <td>VARCHAR. Name of the model architecture table containing the
+        model architecture IDs.
+        </td>
+      </tr>
+      <tr>
+        <th>object_table</th>
+        <td>VARCHAR. Name of the object table containing the serialized
+        Python objects for custom loss functions and custom metrics.
+        If there are none, this field will be blank.
+        </td>
+      </tr>
+    </table>
+</br>
+
+@anchor example
+@par Examples
+-# The model selection table works in conjunction with a model architecture table,
+so we first create a model architecture table with two different models.  Use Keras to define
+a model architecture with 1 hidden layer:
+<pre class="example">
+import keras
+from keras.models import Sequential
+from keras.layers import Dense
+model1 = Sequential()
+model1.add(Dense(10, activation='relu', input_shape=(4,)))
+model1.add(Dense(10, activation='relu'))
+model1.add(Dense(3, activation='softmax'))
+model1.summary()
+\verbatim
+
+_________________________________________________________________
+Layer (type)                 Output Shape              Param #
+=================================================================
+dense_1 (Dense)              (None, 10)                50
+_________________________________________________________________
+dense_2 (Dense)              (None, 10)                110
+_________________________________________________________________
+dense_3 (Dense)              (None, 3)                 33
+=================================================================
+Total params: 193
+Trainable params: 193
+Non-trainable params: 0
+\endverbatim
+</pre>
+Export the model to JSON:
+<pre class="example">
+model1.to_json()
+</pre>
+<pre class="result">
+'{"class_name": "Sequential", "keras_version": "2.1.6", "config": [{"class_name": "Dense", "config": {"kernel_initializer": {"class_name": "VarianceScaling", "config": {"distribution": "uniform", "scale": 1.0, "seed": null, "mode": "fan_avg"}}, "name": "dense_1", "kernel_constraint": null, "bias_regularizer": null, "bias_constraint": null, "dtype": "float32", "activation": "relu", "trainable": true, "kernel_regularizer": null, "bias_initializer": {"class_name": "Zeros", "config": {}}, "units": 10, "batch_input_shape": [null, 4], "use_bias": true, "activity_regularizer": null}}, {"class_name": "Dense", "config": {"kernel_initializer": {"class_name": "VarianceScaling", "config": {"distribution": "uniform", "scale": 1.0, "seed": null, "mode": "fan_avg"}}, "name": "dense_2", "kernel_constraint": null, "bias_regularizer": null, "bias_constraint": null, "activation": "relu", "trainable": true, "kernel_regularizer": null, "bias_initializer": {"class_name": "Zeros", "config": {}}, "units": 10, "use_bias": true, "activity_regularizer": null}}, {"class_name": "Dense", "config": {"kernel_initializer": {"class_name": "VarianceScaling", "config": {"distribution": "uniform", "scale": 1.0, "seed": null, "mode": "fan_avg"}}, "name": "dense_3", "kernel_constraint": null, "bias_regularizer": null, "bias_constraint": null, "activation": "softmax", "trainable": true, "kernel_regularizer": null, "bias_initializer": {"class_name": "Zeros", "config": {}}, "units": 3, "use_bias": true, "activity_regularizer": null}}], "backend": "tensorflow"}'
+</pre>
+Now use Keras to define
+a model architecture with 2 hidden layers:
+<pre class="example">
+model2 = Sequential()
+model2.add(Dense(10, activation='relu', input_shape=(4,)))
+model2.add(Dense(10, activation='relu'))
+model2.add(Dense(10, activation='relu'))
+model2.add(Dense(3, activation='softmax'))
+model2.summary()
+\verbatim
+
+_________________________________________________________________
+Layer (type)                 Output Shape              Param #
+=================================================================
+dense_4 (Dense)              (None, 10)                50
+_________________________________________________________________
+dense_5 (Dense)              (None, 10)                110
+_________________________________________________________________
+dense_6 (Dense)              (None, 10)                110
+_________________________________________________________________
+dense_7 (Dense)              (None, 3)                 33
+=================================================================
+Total params: 303
+Trainable params: 303
+Non-trainable params: 0
+\endverbatim
+</pre>
+Export the model to JSON:
+<pre class="example">
+model2.to_json()
+</pre>
+<pre class="result">
+'{"class_name": "Sequential", "keras_version": "2.1.6", "config": [{"class_name": "Dense", "config": {"kernel_initializer": {"class_name": "VarianceScaling", "config": {"distribution": "uniform", "scale": 1.0, "seed": null, "mode": "fan_avg"}}, "name": "dense_4", "kernel_constraint": null, "bias_regularizer": null, "bias_constraint": null, "dtype": "float32", "activation": "relu", "trainable": true, "kernel_regularizer": null, "bias_initializer": {"class_name": "Zeros", "config": {}}, "units": 10, "batch_input_shape": [null, 4], "use_bias": true, "activity_regularizer": null}}, {"class_name": "Dense", "config": {"kernel_initializer": {"class_name": "VarianceScaling", "config": {"distribution": "uniform", "scale": 1.0, "seed": null, "mode": "fan_avg"}}, "name": "dense_5", "kernel_constraint": null, "bias_regularizer": null, "bias_constraint": null, "activation": "relu", "trainable": true, "kernel_regularizer": null, "bias_initializer": {"class_name": "Zeros", "config": {}}, "units": 10, "use_bias": true, "activity_regularizer": null}}, {"class_name": "Dense", "config": {"kernel_initializer": {"class_name": "VarianceScaling", "config": {"distribution": "uniform", "scale": 1.0, "seed": null, "mode": "fan_avg"}}, "name": "dense_6", "kernel_constraint": null, "bias_regularizer": null, "bias_constraint": null, "activation": "relu", "trainable": true, "kernel_regularizer": null, "bias_initializer": {"class_name": "Zeros", "config": {}}, "units": 10, "use_bias": true, "activity_regularizer": null}}, {"class_name": "Dense", "config": {"kernel_initializer": {"class_name": "VarianceScaling", "config": {"distribution": "uniform", "scale": 1.0, "seed": null, "mode": "fan_avg"}}, "name": "dense_7", "kernel_constraint": null, "bias_regularizer": null, "bias_constraint": null, "activation": "softmax", "trainable": true, "kernel_regularizer": null, "bias_initializer": {"class_name": "Zeros", "config": {}}, "units": 3, "use_bias": true, "activity_regularizer": null}}], "backend": "tensorflow"}'
+</pre>
+
+-# Load both models into the architecture table:
+<pre class="example">
+DROP TABLE IF EXISTS model_arch_library;
+SELECT madlib.load_keras_model('model_arch_library',  -- Output table,
+$$
+{"class_name": "Sequential", "keras_version": "2.1.6", "config": [{"class_name": "Dense", "config": {"kernel_initializer": {"class_name": "VarianceScaling", "config": {"distribution": "uniform", "scale": 1.0, "seed": null, "mode": "fan_avg"}}, "name": "dense_1", "kernel_constraint": null, "bias_regularizer": null, "bias_constraint": null, "dtype": "float32", "activation": "relu", "trainable": true, "kernel_regularizer": null, "bias_initializer": {"class_name": "Zeros", "config": {}}, "units": 10, "batch_input_shape": [null, 4], "use_bias": true, "activity_regularizer": null}}, {"class_name": "Dense", "config": {"kernel_initializer": {"class_name": "VarianceScaling", "config": {"distribution": "uniform", "scale": 1.0, "seed": null, "mode": "fan_avg"}}, "name": "dense_2", "kernel_constraint": null, "bias_regularizer": null, "bias_constraint": null, "activation": "relu", "trainable": true, "kernel_regularizer": null, "bias_initializer": {"class_name": "Zeros", "config": {}}, "units": 10, "use_bias": true, "activity_regularizer": null}}, {"class_name": "Dense", "config": {"kernel_initializer": {"class_name": "VarianceScaling", "config": {"distribution": "uniform", "scale": 1.0, "seed": null, "mode": "fan_avg"}}, "name": "dense_3", "kernel_constraint": null, "bias_regularizer": null, "bias_constraint": null, "activation": "softmax", "trainable": true, "kernel_regularizer": null, "bias_initializer": {"class_name": "Zeros", "config": {}}, "units": 3, "use_bias": true, "activity_regularizer": null}}], "backend": "tensorflow"}
+$$
+::json,         -- JSON blob
+                               NULL,                  -- Weights
+                               'Sophie',              -- Name
+                               'MLP with 1 hidden layer'       -- Descr
+);
+SELECT madlib.load_keras_model('model_arch_library',  -- Output table,
+$$
+{"class_name": "Sequential", "keras_version": "2.1.6", "config": [{"class_name": "Dense", "config": {"kernel_initializer": {"class_name": "VarianceScaling", "config": {"distribution": "uniform", "scale": 1.0, "seed": null, "mode": "fan_avg"}}, "name": "dense_4", "kernel_constraint": null, "bias_regularizer": null, "bias_constraint": null, "dtype": "float32", "activation": "relu", "trainable": true, "kernel_regularizer": null, "bias_initializer": {"class_name": "Zeros", "config": {}}, "units": 10, "batch_input_shape": [null, 4], "use_bias": true, "activity_regularizer": null}}, {"class_name": "Dense", "config": {"kernel_initializer": {"class_name": "VarianceScaling", "config": {"distribution": "uniform", "scale": 1.0, "seed": null, "mode": "fan_avg"}}, "name": "dense_5", "kernel_constraint": null, "bias_regularizer": null, "bias_constraint": null, "activation": "relu", "trainable": true, "kernel_regularizer": null, "bias_initializer": {"class_name": "Zeros", "config": {}}, "units": 10, "use_bias": true, "activity_regularizer": null}}, {"class_name": "Dense", "config": {"kernel_initializer": {"class_name": "VarianceScaling", "config": {"distribution": "uniform", "scale": 1.0, "seed": null, "mode": "fan_avg"}}, "name": "dense_6", "kernel_constraint": null, "bias_regularizer": null, "bias_constraint": null, "activation": "relu", "trainable": true, "kernel_regularizer": null, "bias_initializer": {"class_name": "Zeros", "config": {}}, "units": 10, "use_bias": true, "activity_regularizer": null}}, {"class_name": "Dense", "config": {"kernel_initializer": {"class_name": "VarianceScaling", "config": {"distribution": "uniform", "scale": 1.0, "seed": null, "mode": "fan_avg"}}, "name": "dense_7", "kernel_constraint": null, "bias_regularizer": null, "bias_constraint": null, "activation": "softmax", "trainable": true, "kernel_regularizer": null, "bias_initializer": {"class_name": "Zeros", "config": {}}, "units": 3, "use_bias": true, "activity_regularizer": null}}], "backend": "tensorflow"}
+$$
+::json,         -- JSON blob
+                               NULL,                  -- Weights
+                               'Maria',               -- Name
+                               'MLP with 2 hidden layers'       -- Descr
+);
+SELECT model_id, name, description FROM model_arch_library ORDER BY model_id;
+</pre>
+<pre class="result">
+ model_id |  name  |       description
+----------+--------+--------------------------
+        1 | Sophie | MLP with 1 hidden layer
+        2 | Maria  | MLP with 2 hidden layers
+(2 rows)
+</pre>
+
+-# Load model selection table.  Select the model(s) from the model
+architecture table that you want to run, along with the compile and
+fit parameters.  Unique combinations will be created:
+<pre class="example">
+DROP TABLE IF EXISTS mst_table, mst_table_summary;
+SELECT madlib.load_model_selection_table('model_arch_library', -- model architecture table
+                                         'mst_table',          -- model selection table output
+                                          ARRAY[1,2],              -- model ids from model architecture table
+                                          ARRAY[                   -- compile params
+                                              $$loss='categorical_crossentropy',optimizer='Adam(lr=0.1)',metrics=['accuracy']$$,
+                                              $$loss='categorical_crossentropy', optimizer='Adam(lr=0.01)',metrics=['accuracy']$$,
+                                              $$loss='categorical_crossentropy',optimizer='Adam(lr=0.001)',metrics=['accuracy']$$
+                                          ],
+                                          ARRAY[                    -- fit params
+                                              $$batch_size=4,epochs=1$$,
+                                              $$batch_size=8,epochs=1$$
+                                          ]
+                                         );
+SELECT * FROM mst_table ORDER BY mst_key;
+</pre>
+<pre class="result">
+ mst_key | model_id      |                                 compile_params                                  |      fit_params
+---------+---------------+---------------------------------------------------------------------------------+-----------------------
+       1 |             1 | loss='categorical_crossentropy',optimizer='Adam(lr=0.1)',metrics=['accuracy']   | batch_size=4,epochs=1
+       2 |             1 | loss='categorical_crossentropy',optimizer='Adam(lr=0.1)',metrics=['accuracy']   | batch_size=8,epochs=1
+       3 |             1 | loss='categorical_crossentropy', optimizer='Adam(lr=0.01)',metrics=['accuracy'] | batch_size=4,epochs=1
+       4 |             1 | loss='categorical_crossentropy', optimizer='Adam(lr=0.01)',metrics=['accuracy'] | batch_size=8,epochs=1
+       5 |             1 | loss='categorical_crossentropy',optimizer='Adam(lr=0.001)',metrics=['accuracy'] | batch_size=4,epochs=1
+       6 |             1 | loss='categorical_crossentropy',optimizer='Adam(lr=0.001)',metrics=['accuracy'] | batch_size=8,epochs=1
+       7 |             2 | loss='categorical_crossentropy',optimizer='Adam(lr=0.1)',metrics=['accuracy']   | batch_size=4,epochs=1
+       8 |             2 | loss='categorical_crossentropy',optimizer='Adam(lr=0.1)',metrics=['accuracy']   | batch_size=8,epochs=1
+       9 |             2 | loss='categorical_crossentropy', optimizer='Adam(lr=0.01)',metrics=['accuracy'] | batch_size=4,epochs=1
+      10 |             2 | loss='categorical_crossentropy', optimizer='Adam(lr=0.01)',metrics=['accuracy'] | batch_size=8,epochs=1
+      11 |             2 | loss='categorical_crossentropy',optimizer='Adam(lr=0.001)',metrics=['accuracy'] | batch_size=4,epochs=1
+      12 |             2 | loss='categorical_crossentropy',optimizer='Adam(lr=0.001)',metrics=['accuracy'] | batch_size=8,epochs=1
+(12 rows)
+</pre>
+The name of the model architecture table is stored in the summary table:
+<pre class="example">
+SELECT * FROM mst_table_summary;
+</pre>
+<pre class="result">
+  model_arch_table
+--------------------+
+ model_arch_library
+(1 row)
+</pre>
+
+-# Create model selection table manually.  If you would like to
+have more control over the set of model selection parameters
+to run, you can manually create the model selection table and
+the associated summary table. Both must be created since
+they are needed by the multiple model fit module.
+For example, let's say we don't want all combinations
+but only want batch_size=4 for model_id=1 and batch_size=8 for model_id=2:
+<pre class="example">
+DROP TABLE IF EXISTS mst_table_manual;
+CREATE TABLE mst_table_manual(
+    mst_key serial,
+    model_id integer,
+    compile_params varchar,
+    fit_params varchar
+);
+INSERT INTO mst_table_manual(model_id, compile_params, fit_params) VALUES
+(1, $$loss='categorical_crossentropy',optimizer='Adam(lr=0.1)',metrics=['accuracy']$$, 'batch_size=4,epochs=1'),
+(1, $$loss='categorical_crossentropy',optimizer='Adam(lr=0.01)',metrics=['accuracy']$$, 'batch_size=4,epochs=1'),
+(1, $$loss='categorical_crossentropy',optimizer='Adam(lr=0.001)',metrics=['accuracy']$$, 'batch_size=4,epochs=1'),
+(2, $$loss='categorical_crossentropy',optimizer='Adam(lr=0.1)',metrics=['accuracy']$$, 'batch_size=8,epochs=1'),
+(2, $$loss='categorical_crossentropy',optimizer='Adam(lr=0.01)',metrics=['accuracy']$$, 'batch_size=8,epochs=1'),
+(2, $$loss='categorical_crossentropy',optimizer='Adam(lr=0.001)',metrics=['accuracy']$$, 'batch_size=8,epochs=1');
+SELECT * FROM mst_table_manual ORDER BY mst_key;
+</pre>
+<pre class="result">
+ mst_key | model_id      |                                 compile_params                                  |      fit_params
+---------+---------------+---------------------------------------------------------------------------------+-----------------------
+       1 |             1 | loss='categorical_crossentropy',optimizer='Adam(lr=0.1)',metrics=['accuracy']   | batch_size=4,epochs=1
+       2 |             1 | loss='categorical_crossentropy',optimizer='Adam(lr=0.01)',metrics=['accuracy']  | batch_size=4,epochs=1
+       3 |             1 | loss='categorical_crossentropy',optimizer='Adam(lr=0.001)',metrics=['accuracy'] | batch_size=4,epochs=1
+       4 |             2 | loss='categorical_crossentropy',optimizer='Adam(lr=0.1)',metrics=['accuracy']   | batch_size=8,epochs=1
+       5 |             2 | loss='categorical_crossentropy',optimizer='Adam(lr=0.01)',metrics=['accuracy']  | batch_size=8,epochs=1
+       6 |             2 | loss='categorical_crossentropy',optimizer='Adam(lr=0.001)',metrics=['accuracy'] | batch_size=8,epochs=1
+(6 rows)
+</pre>
+Create the summary table which must be named
+with the model selection output table appended by "_summary":
+<pre class="example">
+DROP TABLE IF EXISTS mst_table_manual_summary;
+CREATE TABLE mst_table_manual_summary (
+    model_arch_table varchar
+);
+INSERT INTO mst_table_manual_summary(model_arch_table) VALUES
+('model_arch_library');
+SELECT * FROM mst_table_manual_summary;
+</pre>
+<pre class="result">
+  model_arch_table
+--------------------+
+ model_arch_library
+(1 row)
+</pre>
+
+-# Generate hyperparameters automatically.  You can use other
+libraries or methods to generate hyperparameters according
+to the tests that you want to run. For example, let's randomly
+generate batch size from powers of 2 and learning
+rate on a log scale.
+We use psycopg which is a PostgreSQL database adapter
+for the Python programming language.
+<pre class="example">
+import numpy as np
+import psycopg2 as p2
+conn = p2.connect('postgresql://gpadmin@35.239.240.26:5432/madlib')
+#conn = p2.connect('postgresql://fmcquillan@localhost:5432/madlib')
+cur = conn.cursor()
+\#
+%sql DROP TABLE IF EXISTS mst_table_auto, mst_table_auto_summary;
+\#
+\#compile params
+learning_rate = np.random.permutation([0.1,0.01,0.001,0.0001])[:3]
+compile_param1 = "loss='categorical_crossentropy',optimizer='Adam(lr=" + str(learning_rate[0]) + ")',metrics=['accuracy']"
+compile_param2 = "loss='categorical_crossentropy',optimizer='Adam(lr=" + str(learning_rate[1]) + ")',metrics=['accuracy']"
+compile_param3 = "loss='categorical_crossentropy',optimizer='Adam(lr=" + str(learning_rate[2]) + ")',metrics=['accuracy']"
+compile_params = [compile_param1,compile_param2,compile_param3]
+\#
+\#fit params
+batch_size = np.random.permutation([4,8,16,32,64])[:2]
+fit_param1 = "batch_size=" + str(batch_size[0]) + ",epochs=1"
+fit_param2 = "batch_size=" + str(batch_size[1]) + ",epochs=1"
+fit_params = [fit_param1,fit_param2]
+\#
+query = "SELECT madlib.load_model_selection_table('model_arch_library', 'mst_table_auto', ARRAY[1,2], %s, %s);"
+\#
+cur.execute(query,[compile_params, fit_params])
+conn.commit()
+\#
+\# review model selection table
+%sql SELECT * FROM mst_table_auto ORDER BY mst_key;
+</pre>
+<pre class="result">
+ mst_key | model_id      |                                  compile_params                                  |      fit_params
+---------+---------------+----------------------------------------------------------------------------------+-----------------------
+       1 |             1 | loss='categorical_crossentropy',optimizer='Adam(lr=0.0001)',metrics=['accuracy'] | batch_size=4,epochs=1
+       2 |             1 | loss='categorical_crossentropy',optimizer='Adam(lr=0.0001)',metrics=['accuracy'] | batch_size=8,epochs=1
+       3 |             1 | loss='categorical_crossentropy',optimizer='Adam(lr=0.1)',metrics=['accuracy']    | batch_size=4,epochs=1
+       4 |             1 | loss='categorical_crossentropy',optimizer='Adam(lr=0.1)',metrics=['accuracy']    | batch_size=8,epochs=1
+       5 |             1 | loss='categorical_crossentropy',optimizer='Adam(lr=0.001)',metrics=['accuracy']  | batch_size=4,epochs=1
+       6 |             1 | loss='categorical_crossentropy',optimizer='Adam(lr=0.001)',metrics=['accuracy']  | batch_size=8,epochs=1
+       7 |             2 | loss='categorical_crossentropy',optimizer='Adam(lr=0.0001)',metrics=['accuracy'] | batch_size=4,epochs=1
+       8 |             2 | loss='categorical_crossentropy',optimizer='Adam(lr=0.0001)',metrics=['accuracy'] | batch_size=8,epochs=1
+       9 |             2 | loss='categorical_crossentropy',optimizer='Adam(lr=0.1)',metrics=['accuracy']    | batch_size=4,epochs=1
+      10 |             2 | loss='categorical_crossentropy',optimizer='Adam(lr=0.1)',metrics=['accuracy']    | batch_size=8,epochs=1
+      11 |             2 | loss='categorical_crossentropy',optimizer='Adam(lr=0.001)',metrics=['accuracy']  | batch_size=4,epochs=1
+      12 |             2 | loss='categorical_crossentropy',optimizer='Adam(lr=0.001)',metrics=['accuracy']  | batch_size=8,epochs=1
+(12 rows)
+</pre>
+The name of the model architecture table is stored in the summary table:
+<pre class="example">
+SELECT * FROM mst_table_auto_summary;
+</pre>
+<pre class="result">
+  model_arch_table
+--------------------+
+ model_arch_library
+(1 row)
+</pre>
+
+@anchor notes
+@par Notes
+
+1. In this method, the same compile and fit parameters are applied to all model architectures
+when generating combinations.  However, you may wish to have different compile and fit parameters
+for each model.  To do so, call 'load_model_selection_table'
+multiple times - once for each model.  Then you can combine the resulting tables using UNION or other means.
+Note that the 'mst_key' must be unique so you will need to regenerate it in your final combined table.
+
+@anchor related
+@par Related Topics
+
+See keras_model_arch_table.sql_in
+
+*/
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.load_model_selection_table(
+    model_arch_table        VARCHAR,
+    model_selection_table   VARCHAR,
+    model_id_list           INTEGER[],
+    compile_params_list     VARCHAR[],
+    fit_params_list         VARCHAR[],
+    object_table            VARCHAR
+) RETURNS VOID AS $$
+    PythonFunctionBodyOnly(`deep_learning', `madlib_keras_model_selection')
+    with AOControl(False):
+        mst_loader = madlib_keras_model_selection.MstLoader(**globals())
+        mst_loader.load()
+$$ LANGUAGE plpythonu VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.load_model_selection_table(
+    model_arch_table        VARCHAR,
+    model_selection_table   VARCHAR,
+    model_id_list           INTEGER[],
+    compile_params_list     VARCHAR[],
+    fit_params_list         VARCHAR[]
+) RETURNS VOID AS $$
+  SELECT MADLIB_SCHEMA.load_model_selection_table($1, $2, $3, $4, $5, NULL);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA', `');

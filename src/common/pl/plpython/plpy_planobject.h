@@ -1,5 +1,5 @@
 /*
- * src/pl/plpython/plpy_planobject.h
+ * src/common/pl/plpython/plpy_planobject.h
  */
 
 #ifndef PLPY_PLANOBJECT_H

@@ -1,0 +1,70 @@
+/*
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ *
+ * openGauss is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ * See the Mulan PSL v2 for more details.
+ * -------------------------------------------------------------------------
+ */
+
+------------------------------------------------
+-- Build agglomerative clustering in database --
+------------------------------------------------
+
+m4_include(`SQLCommon.m4')
+
+---------------------
+-- train & evaluate--
+---------------------
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.agglomerative_clustering(
+    train_table TEXT,           -- Name of the table containing the train data
+    output_table TEXT,          -- Name of the table containing the clustering results
+    id_column TEXT,             -- Name of the id column from the train table
+    point_column TEXT,          -- Name of the point column from the train table
+    n_cluster INTEGER,          -- (optional, default:2) The number of clusters to find
+    affinity TEXT,              -- (optional, default:'euclidean') Metric used to compute the linkage
+    linkage TEXT                -- (optional, default:'ward') Which linkage criterion to use
+) RETURNS VOID AS $$ 
+PythonFunction(agglomerative_clustering, agglomerative_clustering, agglomerative_clustering)
+$$ LANGUAGE plpythonu;
+---------------------------------------------------------------------------------------------------
+-- Note:
+-- 1) affinity: Can be “euclidean”, “l1”, “l2”, “manhattan”, “cosine”. If linkage is “ward”, only “euclidean” is accepted.
+-- 2) linkage: Can be “ward”, “complete”, “average”, “single”. The linkage criterion determines which distance to use between sets of observation. The algorithm will merge the pairs of cluster that minimize this criterion. "ward" minimizes the variance of the clusters being merged. "complete" uses the maximum distances between all observations of the two sets. "average" uses the average of the distances of each observation of the two sets. "single" uses the minimum of the distances between all observations of the two sets.
+----------------------------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.agglomerative_clustering(
+    train_table TEXT,
+    output_table TEXT,
+    id_column TEXT,
+    point_column TEXT,
+    n_cluster INTEGER,
+    affinity TEXT
+) RETURNS VOID AS $$
+SELECT MADLIB_SCHEMA.agglomerative_clustering($1, $2, $3, $4, $5, $6, NULL);
+$$ LANGUAGE sql;
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.agglomerative_clustering(
+    train_table TEXT,
+    output_table TEXT,
+    id_column TEXT,
+    point_column TEXT,
+    n_cluster INTEGER
+) RETURNS VOID AS $$
+SELECT MADLIB_SCHEMA.agglomerative_clustering($1, $2, $3, $4, $5, NULL, NULL);
+$$ LANGUAGE sql;
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.agglomerative_clustering(
+    train_table TEXT,
+    output_table TEXT,
+    id_column TEXT,
+    point_column TEXT
+) RETURNS VOID AS $$
+SELECT MADLIB_SCHEMA.agglomerative_clustering($1, $2, $3, $4, NULL, NULL, NULL);
+$$ LANGUAGE sql;

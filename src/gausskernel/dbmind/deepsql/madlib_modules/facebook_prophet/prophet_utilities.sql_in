@@ -1,0 +1,54 @@
+/*
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ *
+ * openGauss is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ * See the Mulan PSL v2 for more details.
+ * -------------------------------------------------------------------------
+ */
+
+-------------------------------------------------------------------------------------------------------------------------------
+-- Build facebook Prophet models in-database - -
+-------------------------------------------------------------------------------------------------------------------------------
+--
+-----------
+-- Note: --
+-----------
+-- 1) Porphet uses facebook-API. However we're limited by the maximum
+--    field-size in Greenplum/Postgres which is currently 1 GB.
+-- 2) If your dataset is much larger (> 1 GB), it is strongly recommended that you use MADlib's models so that
+--    training & scoring will happen in-parallel on all nodes.
+-------------------------------------------------------------------------------------------------------------------------------
+
+m4_include(`SQLCommon.m4')
+
+
+------------------------------------------------
+-- Type for internal train results
+------------------------------------------------
+DROP TYPE IF EXISTS MADLIB_SCHEMA.prophet_fit_results_type cascade;
+CREATE TYPE MADLIB_SCHEMA.prophet_fit_results_type AS(
+    y_type           TEXT,                  -- save X
+    model            bytea,                -- dump model
+    params           TEXT                  -- parameters used
+);
+
+
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.__get_fbmodel_as_bytea__(
+    input_table  TEXT,                 -- dataset table
+    column_map   TEXT,                 -- map relation of column {'ds' 'y' 'floor' 'cap'}
+    params_str   TEXT,                 -- xgboost parameters
+    verbose      BOOLEAN
+)
+RETURNS MADLIB_SCHEMA.prophet_fit_results_type AS $$
+PythonFunction(facebook_prophet, prophet_utilities, get_fbmodel)
+$$ LANGUAGE plpythonu;
+
