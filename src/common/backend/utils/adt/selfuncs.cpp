@@ -6462,7 +6462,8 @@ static List* add_predicate_to_quals(IndexOptInfo* index, List* index_quals)
  * otherwise we compute a generic estimate.
  */
 static void generic_cost_estimate(PlannerInfo* root, IndexPath* path, double loop_count, double num_index_tuples,
-    Cost* index_startup_cost, Cost* index_total_cost, Selectivity* index_selectivity, double* index_correlation)
+    Cost* index_startup_cost, Cost* index_total_cost, Selectivity* index_selectivity, double* index_correlation,
+    double* index_pages = NULL)
 {
     IndexOptInfo* index = path->indexinfo;
     List* index_quals = path->indexquals;
@@ -6670,6 +6671,9 @@ static void generic_cost_estimate(PlannerInfo* root, IndexPath* path, double loo
      * Generic assumption about index correlation: there isn't any.
      */
     *index_correlation = 0.0;
+    if (index_pages != NULL) {
+        *index_pages = num_index_pages;
+    }
 }
 
 Datum btcostestimate(PG_FUNCTION_ARGS)
@@ -6681,6 +6685,7 @@ Datum btcostestimate(PG_FUNCTION_ARGS)
     Cost* index_total_cost = (Cost*)PG_GETARG_POINTER(4);
     Selectivity* index_selectivity = (Selectivity*)PG_GETARG_POINTER(5);
     double* index_correlation = (double*)PG_GETARG_POINTER(6);
+    double* index_pages = (double*)PG_GETARG_POINTER(7);
     IndexOptInfo* index = path->indexinfo;
     Oid relid;
     AttrNumber col_num;
@@ -6846,7 +6851,7 @@ Datum btcostestimate(PG_FUNCTION_ARGS)
     }
 
     generic_cost_estimate(root, path, loop_count, num_index_tuples, index_startup_cost,
-        index_total_cost, index_selectivity, index_correlation);
+        index_total_cost, index_selectivity, index_correlation, index_pages);
 
     /*
      * If we can get an estimate of the first column's ordering correlation C

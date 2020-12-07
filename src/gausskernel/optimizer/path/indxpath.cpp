@@ -904,7 +904,7 @@ static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo*
         * If appropriate, consider parallel index scan.  We don't allow
         * parallel index scan for bitmap index scans.
         */
-        if (index->amcanparallel && !index_only_scan && rel->consider_parallel && outer_relids == NULL &&
+        if (index->amcanparallel && rel->consider_parallel && outer_relids == NULL &&
             scantype != ST_BITMAPSCAN) {
             ipath = create_index_path(root, 
                 index,
@@ -956,7 +956,7 @@ static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo*
             result = lappend(result, ipath);
 
             /* If appropriate, consider parallel index scan */
-            if (index->amcanparallel && !index_only_scan && rel->consider_parallel && outer_relids == NULL &&
+            if (index->amcanparallel && rel->consider_parallel && outer_relids == NULL &&
                 scantype != ST_BITMAPSCAN) {
                 ipath = create_index_path(root,
                     index, index_clauses,

@@ -29,6 +29,7 @@
 #include "executor/nodeSeqscan.h"
 #include "executor/nodeAppend.h"
 #include "executor/nodeIndexscan.h"
+#include "executor/nodeIndexonlyscan.h"
 #include "executor/nodeHashjoin.h"
 #include "executor/nodeHash.h"
 #include "executor/tqueue.h"
@@ -84,7 +85,7 @@ static DestReceiver *ExecParallelGetReceiver(void *seg);
  */
 static char *ExecSerializePlan(Plan *plan, EState *estate)
 {
-    ListCell *tlist = NULL;
+    ListCell *lc = NULL;
 
     /* We can't scribble on the original plan, so make a copy. */
     plan = (Plan *)copyObject(plan);
@@ -98,8 +99,8 @@ static char *ExecSerializePlan(Plan *plan, EState *estate)
      * accordingly.  This is sort of a hack; there might be better ways to do
      * this...
      */
-    foreach (tlist, plan->targetlist) {
-        TargetEntry *tle = (TargetEntry *)lfirst(tlist);
+    foreach (lc, plan->targetlist) {
+        TargetEntry *tle = lfirst_node(TargetEntry, lc);
 
         tle->resjunk = false;
     }
@@ -120,7 +121,25 @@ static char *ExecSerializePlan(Plan *plan, EState *estate)
     pstmt->rtable = estate->es_range_table;
     pstmt->resultRelations = NIL;
     pstmt->utilityStmt = NULL;
-    pstmt->subplans = estate->es_plannedstmt->subplans;
+
+    /*
+     * Transfer only parallel-safe subplans, leaving a NULL "hole" in the list
+     * for unsafe ones (so that the list indexes of the safe ones are
+     * preserved).  This positively ensures that the worker won't try to run,
+     * or even do ExecInitNode on, an unsafe subplan.  That's important to
+     * protect, eg, non-parallel-aware FDWs from getting into trouble.
+     */
+    pstmt->subplans = NIL;
+    foreach(lc, estate->es_plannedstmt->subplans)
+    {
+        Plan *subplan = (Plan *)lfirst(lc);
+
+        if (subplan && !subplan->parallel_safe) {
+            subplan = NULL;
+        }
+        pstmt->subplans = lappend(pstmt->subplans, subplan);
+    }
+
     pstmt->rewindPlanIDs = NULL;
     pstmt->rowMarks = NIL;
     pstmt->nParamExec = estate->es_plannedstmt->nParamExec;
@@ -157,6 +176,9 @@ static bool ExecParallelEstimate(PlanState *planstate, ExecParallelEstimateConte
                 break;
             case T_IndexScanState:
                 ExecIndexScanEstimate((IndexScanState*)planstate, e->pcxt);
+                break;
+            case T_IndexOnlyScanState:
+                ExecIndexOnlyScanEstimate((IndexOnlyScanState*)planstate, e->pcxt);
                 break;
             case T_AppendState:
                 ExecAppendEstimate((AppendState*)planstate, e->pcxt);
@@ -206,6 +228,13 @@ static bool ExecParallelInitializeDSM(PlanState *planstate, ExecParallelInitiali
         case T_IndexScanState:
             if (planstate->plan->parallel_aware) {
                 ExecIndexScanInitializeDSM((IndexScanState*)planstate, d->pcxt, cxt->pwCtx->queryInfo.piscan_num);
+                cxt->pwCtx->queryInfo.piscan_num++;
+            }
+            break;
+        case T_IndexOnlyScanState:
+            if (planstate->plan->parallel_aware) {
+                ExecIndexOnlyScanInitializeDSM((IndexOnlyScanState*)planstate, d->pcxt,
+                    cxt->pwCtx->queryInfo.piscan_num);
                 cxt->pwCtx->queryInfo.piscan_num++;
             }
             break;
@@ -449,6 +478,11 @@ static bool ExecParallelReInitializeDSM(PlanState* planstate, ParallelContext* p
                 ExecIndexScanReInitializeDSM((IndexScanState*)planstate, pcxt);
             }
             break;
+        case T_IndexOnlyScanState:
+            if (planstate->plan->parallel_aware) {
+                ExecIndexOnlyScanReInitializeDSM((IndexOnlyScanState*)planstate, pcxt);
+            }
+            break;
         case T_AppendState:
             if (planstate->plan->parallel_aware) {
                 ExecAppendReInitializeDSM((AppendState*)planstate, pcxt);
@@ -689,6 +723,11 @@ static bool ExecParallelInitializeWorker(PlanState *planstate, void *context)
         case T_IndexScanState:
             if (planstate->plan->parallel_aware) {
                 ExecIndexScanInitializeWorker((IndexScanState*)planstate, context);
+            }
+            break;
+        case T_IndexOnlyScanState:
+            if (planstate->plan->parallel_aware) {
+                ExecIndexOnlyScanInitializeWorker((IndexOnlyScanState *)planstate, context);
             }
             break;
         case T_AppendState:

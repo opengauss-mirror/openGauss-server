@@ -499,10 +499,9 @@ void index_parallelscan_initialize(Relation heap_relation, Size pscan_len, Relat
     offset = MAXALIGN(offset);
 
     target->ps_relid = RelationGetRelid(heap_relation);
-    target->ps_indexid = RelationGetRelid(index_relation);
     target->ps_offset = offset;
     SerializeSnapshot(snapshot, target->ps_snapshot_data,
-        pscan_len - offsetof(ParallelIndexScanDescData, ps_snapshot_data));
+        pscan_len - offsetof(ParallelIndexScanDescData, ps_snapshot_data) - btestimateparallelscan());
 
     /* We reach heare only if the index type is btree */
     Assert(index_relation->rd_rel->relam == BTREE_AM_OID);
@@ -537,7 +536,7 @@ IndexScanDesc index_beginscan_parallel(Relation heaprel, Relation indexrel, int 
 {
     Assert(RelationGetRelid(heaprel) == pscan->ps_relid);
     Snapshot snapshot = RestoreSnapshot(pscan->ps_snapshot_data,
-        pscan->pscan_len - offsetof(ParallelIndexScanDescData, ps_snapshot_data));
+        pscan->pscan_len - offsetof(ParallelIndexScanDescData, ps_snapshot_data) - btestimateparallelscan());
     RegisterSnapshot(snapshot);
 
     IndexScanDesc scan = index_beginscan_internal(indexrel, nkeys, norderbys, snapshot, pscan, true);

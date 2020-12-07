@@ -3026,9 +3026,6 @@ GatherPath *create_gather_path(PlannerInfo *root, RelOptInfo *rel, Path *subpath
     pathnode->subpath = subpath;
     pathnode->single_copy = false;
 
-#ifdef STREAMPLAN
-    inherit_path_locator_info((Path*)pathnode, subpath);
-#endif
     if (pathnode->path.parallel_workers == 0) {
         pathnode->path.pathkeys = subpath->pathkeys;
         pathnode->path.parallel_workers = 1;

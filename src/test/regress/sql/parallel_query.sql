@@ -69,6 +69,14 @@ explain (costs off) select count(b) from parallel_t2 where a < 5000;
 select count(b) from parallel_t2 where a > 5000;
 select count(b) from parallel_t2 where a < 5000;
 
+--normal plan for index only scan
+explain (costs off) select count(*) from parallel_t2;
+explain (costs off) select count(*) from parallel_t2 where a > 5000;
+explain (costs off) select count(*) from parallel_t2 where a < 5000;
+select count(*) from parallel_t2;
+select count(*) from parallel_t2 where a > 5000;
+select count(*) from parallel_t2 where a < 5000;
+
 --set parallel parameter
 set force_parallel_mode=on;
 set parallel_setup_cost=0;
@@ -83,6 +91,14 @@ explain (costs off) select count(b) from parallel_t2 where a > 5000;
 explain (costs off) select count(b) from parallel_t2 where a < 5000;
 select count(b) from parallel_t2 where a > 5000;
 select count(b) from parallel_t2 where a < 5000;
+
+--parallel plan for index only scan
+explain (costs off) select count(a) from parallel_t2;
+explain (costs off) select count(a) from parallel_t2 where a > 5000;
+explain (costs off) select count(a) from parallel_t2 where a < 5000;
+select count(a) from parallel_t2;
+select count(a) from parallel_t2 where a > 5000;
+select count(a) from parallel_t2 where a < 5000;
 
 --set parallel_workers for parallel_t2
 alter table parallel_t2 set (parallel_workers = 1);
