@@ -2047,14 +2047,13 @@ bool ExecParallelScanHashBucket(HashJoinState* hjstate, ExprContext* econtext)
                 return true;
             }
         }
-        /*
-         * For right Semi/Anti join, we delete mathced tuples in HashTable to make next matching faster,
-         * so pointer hj_PreTuple is designed to follow the hj_CurTuple and to help us to clear the HashTable.
-         */
-        if (hjstate->js.jointype == JOIN_RIGHT_SEMI || hjstate->js.jointype == JOIN_RIGHT_ANTI) {
-            hjstate->hj_PreTuple = hashTuple;
-        }
 
+        /*
+         * We don't support parallel right Semi/Anti join, so we don't set hj_PreTuple like ExecScanHashBucket
+         * did. Check ExecScanHashBucket and hash_inner_and_outer.
+         */
+        Assert(hjstate->js.jointype != JOIN_RIGHT_SEMI);
+        Assert(hjstate->js.jointype != JOIN_RIGHT_ANTI);
         hashTuple = ExecParallelHashNextTuple(hashtable, hashTuple);
     }
 

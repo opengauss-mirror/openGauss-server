@@ -647,7 +647,8 @@ RelOptInfo* build_join_rel(PlannerInfo* root, Relids joinrelids, RelOptInfo* out
      * here.
      */
     if (inner_rel->consider_parallel && outer_rel->consider_parallel &&
-        !has_parallel_hazard((Node *)restrictlist, false)) {
+        !has_parallel_hazard((Node *)restrictlist, false) &&
+        !has_parallel_hazard((Node *)joinrel->reltargetlist, false)) {
         joinrel->consider_parallel = true;
     }
 

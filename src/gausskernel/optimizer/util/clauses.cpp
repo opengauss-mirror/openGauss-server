@@ -91,6 +91,7 @@ typedef struct {
 
 typedef struct {
     bool allow_restricted;
+    List *safe_param_ids; /* PARAM_EXEC Param IDs to treat as safe */
 } has_parallel_hazard_arg;
 
 
@@ -1168,6 +1169,7 @@ bool has_parallel_hazard(Node *node, bool allow_restricted)
     has_parallel_hazard_arg context;
 
     context.allow_restricted = allow_restricted;
+    context.safe_param_ids = NIL;
     return has_parallel_hazard_walker(node, &context);
 }
 
@@ -1196,8 +1198,53 @@ static bool has_parallel_hazard_walker(Node *node, has_parallel_hazard_arg *cont
 
         /* Recurse into subselects */
         return query_tree_walker(query, (bool (*)())has_parallel_hazard_walker, context, 0);
-    } else if (IsA(node, SubPlan) || IsA(node, SubLink) || IsA(node, AlternativeSubPlan) || IsA(node, Param)) {
-        return true;
+    } else if (IsA(node, SubLink) || IsA(node, AlternativeSubPlan)) {
+        if (!context->allow_restricted) {
+            return true;
+        }
+    } else if (IsA(node, SubPlan)) {
+        /*
+         * Only parallel-safe SubPlans can be sent to workers.  Within the
+         * testexpr of the SubPlan, Params representing the output columns of the
+         * subplan can be treated as parallel-safe, so temporarily add their IDs
+         * to the safe_param_ids list while examining the testexpr.
+         */
+        SubPlan *subplan = (SubPlan *)node;
+
+        if (!subplan->parallel_safe && !context->allow_restricted) {
+            return true;
+        }
+        List *saveSafeParamIds = context->safe_param_ids;
+        context->safe_param_ids = list_concat(list_copy(context->safe_param_ids), list_copy(subplan->paramIds));
+        if (has_parallel_hazard_walker(subplan->testexpr, context)) {
+            return true; /* no need to restore safe_param_ids */
+        }
+        list_free(context->safe_param_ids);
+        context->safe_param_ids = saveSafeParamIds;
+        /* we must also check args, but no special Param treatment there */
+        if (has_parallel_hazard_walker((Node *) subplan->args, context)) {
+            return true;
+        }
+        /* don't want to recurse normally, so we're done */
+        return false;
+    } else if (IsA(node, Param)) {
+        /*
+         * We can't pass Params to workers at the moment either, so they are also
+         * parallel-restricted, unless they are PARAM_EXTERN Params or are
+         * PARAM_EXEC Params listed in safe_param_ids, meaning they could be
+         * either generated within workers or can be computed by the leader and
+         * then their value can be passed to workers.
+         */
+        Param *param = (Param *)node;
+        if (param->paramkind == PARAM_EXTERN) {
+            return false;
+        }
+        if (param->paramkind != PARAM_EXEC || !list_member_int(context->safe_param_ids, param->paramid)) {
+            if (!context->allow_restricted) {
+                return true;
+            }
+        }
+        return false; /* nothing to recurse to */
     }
 
     /* This is just a notational convenience for callers. */

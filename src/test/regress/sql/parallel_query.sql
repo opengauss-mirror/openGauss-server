@@ -278,6 +278,20 @@ reset enable_hashjoin;
 reset enable_nestloop;
 reset enable_indexscan;
 
+--parallel with subplan
+drop table subplan_tb1;
+create table subplan_tb1(a int, b varchar);
+insert into subplan_tb1 values (0, NULL);
+insert into subplan_tb1 values (1, NULL);
+insert into subplan_tb1 values (2, NULL);
+insert into subplan_tb1 values (3, NULL);
+
+explain (verbose,costs off) select boo_1.a  
+from subplan_tb1 boo_1 inner join subplan_tb1 boo_2
+on ( case when boo_1.a in ( 
+select boo_3.a  from subplan_tb1 boo_3 ) then boo_1.a end ) in 
+(select max( boo.a ) column_009 from subplan_tb1 boo);
+
 --clean up
 drop table parallel_t1;
 drop table parallel_t2;

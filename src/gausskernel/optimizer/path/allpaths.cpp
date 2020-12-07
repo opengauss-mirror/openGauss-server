@@ -1072,10 +1072,10 @@ static void set_rel_consider_parallel(PlannerInfo *root, RelOptInfo *rel, RangeT
             break;
 
         case RTE_VALUES:
-            /*
-             * The data for a VALUES clause is stored in the plan tree itself,
-             * so scanning it in a worker is fine.
-             */
+            /* Check for parallel-restricted functions. */
+            if (has_parallel_hazard((Node *)rte->values_lists, false)) {
+                return;
+            }
             break;
 
         case RTE_CTE:
@@ -1101,6 +1101,14 @@ static void set_rel_consider_parallel(PlannerInfo *root, RelOptInfo *rel, RangeT
      */
     if (has_parallel_hazard((Node *)rel->baserestrictinfo, false))
         return;
+
+    /*
+     * Likewise, if the relation's outputs are not parallel-safe, give up.
+     * (Usually, they're just Vars, but sometimes they're not.)
+     */
+    if (has_parallel_hazard((Node *)rel->reltargetlist, false)) {
+        return;
+    }
 
     /* We have a winner. */
     rel->consider_parallel = true;

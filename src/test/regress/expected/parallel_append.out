@@ -82,18 +82,24 @@ explain (costs off) select * from a where a1 > 4 union all select * from b where
 (10 rows)
 
 explain (costs off) select * from c where c1 in (select a1 from a union select b1 from b);
-           QUERY PLAN            
----------------------------------
+                   QUERY PLAN                   
+------------------------------------------------
  Hash Join
    Hash Cond: (a.a1 = c.c1)
    ->  HashAggregate
          Group By Key: a.a1
          ->  Append
-               ->  Seq Scan on a
-               ->  Seq Scan on b
+               ->  Gather
+                     Number of Workers: 1
+                     ->  Parallel Seq Scan on a
+               ->  Gather
+                     Number of Workers: 1
+                     ->  Parallel Seq Scan on b
    ->  Hash
-         ->  Seq Scan on c
-(9 rows)
+         ->  Gather
+               Number of Workers: 1
+               ->  Parallel Seq Scan on c
+(15 rows)
 
 explain (costs off) select * from (select * from a union all select * from b) as ta, c where ta.a1 = c.c1;
                 QUERY PLAN                

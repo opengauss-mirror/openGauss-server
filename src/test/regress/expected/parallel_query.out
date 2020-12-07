@@ -1061,6 +1061,57 @@ select count(*) from parallel_t1,parallel_t2 where parallel_t1.a=parallel_t2.a;
 reset enable_hashjoin;
 reset enable_nestloop;
 reset enable_indexscan;
+--parallel with subplan
+drop table subplan_tb1;
+ERROR:  table "subplan_tb1" does not exist
+create table subplan_tb1(a int, b varchar);
+insert into subplan_tb1 values (0, NULL);
+insert into subplan_tb1 values (1, NULL);
+insert into subplan_tb1 values (2, NULL);
+insert into subplan_tb1 values (3, NULL);
+explain (verbose,costs off) select boo_1.a  
+from subplan_tb1 boo_1 inner join subplan_tb1 boo_2
+on ( case when boo_1.a in ( 
+select boo_3.a  from subplan_tb1 boo_3 ) then boo_1.a end ) in 
+(select max( boo.a ) column_009 from subplan_tb1 boo);
+                                            QUERY PLAN                                             
+---------------------------------------------------------------------------------------------------
+ Merge Join
+   Output: boo_1.a
+   Merge Cond: ((max(boo.a)) = (CASE WHEN (hashed SubPlan 1) THEN boo_1.a ELSE NULL::integer END))
+   ->  Sort
+         Output: (max(boo.a))
+         Sort Key: (max(boo.a))
+         ->  Nested Loop
+               Output: (max(boo.a))
+               ->  Aggregate
+                     Output: max(boo.a)
+                     ->  Gather
+                           Output: boo.a
+                           Number of Workers: 2
+                           ->  Parallel Seq Scan on public.subplan_tb1 boo
+                                 Output: boo.a
+               ->  Gather
+                     Output: boo_2.a, boo_2.b
+                     Number of Workers: 2
+                     ->  Parallel Seq Scan on public.subplan_tb1 boo_2
+                           Output: boo_2.a, boo_2.b
+   ->  Sort
+         Output: boo_1.a, (CASE WHEN (hashed SubPlan 1) THEN boo_1.a ELSE NULL::integer END)
+         Sort Key: (CASE WHEN (hashed SubPlan 1) THEN boo_1.a ELSE NULL::integer END)
+         ->  Gather
+               Output: boo_1.a, CASE WHEN (hashed SubPlan 1) THEN boo_1.a ELSE NULL::integer END
+               Number of Workers: 2
+               ->  Parallel Seq Scan on public.subplan_tb1 boo_1
+                     Output: boo_1.a
+               SubPlan 1
+                 ->  Gather
+                       Output: boo_3.a
+                       Number of Workers: 2
+                       ->  Parallel Seq Scan on public.subplan_tb1 boo_3
+                             Output: boo_3.a
+(34 rows)
+
 --clean up
 drop table parallel_t1;
 drop table parallel_t2;

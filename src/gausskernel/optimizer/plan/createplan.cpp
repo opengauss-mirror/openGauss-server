@@ -1838,7 +1838,12 @@ static Gather* create_gather_plan(PlannerInfo* root, GatherPath* best_path)
 
     disuse_physical_tlist(subplan, best_path->subpath);
 
-    Gather* gather_plan = make_gather(subplan->targetlist,
+    /*
+     * Copy a new target list for gather, since in merge join case, it will change the targetlist.
+     * If we just use a pointer to subplan->targetlist, then it will change the subplan's targetlist
+     * at same time, which we don't want. Check prepare_sort_from_pathkeys for the targetlist.
+     */
+    Gather* gather_plan = make_gather(list_copy(subplan->targetlist),
         NIL,
         best_path->path.parallel_workers,
         SS_assign_special_param(root),
