@@ -66,8 +66,8 @@ extern bool CheckBitmapHeapPathContainGlobalOrLocal(Path* bitmapqual);
 extern bool check_bitmap_heap_path_index_unusable(Path* bitmapqual, RelOptInfo* baserel);
 extern bool is_partitionIndex_Subpath(Path* subpath);
 extern bool is_pwj_path(Path* pwjpath);
-extern BitmapHeapPath* create_bitmap_heap_path(
-    PlannerInfo* root, RelOptInfo* rel, Path* bitmapqual, Relids required_outer, double loop_count);
+extern BitmapHeapPath *create_bitmap_heap_path(PlannerInfo *root, RelOptInfo *rel, Path *bitmapqual,
+    Relids required_outer, double loop_count, int parallel_degree);
 extern BitmapAndPath* create_bitmap_and_path(PlannerInfo* root, RelOptInfo* rel, List* bitmapquals);
 extern BitmapOrPath* create_bitmap_or_path(PlannerInfo* root, RelOptInfo* rel, List* bitmapquals);
 extern TidPath* create_tidscan_path(PlannerInfo* root, RelOptInfo* rel, List* tidquals);

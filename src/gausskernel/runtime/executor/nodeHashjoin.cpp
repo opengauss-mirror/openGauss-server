@@ -1597,7 +1597,6 @@ void ExecHashJoinInitializeDSM(HashJoinState* state, ParallelContext* pcxt, int 
     /* Initialize the shared state in the hash node. */
     hashNode = (HashState*)innerPlanState(state);
     hashNode->parallel_state = pstate;
-    t_thrd.bgworker_cxt.memCxt = cxt->memCtx;
 }
 
 /* ----------------------------------------------------------------
@@ -1669,5 +1668,4 @@ void ExecHashJoinInitializeWorker(HashJoinState* state, void* pwcxt)
     hashNode = (HashState*)innerPlanState(state);
     hashNode->parallel_state = pstate;
     state->isParallel = true;
-    t_thrd.bgworker_cxt.memCxt = cxt->memCtx;
 }

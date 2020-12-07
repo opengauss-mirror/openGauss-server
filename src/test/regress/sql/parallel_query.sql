@@ -14,15 +14,149 @@ select count(*) from parallel_t1 where a > 5000;
 select count(*) from parallel_t1 where a < 5000;
 select count(*) from parallel_t1 where a <> 5000;
 
+--normal plan for bitmapscan
+create index idx_parallel_t1 on parallel_t1(a);
+analyze parallel_t1;
+set enable_seqscan to off;
+set enable_indexscan to off;
+explain (costs off) select count(*) from parallel_t1 where a > 5000;
+explain (costs off) select count(*) from parallel_t1 where a < 5000;
+explain (costs off) select count(*) from parallel_t1 where a <> 5000;
+select count(*) from parallel_t1 where a > 5000;
+select count(*) from parallel_t1 where a < 5000;
+select count(*) from parallel_t1 where a <> 5000;
+reset enable_seqscan;
+reset enable_indexscan;
+
 --set parallel parameter
 set force_parallel_mode=on;
 set parallel_setup_cost=0;
 set parallel_tuple_cost=0.000005;
 set max_parallel_workers_per_gather=2;
 set min_parallel_table_scan_size=0;
+set min_parallel_index_scan_size=0;
 set parallel_leader_participation=on;
 
+--rescan case
+create table test_with_rescan(dm int, sj_dm int, name text);
+insert into test_with_rescan values(1,0,'universe');
+insert into test_with_rescan values(2,1,'galaxy');
+insert into test_with_rescan values(3,2,'sun');
+insert into test_with_rescan values(4,3,'earth');
+insert into test_with_rescan values(5,4,'asia');
+insert into test_with_rescan values(6,5,'China');
+insert into test_with_rescan values(7,6,'shaanxi');
+insert into test_with_rescan values(8,7,'xian');
+insert into test_with_rescan values(9,8,'huawei');
+insert into test_with_rescan values(10,9,'v10');
+insert into test_with_rescan values(11,10,'v10-3L');
+insert into test_with_rescan values(12,11,'gauss');
+insert into test_with_rescan values(13,12,'test');
+insert into test_with_rescan values(14,13,'test');
+insert into test_with_rescan values(15,14,'test');
+insert into test_with_rescan values(16,15,'test');
+insert into test_with_rescan values(17,16,'test');
+insert into test_with_rescan values(18,17,'test');
+insert into test_with_rescan values(19,18,'test');
+insert into test_with_rescan values(20,19,'test');
+create index on test_with_rescan(dm);
+create index on test_with_rescan(sj_dm);
+create index on test_with_rescan(name);
+analyze test_with_rescan;
+explain (costs off)
+WITH recursive t_result AS (
+select * from(
+SELECT dm,sj_dm,name,1 as level
+FROM test_with_rescan
+WHERE sj_dm < 10 order by dm limit 6 offset 2)
+UNION all
+SELECT t2.dm,t2.sj_dm,t2.name||' > '||t1.name,t1.level+1 
+FROM t_result t1
+JOIN test_with_rescan t2 ON t2.sj_dm = t1.dm
+)
+SELECT *
+FROM t_result t;
+
+WITH recursive t_result AS (
+select * from(
+SELECT dm,sj_dm,name,1 as level
+FROM test_with_rescan
+WHERE sj_dm < 10 order by dm limit 6 offset 2)
+UNION all
+SELECT t2.dm,t2.sj_dm,t2.name||' > '||t1.name,t1.level+1
+FROM t_result t1
+JOIN test_with_rescan t2 ON t2.sj_dm = t1.dm
+)
+SELECT *
+FROM t_result t order by 1,2,3,4;
+
+--increate cpu_tuple_cost, disable seqscan, test parallel index scan
+set enable_seqscan=off;
+set cpu_tuple_cost=1000;
+explain (costs off)
+WITH recursive t_result AS (
+select * from(
+SELECT dm,sj_dm,name,1 as level
+FROM test_with_rescan
+WHERE sj_dm < 10 order by dm limit 6 offset 2)
+UNION all
+SELECT t2.dm,t2.sj_dm,t2.name||' > '||t1.name,t1.level+1 
+FROM t_result t1
+JOIN test_with_rescan t2 ON t2.sj_dm = t1.dm
+)
+SELECT *
+FROM t_result t;
+
+WITH recursive t_result AS (
+select * from(
+SELECT dm,sj_dm,name,1 as level
+FROM test_with_rescan
+WHERE sj_dm < 10 order by dm limit 6 offset 2)
+UNION all
+SELECT t2.dm,t2.sj_dm,t2.name||' > '||t1.name,t1.level+1
+FROM t_result t1
+JOIN test_with_rescan t2 ON t2.sj_dm = t1.dm
+)
+SELECT *
+FROM t_result t order by 1,2,3,4;
+
+--disable indexscan, test parallel bitmap scan
+set enable_indexscan to off;
+explain (costs off)
+WITH recursive t_result AS (
+select * from(
+SELECT dm,sj_dm,name,1 as level
+FROM test_with_rescan
+WHERE sj_dm < 10 order by dm limit 6 offset 2)
+UNION all
+SELECT t2.dm,t2.sj_dm,t2.name||' > '||t1.name,t1.level+1 
+FROM t_result t1
+JOIN test_with_rescan t2 ON t2.sj_dm = t1.dm
+)
+SELECT *
+FROM t_result t;
+
+WITH recursive t_result AS (
+select * from(
+SELECT dm,sj_dm,name,1 as level
+FROM test_with_rescan
+WHERE sj_dm < 10 order by dm limit 6 offset 2)
+UNION all
+SELECT t2.dm,t2.sj_dm,t2.name||' > '||t1.name,t1.level+1
+FROM t_result t1
+JOIN test_with_rescan t2 ON t2.sj_dm = t1.dm
+)
+SELECT *
+FROM t_result t order by 1,2,3,4;
+
+drop table test_with_rescan;
+reset enable_seqscan;
+reset enable_indexscan;
+reset cpu_tuple_cost;
+
 --parallel plan for seq scan
+set enable_bitmapscan to off;
+set enable_indexscan to off;
 explain (costs off) select count(*) from parallel_t1;
 explain (costs off) select count(*) from parallel_t1 where a = 5000;
 explain (costs off) select count(*) from parallel_t1 where a > 5000;
@@ -34,6 +168,29 @@ select count(*) from parallel_t1 where a > 5000;
 select count(*) from parallel_t1 where a < 5000;
 select count(*) from parallel_t1 where a <> 5000;
 explain (costs off,analyse on,verbose on) select count(*) from parallel_t1;
+reset enable_indexscan;
+reset enable_bitmapscan;
+
+--parallel plan for bitmap scan
+--onepage case
+CREATE TABLE onepage1 (val int, val2 int);
+ALTER TABLE onepage1 ADD PRIMARY KEY(val, val2);
+insert into onepage1 (select * from generate_series(1, 5) a, generate_series(1, 5) b);
+CREATE TABLE onepage2 as select * from onepage1;
+explain select * from onepage2 natural join onepage1 where onepage2.val > 2 and onepage1.val < 4;
+select * from onepage2 natural join onepage1 where onepage2.val > 2 and onepage1.val < 4 order by 1,2;
+drop table onepage1;
+drop table onepage2;
+set enable_seqscan to off;
+set enable_indexscan to off;
+explain (costs off) select count(*) from parallel_t1 where a > 5000;
+explain (costs off) select count(*) from parallel_t1 where a < 5000;
+explain (costs off) select count(*) from parallel_t1 where a <> 5000;
+select count(*) from parallel_t1 where a > 5000;
+select count(*) from parallel_t1 where a < 5000;
+select count(*) from parallel_t1 where a <> 5000;
+reset enable_seqscan;
+reset enable_indexscan;
 
 --clean up
 reset force_parallel_mode;

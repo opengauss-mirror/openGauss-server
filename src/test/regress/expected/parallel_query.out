@@ -72,14 +72,539 @@ select count(*) from parallel_t1 where a <> 5000;
  99999
 (1 row)
 
+--normal plan for bitmapscan
+create index idx_parallel_t1 on parallel_t1(a);
+analyze parallel_t1;
+set enable_seqscan to off;
+set enable_indexscan to off;
+explain (costs off) select count(*) from parallel_t1 where a > 5000;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on parallel_t1
+         Recheck Cond: (a > 5000)
+         ->  Bitmap Index Scan on idx_parallel_t1
+               Index Cond: (a > 5000)
+(5 rows)
+
+explain (costs off) select count(*) from parallel_t1 where a < 5000;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on parallel_t1
+         Recheck Cond: (a < 5000)
+         ->  Bitmap Index Scan on idx_parallel_t1
+               Index Cond: (a < 5000)
+(5 rows)
+
+explain (costs off) select count(*) from parallel_t1 where a <> 5000;
+                    QUERY PLAN                    
+--------------------------------------------------
+ Aggregate
+   ->  Bitmap Heap Scan on parallel_t1
+         Filter: (a <> 5000)
+         ->  Bitmap Index Scan on idx_parallel_t1
+(4 rows)
+
+select count(*) from parallel_t1 where a > 5000;
+ count 
+-------
+ 95000
+(1 row)
+
+select count(*) from parallel_t1 where a < 5000;
+ count 
+-------
+  4999
+(1 row)
+
+select count(*) from parallel_t1 where a <> 5000;
+ count 
+-------
+ 99999
+(1 row)
+
+reset enable_seqscan;
+reset enable_indexscan;
 --set parallel parameter
 set force_parallel_mode=on;
 set parallel_setup_cost=0;
 set parallel_tuple_cost=0.000005;
 set max_parallel_workers_per_gather=2;
 set min_parallel_table_scan_size=0;
+set min_parallel_index_scan_size=0;
 set parallel_leader_participation=on;
+--rescan case
+create table test_with_rescan(dm int, sj_dm int, name text);
+insert into test_with_rescan values(1,0,'universe');
+insert into test_with_rescan values(2,1,'galaxy');
+insert into test_with_rescan values(3,2,'sun');
+insert into test_with_rescan values(4,3,'earth');
+insert into test_with_rescan values(5,4,'asia');
+insert into test_with_rescan values(6,5,'China');
+insert into test_with_rescan values(7,6,'shaanxi');
+insert into test_with_rescan values(8,7,'xian');
+insert into test_with_rescan values(9,8,'huawei');
+insert into test_with_rescan values(10,9,'v10');
+insert into test_with_rescan values(11,10,'v10-3L');
+insert into test_with_rescan values(12,11,'gauss');
+insert into test_with_rescan values(13,12,'test');
+insert into test_with_rescan values(14,13,'test');
+insert into test_with_rescan values(15,14,'test');
+insert into test_with_rescan values(16,15,'test');
+insert into test_with_rescan values(17,16,'test');
+insert into test_with_rescan values(18,17,'test');
+insert into test_with_rescan values(19,18,'test');
+insert into test_with_rescan values(20,19,'test');
+create index on test_with_rescan(dm);
+create index on test_with_rescan(sj_dm);
+create index on test_with_rescan(name);
+analyze test_with_rescan;
+explain (costs off)
+WITH recursive t_result AS (
+select * from(
+SELECT dm,sj_dm,name,1 as level
+FROM test_with_rescan
+WHERE sj_dm < 10 order by dm limit 6 offset 2)
+UNION all
+SELECT t2.dm,t2.sj_dm,t2.name||' > '||t1.name,t1.level+1 
+FROM t_result t1
+JOIN test_with_rescan t2 ON t2.sj_dm = t1.dm
+)
+SELECT *
+FROM t_result t;
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ CTE Scan on t_result t
+   CTE t_result
+     ->  Recursive Union
+           ->  Limit
+                 ->  Sort
+                       Sort Key: test_with_rescan.dm
+                       ->  Gather
+                             Number of Workers: 1
+                             ->  Parallel Seq Scan on test_with_rescan
+                                   Filter: (sj_dm < 10)
+           ->  Hash Join
+                 Hash Cond: (t1.dm = t2.sj_dm)
+                 ->  WorkTable Scan on t_result t1
+                 ->  Hash
+                       ->  Gather
+                             Number of Workers: 1
+                             ->  Parallel Seq Scan on test_with_rescan t2
+(17 rows)
+
+WITH recursive t_result AS (
+select * from(
+SELECT dm,sj_dm,name,1 as level
+FROM test_with_rescan
+WHERE sj_dm < 10 order by dm limit 6 offset 2)
+UNION all
+SELECT t2.dm,t2.sj_dm,t2.name||' > '||t1.name,t1.level+1
+FROM t_result t1
+JOIN test_with_rescan t2 ON t2.sj_dm = t1.dm
+)
+SELECT *
+FROM t_result t order by 1,2,3,4;
+ dm | sj_dm |                                                                name                                                                 | level 
+----+-------+-------------------------------------------------------------------------------------------------------------------------------------+-------
+  3 |     2 | sun                                                                                                                                 |     1
+  4 |     3 | earth                                                                                                                               |     1
+  4 |     3 | earth > sun                                                                                                                         |     2
+  5 |     4 | asia                                                                                                                                |     1
+  5 |     4 | asia > earth                                                                                                                        |     2
+  5 |     4 | asia > earth > sun                                                                                                                  |     3
+  6 |     5 | China                                                                                                                               |     1
+  6 |     5 | China > asia                                                                                                                        |     2
+  6 |     5 | China > asia > earth                                                                                                                |     3
+  6 |     5 | China > asia > earth > sun                                                                                                          |     4
+  7 |     6 | shaanxi                                                                                                                             |     1
+  7 |     6 | shaanxi > China                                                                                                                     |     2
+  7 |     6 | shaanxi > China > asia                                                                                                              |     3
+  7 |     6 | shaanxi > China > asia > earth                                                                                                      |     4
+  7 |     6 | shaanxi > China > asia > earth > sun                                                                                                |     5
+  8 |     7 | xian                                                                                                                                |     1
+  8 |     7 | xian > shaanxi                                                                                                                      |     2
+  8 |     7 | xian > shaanxi > China                                                                                                              |     3
+  8 |     7 | xian > shaanxi > China > asia                                                                                                       |     4
+  8 |     7 | xian > shaanxi > China > asia > earth                                                                                               |     5
+  8 |     7 | xian > shaanxi > China > asia > earth > sun                                                                                         |     6
+  9 |     8 | huawei > xian                                                                                                                       |     2
+  9 |     8 | huawei > xian > shaanxi                                                                                                             |     3
+  9 |     8 | huawei > xian > shaanxi > China                                                                                                     |     4
+  9 |     8 | huawei > xian > shaanxi > China > asia                                                                                              |     5
+  9 |     8 | huawei > xian > shaanxi > China > asia > earth                                                                                      |     6
+  9 |     8 | huawei > xian > shaanxi > China > asia > earth > sun                                                                                |     7
+ 10 |     9 | v10 > huawei > xian                                                                                                                 |     3
+ 10 |     9 | v10 > huawei > xian > shaanxi                                                                                                       |     4
+ 10 |     9 | v10 > huawei > xian > shaanxi > China                                                                                               |     5
+ 10 |     9 | v10 > huawei > xian > shaanxi > China > asia                                                                                        |     6
+ 10 |     9 | v10 > huawei > xian > shaanxi > China > asia > earth                                                                                |     7
+ 10 |     9 | v10 > huawei > xian > shaanxi > China > asia > earth > sun                                                                          |     8
+ 11 |    10 | v10-3L > v10 > huawei > xian                                                                                                        |     4
+ 11 |    10 | v10-3L > v10 > huawei > xian > shaanxi                                                                                              |     5
+ 11 |    10 | v10-3L > v10 > huawei > xian > shaanxi > China                                                                                      |     6
+ 11 |    10 | v10-3L > v10 > huawei > xian > shaanxi > China > asia                                                                               |     7
+ 11 |    10 | v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth                                                                       |     8
+ 11 |    10 | v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun                                                                 |     9
+ 12 |    11 | gauss > v10-3L > v10 > huawei > xian                                                                                                |     5
+ 12 |    11 | gauss > v10-3L > v10 > huawei > xian > shaanxi                                                                                      |     6
+ 12 |    11 | gauss > v10-3L > v10 > huawei > xian > shaanxi > China                                                                              |     7
+ 12 |    11 | gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia                                                                       |     8
+ 12 |    11 | gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth                                                               |     9
+ 12 |    11 | gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun                                                         |    10
+ 13 |    12 | test > gauss > v10-3L > v10 > huawei > xian                                                                                         |     6
+ 13 |    12 | test > gauss > v10-3L > v10 > huawei > xian > shaanxi                                                                               |     7
+ 13 |    12 | test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China                                                                       |     8
+ 13 |    12 | test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia                                                                |     9
+ 13 |    12 | test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth                                                        |    10
+ 13 |    12 | test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun                                                  |    11
+ 14 |    13 | test > test > gauss > v10-3L > v10 > huawei > xian                                                                                  |     7
+ 14 |    13 | test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi                                                                        |     8
+ 14 |    13 | test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China                                                                |     9
+ 14 |    13 | test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia                                                         |    10
+ 14 |    13 | test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth                                                 |    11
+ 14 |    13 | test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun                                           |    12
+ 15 |    14 | test > test > test > gauss > v10-3L > v10 > huawei > xian                                                                           |     8
+ 15 |    14 | test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi                                                                 |     9
+ 15 |    14 | test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China                                                         |    10
+ 15 |    14 | test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia                                                  |    11
+ 15 |    14 | test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth                                          |    12
+ 15 |    14 | test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun                                    |    13
+ 16 |    15 | test > test > test > test > gauss > v10-3L > v10 > huawei > xian                                                                    |     9
+ 16 |    15 | test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi                                                          |    10
+ 16 |    15 | test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China                                                  |    11
+ 16 |    15 | test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia                                           |    12
+ 16 |    15 | test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth                                   |    13
+ 16 |    15 | test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun                             |    14
+ 17 |    16 | test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian                                                             |    10
+ 17 |    16 | test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi                                                   |    11
+ 17 |    16 | test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China                                           |    12
+ 17 |    16 | test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia                                    |    13
+ 17 |    16 | test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth                            |    14
+ 17 |    16 | test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun                      |    15
+ 18 |    17 | test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian                                                      |    11
+ 18 |    17 | test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi                                            |    12
+ 18 |    17 | test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China                                    |    13
+ 18 |    17 | test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia                             |    14
+ 18 |    17 | test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth                     |    15
+ 18 |    17 | test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun               |    16
+ 19 |    18 | test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian                                               |    12
+ 19 |    18 | test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi                                     |    13
+ 19 |    18 | test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China                             |    14
+ 19 |    18 | test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia                      |    15
+ 19 |    18 | test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth              |    16
+ 19 |    18 | test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun        |    17
+ 20 |    19 | test > test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian                                        |    13
+ 20 |    19 | test > test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi                              |    14
+ 20 |    19 | test > test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China                      |    15
+ 20 |    19 | test > test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia               |    16
+ 20 |    19 | test > test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth       |    17
+ 20 |    19 | test > test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun |    18
+(93 rows)
+
+--increate cpu_tuple_cost, disable seqscan, test parallel index scan
+set enable_seqscan=off;
+set cpu_tuple_cost=1000;
+explain (costs off)
+WITH recursive t_result AS (
+select * from(
+SELECT dm,sj_dm,name,1 as level
+FROM test_with_rescan
+WHERE sj_dm < 10 order by dm limit 6 offset 2)
+UNION all
+SELECT t2.dm,t2.sj_dm,t2.name||' > '||t1.name,t1.level+1 
+FROM t_result t1
+JOIN test_with_rescan t2 ON t2.sj_dm = t1.dm
+)
+SELECT *
+FROM t_result t;
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ CTE Scan on t_result t
+   CTE t_result
+     ->  Recursive Union
+           ->  Limit
+                 ->  Sort
+                       Sort Key: test_with_rescan.dm
+                       ->  Gather
+                             Number of Workers: 1
+                             ->  Parallel Index Scan using test_with_rescan_sj_dm_idx on test_with_rescan
+                                   Index Cond: (sj_dm < 10)
+           ->  Merge Join
+                 Merge Cond: (t1.dm = t2.sj_dm)
+                 ->  Sort
+                       Sort Key: t1.dm
+                       ->  WorkTable Scan on t_result t1
+                 ->  Sort
+                       Sort Key: t2.sj_dm
+                       ->  Gather
+                             Number of Workers: 1
+                             ->  Parallel Index Scan using test_with_rescan_sj_dm_idx on test_with_rescan t2
+(20 rows)
+
+WITH recursive t_result AS (
+select * from(
+SELECT dm,sj_dm,name,1 as level
+FROM test_with_rescan
+WHERE sj_dm < 10 order by dm limit 6 offset 2)
+UNION all
+SELECT t2.dm,t2.sj_dm,t2.name||' > '||t1.name,t1.level+1
+FROM t_result t1
+JOIN test_with_rescan t2 ON t2.sj_dm = t1.dm
+)
+SELECT *
+FROM t_result t order by 1,2,3,4;
+ dm | sj_dm |                                                                name                                                                 | level 
+----+-------+-------------------------------------------------------------------------------------------------------------------------------------+-------
+  3 |     2 | sun                                                                                                                                 |     1
+  4 |     3 | earth                                                                                                                               |     1
+  4 |     3 | earth > sun                                                                                                                         |     2
+  5 |     4 | asia                                                                                                                                |     1
+  5 |     4 | asia > earth                                                                                                                        |     2
+  5 |     4 | asia > earth > sun                                                                                                                  |     3
+  6 |     5 | China                                                                                                                               |     1
+  6 |     5 | China > asia                                                                                                                        |     2
+  6 |     5 | China > asia > earth                                                                                                                |     3
+  6 |     5 | China > asia > earth > sun                                                                                                          |     4
+  7 |     6 | shaanxi                                                                                                                             |     1
+  7 |     6 | shaanxi > China                                                                                                                     |     2
+  7 |     6 | shaanxi > China > asia                                                                                                              |     3
+  7 |     6 | shaanxi > China > asia > earth                                                                                                      |     4
+  7 |     6 | shaanxi > China > asia > earth > sun                                                                                                |     5
+  8 |     7 | xian                                                                                                                                |     1
+  8 |     7 | xian > shaanxi                                                                                                                      |     2
+  8 |     7 | xian > shaanxi > China                                                                                                              |     3
+  8 |     7 | xian > shaanxi > China > asia                                                                                                       |     4
+  8 |     7 | xian > shaanxi > China > asia > earth                                                                                               |     5
+  8 |     7 | xian > shaanxi > China > asia > earth > sun                                                                                         |     6
+  9 |     8 | huawei > xian                                                                                                                       |     2
+  9 |     8 | huawei > xian > shaanxi                                                                                                             |     3
+  9 |     8 | huawei > xian > shaanxi > China                                                                                                     |     4
+  9 |     8 | huawei > xian > shaanxi > China > asia                                                                                              |     5
+  9 |     8 | huawei > xian > shaanxi > China > asia > earth                                                                                      |     6
+  9 |     8 | huawei > xian > shaanxi > China > asia > earth > sun                                                                                |     7
+ 10 |     9 | v10 > huawei > xian                                                                                                                 |     3
+ 10 |     9 | v10 > huawei > xian > shaanxi                                                                                                       |     4
+ 10 |     9 | v10 > huawei > xian > shaanxi > China                                                                                               |     5
+ 10 |     9 | v10 > huawei > xian > shaanxi > China > asia                                                                                        |     6
+ 10 |     9 | v10 > huawei > xian > shaanxi > China > asia > earth                                                                                |     7
+ 10 |     9 | v10 > huawei > xian > shaanxi > China > asia > earth > sun                                                                          |     8
+ 11 |    10 | v10-3L > v10 > huawei > xian                                                                                                        |     4
+ 11 |    10 | v10-3L > v10 > huawei > xian > shaanxi                                                                                              |     5
+ 11 |    10 | v10-3L > v10 > huawei > xian > shaanxi > China                                                                                      |     6
+ 11 |    10 | v10-3L > v10 > huawei > xian > shaanxi > China > asia                                                                               |     7
+ 11 |    10 | v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth                                                                       |     8
+ 11 |    10 | v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun                                                                 |     9
+ 12 |    11 | gauss > v10-3L > v10 > huawei > xian                                                                                                |     5
+ 12 |    11 | gauss > v10-3L > v10 > huawei > xian > shaanxi                                                                                      |     6
+ 12 |    11 | gauss > v10-3L > v10 > huawei > xian > shaanxi > China                                                                              |     7
+ 12 |    11 | gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia                                                                       |     8
+ 12 |    11 | gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth                                                               |     9
+ 12 |    11 | gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun                                                         |    10
+ 13 |    12 | test > gauss > v10-3L > v10 > huawei > xian                                                                                         |     6
+ 13 |    12 | test > gauss > v10-3L > v10 > huawei > xian > shaanxi                                                                               |     7
+ 13 |    12 | test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China                                                                       |     8
+ 13 |    12 | test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia                                                                |     9
+ 13 |    12 | test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth                                                        |    10
+ 13 |    12 | test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun                                                  |    11
+ 14 |    13 | test > test > gauss > v10-3L > v10 > huawei > xian                                                                                  |     7
+ 14 |    13 | test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi                                                                        |     8
+ 14 |    13 | test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China                                                                |     9
+ 14 |    13 | test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia                                                         |    10
+ 14 |    13 | test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth                                                 |    11
+ 14 |    13 | test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun                                           |    12
+ 15 |    14 | test > test > test > gauss > v10-3L > v10 > huawei > xian                                                                           |     8
+ 15 |    14 | test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi                                                                 |     9
+ 15 |    14 | test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China                                                         |    10
+ 15 |    14 | test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia                                                  |    11
+ 15 |    14 | test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth                                          |    12
+ 15 |    14 | test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun                                    |    13
+ 16 |    15 | test > test > test > test > gauss > v10-3L > v10 > huawei > xian                                                                    |     9
+ 16 |    15 | test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi                                                          |    10
+ 16 |    15 | test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China                                                  |    11
+ 16 |    15 | test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia                                           |    12
+ 16 |    15 | test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth                                   |    13
+ 16 |    15 | test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun                             |    14
+ 17 |    16 | test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian                                                             |    10
+ 17 |    16 | test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi                                                   |    11
+ 17 |    16 | test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China                                           |    12
+ 17 |    16 | test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia                                    |    13
+ 17 |    16 | test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth                            |    14
+ 17 |    16 | test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun                      |    15
+ 18 |    17 | test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian                                                      |    11
+ 18 |    17 | test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi                                            |    12
+ 18 |    17 | test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China                                    |    13
+ 18 |    17 | test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia                             |    14
+ 18 |    17 | test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth                     |    15
+ 18 |    17 | test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun               |    16
+ 19 |    18 | test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian                                               |    12
+ 19 |    18 | test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi                                     |    13
+ 19 |    18 | test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China                             |    14
+ 19 |    18 | test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia                      |    15
+ 19 |    18 | test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth              |    16
+ 19 |    18 | test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun        |    17
+ 20 |    19 | test > test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian                                        |    13
+ 20 |    19 | test > test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi                              |    14
+ 20 |    19 | test > test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China                      |    15
+ 20 |    19 | test > test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia               |    16
+ 20 |    19 | test > test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth       |    17
+ 20 |    19 | test > test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun |    18
+(93 rows)
+
+--disable indexscan, test parallel bitmap scan
+set enable_indexscan to off;
+explain (costs off)
+WITH recursive t_result AS (
+select * from(
+SELECT dm,sj_dm,name,1 as level
+FROM test_with_rescan
+WHERE sj_dm < 10 order by dm limit 6 offset 2)
+UNION all
+SELECT t2.dm,t2.sj_dm,t2.name||' > '||t1.name,t1.level+1 
+FROM t_result t1
+JOIN test_with_rescan t2 ON t2.sj_dm = t1.dm
+)
+SELECT *
+FROM t_result t;
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ CTE Scan on t_result t
+   CTE t_result
+     ->  Recursive Union
+           ->  Limit
+                 ->  Sort
+                       Sort Key: test_with_rescan.dm
+                       ->  Gather
+                             Number of Workers: 1
+                             ->  Parallel Bitmap Heap Scan on test_with_rescan
+                                   Recheck Cond: (sj_dm < 10)
+                                   ->  Bitmap Index Scan on test_with_rescan_sj_dm_idx
+                                         Index Cond: (sj_dm < 10)
+           ->  Nested Loop
+                 ->  WorkTable Scan on t_result t1
+                 ->  Bitmap Heap Scan on test_with_rescan t2
+                       Recheck Cond: (sj_dm = t1.dm)
+                       ->  Bitmap Index Scan on test_with_rescan_sj_dm_idx
+                             Index Cond: (sj_dm = t1.dm)
+(18 rows)
+
+WITH recursive t_result AS (
+select * from(
+SELECT dm,sj_dm,name,1 as level
+FROM test_with_rescan
+WHERE sj_dm < 10 order by dm limit 6 offset 2)
+UNION all
+SELECT t2.dm,t2.sj_dm,t2.name||' > '||t1.name,t1.level+1
+FROM t_result t1
+JOIN test_with_rescan t2 ON t2.sj_dm = t1.dm
+)
+SELECT *
+FROM t_result t order by 1,2,3,4;
+ dm | sj_dm |                                                                name                                                                 | level 
+----+-------+-------------------------------------------------------------------------------------------------------------------------------------+-------
+  3 |     2 | sun                                                                                                                                 |     1
+  4 |     3 | earth                                                                                                                               |     1
+  4 |     3 | earth > sun                                                                                                                         |     2
+  5 |     4 | asia                                                                                                                                |     1
+  5 |     4 | asia > earth                                                                                                                        |     2
+  5 |     4 | asia > earth > sun                                                                                                                  |     3
+  6 |     5 | China                                                                                                                               |     1
+  6 |     5 | China > asia                                                                                                                        |     2
+  6 |     5 | China > asia > earth                                                                                                                |     3
+  6 |     5 | China > asia > earth > sun                                                                                                          |     4
+  7 |     6 | shaanxi                                                                                                                             |     1
+  7 |     6 | shaanxi > China                                                                                                                     |     2
+  7 |     6 | shaanxi > China > asia                                                                                                              |     3
+  7 |     6 | shaanxi > China > asia > earth                                                                                                      |     4
+  7 |     6 | shaanxi > China > asia > earth > sun                                                                                                |     5
+  8 |     7 | xian                                                                                                                                |     1
+  8 |     7 | xian > shaanxi                                                                                                                      |     2
+  8 |     7 | xian > shaanxi > China                                                                                                              |     3
+  8 |     7 | xian > shaanxi > China > asia                                                                                                       |     4
+  8 |     7 | xian > shaanxi > China > asia > earth                                                                                               |     5
+  8 |     7 | xian > shaanxi > China > asia > earth > sun                                                                                         |     6
+  9 |     8 | huawei > xian                                                                                                                       |     2
+  9 |     8 | huawei > xian > shaanxi                                                                                                             |     3
+  9 |     8 | huawei > xian > shaanxi > China                                                                                                     |     4
+  9 |     8 | huawei > xian > shaanxi > China > asia                                                                                              |     5
+  9 |     8 | huawei > xian > shaanxi > China > asia > earth                                                                                      |     6
+  9 |     8 | huawei > xian > shaanxi > China > asia > earth > sun                                                                                |     7
+ 10 |     9 | v10 > huawei > xian                                                                                                                 |     3
+ 10 |     9 | v10 > huawei > xian > shaanxi                                                                                                       |     4
+ 10 |     9 | v10 > huawei > xian > shaanxi > China                                                                                               |     5
+ 10 |     9 | v10 > huawei > xian > shaanxi > China > asia                                                                                        |     6
+ 10 |     9 | v10 > huawei > xian > shaanxi > China > asia > earth                                                                                |     7
+ 10 |     9 | v10 > huawei > xian > shaanxi > China > asia > earth > sun                                                                          |     8
+ 11 |    10 | v10-3L > v10 > huawei > xian                                                                                                        |     4
+ 11 |    10 | v10-3L > v10 > huawei > xian > shaanxi                                                                                              |     5
+ 11 |    10 | v10-3L > v10 > huawei > xian > shaanxi > China                                                                                      |     6
+ 11 |    10 | v10-3L > v10 > huawei > xian > shaanxi > China > asia                                                                               |     7
+ 11 |    10 | v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth                                                                       |     8
+ 11 |    10 | v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun                                                                 |     9
+ 12 |    11 | gauss > v10-3L > v10 > huawei > xian                                                                                                |     5
+ 12 |    11 | gauss > v10-3L > v10 > huawei > xian > shaanxi                                                                                      |     6
+ 12 |    11 | gauss > v10-3L > v10 > huawei > xian > shaanxi > China                                                                              |     7
+ 12 |    11 | gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia                                                                       |     8
+ 12 |    11 | gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth                                                               |     9
+ 12 |    11 | gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun                                                         |    10
+ 13 |    12 | test > gauss > v10-3L > v10 > huawei > xian                                                                                         |     6
+ 13 |    12 | test > gauss > v10-3L > v10 > huawei > xian > shaanxi                                                                               |     7
+ 13 |    12 | test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China                                                                       |     8
+ 13 |    12 | test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia                                                                |     9
+ 13 |    12 | test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth                                                        |    10
+ 13 |    12 | test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun                                                  |    11
+ 14 |    13 | test > test > gauss > v10-3L > v10 > huawei > xian                                                                                  |     7
+ 14 |    13 | test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi                                                                        |     8
+ 14 |    13 | test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China                                                                |     9
+ 14 |    13 | test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia                                                         |    10
+ 14 |    13 | test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth                                                 |    11
+ 14 |    13 | test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun                                           |    12
+ 15 |    14 | test > test > test > gauss > v10-3L > v10 > huawei > xian                                                                           |     8
+ 15 |    14 | test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi                                                                 |     9
+ 15 |    14 | test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China                                                         |    10
+ 15 |    14 | test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia                                                  |    11
+ 15 |    14 | test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth                                          |    12
+ 15 |    14 | test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun                                    |    13
+ 16 |    15 | test > test > test > test > gauss > v10-3L > v10 > huawei > xian                                                                    |     9
+ 16 |    15 | test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi                                                          |    10
+ 16 |    15 | test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China                                                  |    11
+ 16 |    15 | test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia                                           |    12
+ 16 |    15 | test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth                                   |    13
+ 16 |    15 | test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun                             |    14
+ 17 |    16 | test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian                                                             |    10
+ 17 |    16 | test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi                                                   |    11
+ 17 |    16 | test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China                                           |    12
+ 17 |    16 | test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia                                    |    13
+ 17 |    16 | test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth                            |    14
+ 17 |    16 | test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun                      |    15
+ 18 |    17 | test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian                                                      |    11
+ 18 |    17 | test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi                                            |    12
+ 18 |    17 | test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China                                    |    13
+ 18 |    17 | test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia                             |    14
+ 18 |    17 | test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth                     |    15
+ 18 |    17 | test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun               |    16
+ 19 |    18 | test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian                                               |    12
+ 19 |    18 | test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi                                     |    13
+ 19 |    18 | test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China                             |    14
+ 19 |    18 | test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia                      |    15
+ 19 |    18 | test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth              |    16
+ 19 |    18 | test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun        |    17
+ 20 |    19 | test > test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian                                        |    13
+ 20 |    19 | test > test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi                              |    14
+ 20 |    19 | test > test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China                      |    15
+ 20 |    19 | test > test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia               |    16
+ 20 |    19 | test > test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth       |    17
+ 20 |    19 | test > test > test > test > test > test > test > test > gauss > v10-3L > v10 > huawei > xian > shaanxi > China > asia > earth > sun |    18
+(93 rows)
+
+drop table test_with_rescan;
+reset enable_seqscan;
+reset enable_indexscan;
+reset cpu_tuple_cost;
 --parallel plan for seq scan
+set enable_bitmapscan to off;
+set enable_indexscan to off;
 explain (costs off) select count(*) from parallel_t1;
                   QUERY PLAN                  
 ----------------------------------------------
@@ -174,6 +699,100 @@ explain (costs off,analyse on,verbose on) select count(*) from parallel_t1;
 --? Total runtime: [0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* ms
 (10 rows)
 
+reset enable_indexscan;
+reset enable_bitmapscan;
+--parallel plan for bitmap scan
+--onepage case
+CREATE TABLE onepage1 (val int, val2 int);
+ALTER TABLE onepage1 ADD PRIMARY KEY(val, val2);
+NOTICE:  ALTER TABLE / ADD PRIMARY KEY will create implicit index "onepage1_pkey" for table "onepage1"
+insert into onepage1 (select * from generate_series(1, 5) a, generate_series(1, 5) b);
+CREATE TABLE onepage2 as select * from onepage1;
+explain select * from onepage2 natural join onepage1 where onepage2.val > 2 and onepage1.val < 4;
+                                          QUERY PLAN                                           
+-----------------------------------------------------------------------------------------------
+ Gather  (cost=15.04..32.69 rows=1 width=8)
+   Number of Workers: 2
+   ->  Parallel Hash Join  (cost=15.04..32.69 rows=1 width=8)
+         Hash Cond: ((onepage2.val = onepage1.val) AND (onepage2.val2 = onepage1.val2))
+         ->  Parallel Seq Scan on onepage2  (cost=0.00..17.60 rows=5 width=8)
+               Filter: ((val > 2) AND (val < 4))
+         ->  Parallel Hash  (cost=14.97..14.97 rows=5 width=8)
+               ->  Parallel Bitmap Heap Scan on onepage1  (cost=4.36..14.97 rows=5 width=8)
+                     Recheck Cond: ((val < 4) AND (val > 2))
+                     ->  Bitmap Index Scan on onepage1_pkey  (cost=0.00..4.36 rows=11 width=0)
+                           Index Cond: ((val < 4) AND (val > 2))
+(11 rows)
+
+select * from onepage2 natural join onepage1 where onepage2.val > 2 and onepage1.val < 4 order by 1,2;
+ val | val2 
+-----+------
+   3 |    1
+   3 |    2
+   3 |    3
+   3 |    4
+   3 |    5
+(5 rows)
+
+drop table onepage1;
+drop table onepage2;
+set enable_seqscan to off;
+set enable_indexscan to off;
+explain (costs off) select count(*) from parallel_t1 where a > 5000;
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Aggregate
+   ->  Gather
+         Number of Workers: 2
+         ->  Parallel Bitmap Heap Scan on parallel_t1
+               Recheck Cond: (a > 5000)
+               ->  Bitmap Index Scan on idx_parallel_t1
+                     Index Cond: (a > 5000)
+(7 rows)
+
+explain (costs off) select count(*) from parallel_t1 where a < 5000;
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Aggregate
+   ->  Gather
+         Number of Workers: 2
+         ->  Parallel Bitmap Heap Scan on parallel_t1
+               Recheck Cond: (a < 5000)
+               ->  Bitmap Index Scan on idx_parallel_t1
+                     Index Cond: (a < 5000)
+(7 rows)
+
+explain (costs off) select count(*) from parallel_t1 where a <> 5000;
+                       QUERY PLAN                       
+--------------------------------------------------------
+ Aggregate
+   ->  Gather
+         Number of Workers: 2
+         ->  Parallel Bitmap Heap Scan on parallel_t1
+               Filter: (a <> 5000)
+               ->  Bitmap Index Scan on idx_parallel_t1
+(6 rows)
+
+select count(*) from parallel_t1 where a > 5000;
+ count 
+-------
+ 95000
+(1 row)
+
+select count(*) from parallel_t1 where a < 5000;
+ count 
+-------
+  4999
+(1 row)
+
+select count(*) from parallel_t1 where a <> 5000;
+ count 
+-------
+ 99999
+(1 row)
+
+reset enable_seqscan;
+reset enable_indexscan;
 --clean up
 reset force_parallel_mode;
 reset parallel_setup_cost;

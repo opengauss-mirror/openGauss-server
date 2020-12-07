@@ -26,6 +26,7 @@
 #include "executor/execParallel.h"
 #include "executor/executor.h"
 #include "executor/hashjoin.h"
+#include "executor/nodeBitmapHeapscan.h"
 #include "executor/nodeSeqscan.h"
 #include "executor/nodeAppend.h"
 #include "executor/nodeIndexscan.h"
@@ -183,6 +184,9 @@ static bool ExecParallelEstimate(PlanState *planstate, ExecParallelEstimateConte
             case T_AppendState:
                 ExecAppendEstimate((AppendState*)planstate, e->pcxt);
                 break;
+            case T_BitmapHeapScanState:
+                ExecBitmapHeapEstimate((BitmapHeapScanState*)planstate, e->pcxt);
+                break;
             default:
                 break;
         }
@@ -242,6 +246,13 @@ static bool ExecParallelInitializeDSM(PlanState *planstate, ExecParallelInitiali
             if (planstate->plan->parallel_aware) {
                 ExecAppendInitializeDSM((AppendState *)planstate, d->pcxt, cxt->pwCtx->queryInfo.pappend_num);
                 cxt->pwCtx->queryInfo.pappend_num++;
+            }
+            break;
+        case T_BitmapHeapScanState:
+            if (planstate->plan->parallel_aware) {
+                ExecBitmapHeapInitializeDSM((BitmapHeapScanState*)planstate,
+                    d->pcxt, cxt->pwCtx->queryInfo.bmscan_num);
+                cxt->pwCtx->queryInfo.bmscan_num++;
             }
             break;
         case T_HashJoinState:
@@ -425,6 +436,7 @@ ParallelExecutorInfo *ExecInitParallelPlan(PlanState *planstate, EState *estate,
     queryInfo.pappend = (ParallelAppendState**)palloc0(sizeof(ParallelAppendState*) * e.nnodes);
     queryInfo.jstate = (ParallelHashJoinState**)palloc0(sizeof(ParallelHashJoinState*) * e.nnodes);
     queryInfo.shared_info = (SharedHashInfo**)palloc0(sizeof(SharedHashInfo*) * e.nnodes);
+    queryInfo.bmscan = (ParallelBitmapHeapState **)palloc0(sizeof(ParallelBitmapHeapState *) * e.nnodes);
 
     /*
      * Give parallel-aware nodes a chance to initialize their shared data.
@@ -486,6 +498,11 @@ static bool ExecParallelReInitializeDSM(PlanState* planstate, ParallelContext* p
         case T_AppendState:
             if (planstate->plan->parallel_aware) {
                 ExecAppendReInitializeDSM((AppendState*)planstate, pcxt);
+            }
+            break;
+        case T_BitmapHeapScanState:
+            if (planstate->plan->parallel_aware) {
+                ExecBitmapHeapReInitializeDSM((BitmapHeapScanState*)planstate, pcxt);
             }
             break;
         case T_HashJoinState:
@@ -735,6 +752,11 @@ static bool ExecParallelInitializeWorker(PlanState *planstate, void *context)
                 ExecAppendInitializeWorker((AppendState*)planstate, context);
             }
             break;
+        case T_BitmapHeapScanState:
+            if (planstate->plan->parallel_aware) {
+                ExecBitmapHeapInitializeWorker((BitmapHeapScanState *)planstate, context);
+            }
+            break;
         case T_HashState:
             /* even when not parallel-aware, for EXPLAIN ANALYZE */
             ExecHashInitializeWorker((HashState*)planstate, context);
@@ -778,6 +800,8 @@ void ParallelQueryMain(void *seg)
 
     /* Start up the executor, have it run the plan, and then shut it down. */
     (void)ExecutorStart(queryDesc, cxt->pwCtx->queryInfo.eflags);
+    /* Special executor initialization steps for parallel workers */
+    Assert(t_thrd.bgworker_cxt.memCxt != NULL);
     ExecParallelInitializeWorker(queryDesc->planstate, seg);
 
     /* Pass down any tuple bound */

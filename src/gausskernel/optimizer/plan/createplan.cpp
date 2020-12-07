@@ -100,6 +100,7 @@ static Scan* create_indexscan_plan(
 static BitmapHeapScan* create_bitmap_scan_plan(
     PlannerInfo* root, BitmapHeapPath* best_path, List* tlist, List* scan_clauses);
 static Plan* create_bitmap_subplan(PlannerInfo* root, Path* bitmapqual, List** qual, List** indexqual, List** indexECs);
+static void bitmap_subplan_mark_shared(Plan *plan);
 static TidScan* create_tidscan_plan(PlannerInfo* root, TidPath* best_path, List* tlist, List* scan_clauses);
 static SubqueryScan* create_subqueryscan_plan(PlannerInfo* root, Path* best_path, List* tlist, List* scan_clauses);
 static FunctionScan* create_functionscan_plan(PlannerInfo* root, Path* best_path, List* tlist, List* scan_clauses);
@@ -1854,6 +1855,7 @@ static Gather* create_gather_plan(PlannerInfo* root, GatherPath* best_path)
         case T_HashJoin:
         case T_MergeJoin:
         case T_NestLoop:
+        case T_BitmapHeapScan:
             inherit_plan_locator_info(&gather_plan->plan, subplan);
             break;
         default:
@@ -2621,20 +2623,27 @@ static BitmapHeapScan* create_bitmap_scan_plan(
     PlannerInfo* root, BitmapHeapPath* best_path, List* tlist, List* scan_clauses)
 {
     Index baserelid = best_path->path.parent->relid;
-    Plan* bitmapqualplan = NULL;
     List* bitmapqualorig = NIL;
     List* indexquals = NIL;
     List* indexECs = NIL;
-    List* qpqual = NIL;
     ListCell* l = NULL;
     BitmapHeapScan* scan_plan = NULL;
+    bool isGlobal = false;
 
     /* it should be a base rel... */
     Assert(baserelid > 0);
     Assert(best_path->path.parent->rtekind == RTE_RELATION);
 
     /* Process the bitmapqual tree into a Plan tree and qual lists */
-    bitmapqualplan = create_bitmap_subplan(root, best_path->bitmapqual, &bitmapqualorig, &indexquals, &indexECs);
+    Plan *bitmapqualplan = create_bitmap_subplan(root, best_path->bitmapqual, &bitmapqualorig, &indexquals, &indexECs);
+
+    if (IsA(best_path->bitmapqual, IndexPath)) {
+        isGlobal = CheckIndexPathUseGPI((IndexPath*)best_path->bitmapqual);
+    }
+    /* Don't support parallel bitmap scan for global partition index or adio is enabled */
+    if (!g_instance.attr.attr_storage.enable_adio_function && !isGlobal && best_path->path.parallel_aware) {
+        bitmap_subplan_mark_shared(bitmapqualplan);
+    }
 
     /*
      * The qpqual list must contain all restrictions not automatically handled
@@ -2661,7 +2670,7 @@ static BitmapHeapScan* create_bitmap_scan_plan(
      * to do it that way because predicate conditions need to be rechecked if
      * the scan becomes lossy, so they have to be included in bitmapqualorig.
      */
-    qpqual = NIL;
+    List *qpqual = NIL;
     foreach (l, scan_clauses) {
         RestrictInfo* rinfo = (RestrictInfo*)lfirst(l);
         Node* clause = (Node*)rinfo->clause;
@@ -5293,13 +5302,32 @@ void copy_plan_costsize(Plan* dest, Plan* src)
     }
 }
 
-/*****************************************************************************
+/*
+ * bitmap_subplan_mark_shared
+ * 	 Set isshared flag in bitmap subplan so that it will be created in
+ * 	 shared memory.
+ */
+static void bitmap_subplan_mark_shared(Plan *plan)
+{
+    if (IsA(plan, BitmapAnd)) {
+        bitmap_subplan_mark_shared((Plan*)linitial(((BitmapAnd *)plan)->bitmapplans));
+    } else if (IsA(plan, BitmapOr)) {
+        ((BitmapOr *)plan)->isshared = true;
+        bitmap_subplan_mark_shared((Plan*)linitial(((BitmapOr *)plan)->bitmapplans));
+    } else if (IsA(plan, BitmapIndexScan)) {
+        ((BitmapIndexScan *)plan)->isshared = true;
+    } else {
+        /* Maybe CStore index scan(T_CStoreIndexCtidScan), don't support parallel */
+    }
+}
+
+/* ****************************************************************************
  *
- *	PLAN NODE BUILDING ROUTINES
+ * 	PLAN NODE BUILDING ROUTINES
  *
  * Some of these are exported because they are called to build plan nodes
  * in contexts where we're not deriving the plan node from a path node.
- *****************************************************************************/
+ * *************************************************************************** */
 static SeqScan* make_seqscan(List* qptlist, List* qpqual, Index scanrelid)
 {
     SeqScan* node = makeNode(SeqScan);

@@ -1444,10 +1444,10 @@ void cost_bitmap_heap_scan(
     Cost startup_cost = 0;
     Cost run_cost = 0;
     Cost indexTotalCost;
-    Selectivity indexSelectivity;
     QualCost qpqual_cost;
     Cost cpu_per_tuple = 0.0;
     Cost cost_per_page;
+    Cost cpu_run_cost;
     double tuples_fetched;
     double pages_fetched;
     double spc_seq_page_cost, spc_random_page_cost;
@@ -1493,51 +1493,14 @@ void cost_bitmap_heap_scan(
         startup_cost += g_instance.cost_cxt.disable_cost;
     }
 
-    /*
-     * Fetch total cost of obtaining the bitmap, as well as its total
-     * selectivity.
-     */
-    cost_bitmap_tree_node(bitmapqual, &indexTotalCost, &indexSelectivity);
+    pages_fetched = compute_bitmap_pages(root, baserel, bitmapqual, loop_count,
+        &indexTotalCost, &tuples_fetched, ispartitionedindex);
 
     startup_cost += indexTotalCost;
 
     /* Fetch estimated page costs for tablespace containing table. */
     get_tablespace_page_costs(baserel->reltablespace, &spc_random_page_cost, &spc_seq_page_cost);
-
-    /*
-     * Estimate number of main-table pages fetched.
-     */
-    tuples_fetched = clamp_row_est(indexSelectivity * RELOPTINFO_LOCAL_FIELD(root, baserel, tuples));
-
     T = (baserel->pages > 1) ? (double)baserel->pages : 1.0;
-
-    if (loop_count > 1) {
-        /*
-         * For repeated bitmap scans, scale up the number of tuples fetched in
-         * the Mackert and Lohman formula by the number of scans, so that we
-         * estimate the number of pages fetched by all the scans. Then
-         * pro-rate for one scan.
-         */
-        pages_fetched = index_pages_fetched(tuples_fetched * loop_count,
-            (BlockNumber)baserel->pages,
-            get_indexpath_pages(bitmapqual),
-            root,
-            ispartitionedindex);
-
-        pages_fetched /= loop_count;
-    } else {
-        /*
-         * For a single scan, the number of heap pages that need to be fetched
-         * is the same as the Mackert and Lohman formula for the case T <= b
-         * (ie, no re-reads needed).
-         */
-        pages_fetched = (2.0 * T * tuples_fetched) / (2.0 * T + tuples_fetched);
-    }
-    if (pages_fetched >= T) {
-        pages_fetched = T;
-    } else {
-        pages_fetched = ceil(pages_fetched);
-    }
 
     /*
      * For small numbers of pages we should charge spc_random_page_cost
@@ -1566,8 +1529,19 @@ void cost_bitmap_heap_scan(
 
     startup_cost += qpqual_cost.startup;
     cpu_per_tuple = u_sess->attr.attr_sql.cpu_tuple_cost + qpqual_cost.per_tuple;
+    cpu_run_cost = cpu_per_tuple * tuples_fetched;
 
-    run_cost += cpu_per_tuple * tuples_fetched;
+    /* Adjust costing for parallelism, if used. */
+    if (path->parallel_workers > 0) {
+        double parallel_divisor = get_parallel_divisor(path);
+
+        /* The CPU cost is divided among all the workers. */
+        cpu_run_cost /= parallel_divisor;
+
+        path->rows = clamp_row_est(path->rows / parallel_divisor);
+    }
+
+    run_cost += cpu_run_cost;
 
     path->startup_cost = startup_cost;
     path->total_cost = startup_cost + run_cost;
@@ -5932,6 +5906,66 @@ static double get_parallel_divisor(Path* path)
     return parallel_divisor;
 }
 
+/*
+ * compute_bitmap_pages
+ *
+ * compute number of pages fetched from heap in bitmap heap scan.
+ */
+double compute_bitmap_pages(PlannerInfo *root, RelOptInfo *baserel, Path *bitmapqual,
+    double loop_count, Cost *cost, double *tuple, bool ispartitionedindex)
+{
+    Cost indexTotalCost;
+    Selectivity indexSelectivity;
+    double pages_fetched;
+    double T = (baserel->pages > 1) ? (double)baserel->pages : 1.0;
+
+    /*
+     * Fetch total cost of obtaining the bitmap, as well as its total
+     * selectivity.
+     */
+    cost_bitmap_tree_node(bitmapqual, &indexTotalCost, &indexSelectivity);
+    /*
+     * Estimate number of main-table pages fetched.
+     */
+    double tuples_fetched = clamp_row_est(indexSelectivity * RELOPTINFO_LOCAL_FIELD(root, baserel, tuples));
+
+    if (loop_count > 1) {
+        /*
+         * For repeated bitmap scans, scale up the number of tuples fetched in
+         * the Mackert and Lohman formula by the number of scans, so that we
+         * estimate the number of pages fetched by all the scans. Then
+         * pro-rate for one scan.
+         */
+        pages_fetched = index_pages_fetched(tuples_fetched * loop_count,
+            (BlockNumber)baserel->pages,
+            get_indexpath_pages(bitmapqual),
+            root,
+            ispartitionedindex);
+
+        pages_fetched /= loop_count;
+    } else {
+        /*
+         * For a single scan, the number of heap pages that need to be fetched
+         * is the same as the Mackert and Lohman formula for the case T <= b
+         * (ie, no re-reads needed).
+         */
+        pages_fetched = (2.0 * T * tuples_fetched) / (2.0 * T + tuples_fetched);
+    }
+    if (pages_fetched >= T) {
+        pages_fetched = T;
+    } else {
+        pages_fetched = ceil(pages_fetched);
+    }
+
+    if (cost != NULL) {
+        *cost = indexTotalCost;
+    }
+    if (tuple != NULL) {
+        *tuple = tuples_fetched;
+    }
+
+    return pages_fetched;
+}
 /* it used to compute page_size in createplan.cpp */
 double cost_page_size(double tuples, int width)
 {

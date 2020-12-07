@@ -1857,6 +1857,15 @@ HeapTuple heapGetNextForVerify(HeapScanDesc scan, ScanDirection direction, bool&
     return &(scan->rs_ctup);
 }
 
+void heap_scan_update_snapshot(HeapScanDesc scan, Snapshot snapshot)
+{
+    Assert(IsMVCCSnapshot(snapshot));
+
+    RegisterSnapshot(snapshot);
+    scan->rs_snapshot = snapshot;
+    scan->rs_flags |= SO_TEMP_SNAPSHOT;
+}
+
 /* ----------------
  * 		heap_parallelscan_estimate - estimate storage for ParallelHeapScanDesc
  *

@@ -2059,6 +2059,7 @@ struct ParallelHeapScanDescData;
 struct ParallelIndexScanDescData;
 struct ParallelHashJoinState;
 struct SharedHashInfo;
+struct ParallelBitmapHeapState;
 typedef uint64 XLogRecPtr;
 typedef struct ParallelQueryInfo {
     struct SharedExecutorInstrumentation* instrumentation;
@@ -2079,6 +2080,8 @@ typedef struct ParallelQueryInfo {
     ParallelHashJoinState** jstate;
     int hash_num;
     SharedHashInfo** shared_info;
+    int bmscan_num;
+    ParallelBitmapHeapState **bmscan;
 } ParallelQueryInfo;
 
 struct BTShared;

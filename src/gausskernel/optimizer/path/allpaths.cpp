@@ -2918,6 +2918,26 @@ static void recurse_push_qual(Node* setOp, Query* topquery, RangeTblEntry* rte, 
                     (int)nodeTag(setOp))));
     }
 }
+
+/*
+ * create_partial_bitmap_paths
+ * 	  Build partial bitmap heap path for the relation
+ */
+void create_partial_bitmap_paths(PlannerInfo *root, RelOptInfo *rel, Path *bitmapqual)
+{
+    /* Compute heap pages for bitmap heap scan */
+    double pages_fetched = compute_bitmap_pages(root, rel, bitmapqual, 1.0, NULL, NULL, rel->isPartitionedTable);
+    int parallel_workers = compute_parallel_worker(rel, pages_fetched, -1,
+        u_sess->attr.attr_sql.max_parallel_workers_per_gather);
+
+    if (parallel_workers <= 0) {
+        return;
+    }
+
+    add_partial_path(rel,
+        (Path *)create_bitmap_heap_path(root, rel, bitmapqual, NULL, 1.0, parallel_workers));
+}
+
 /*
  * partIterator tries to inherit pathkeys from scan path
  *
