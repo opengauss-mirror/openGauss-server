@@ -2611,7 +2611,7 @@ static void init_configure_names_bool()
         {
             {
                 "update_process_title",
-                PGC_SUSET,
+                PGC_INTERNAL,
                 STATS_COLLECTOR,
                 gettext_noop("Updates the process title to show the active SQL command."),
                 gettext_noop(
