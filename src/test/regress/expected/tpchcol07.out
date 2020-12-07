@@ -39,8 +39,8 @@ group by
 	l_year
 order by 
 	revenue;
-                                                                                                QUERY PLAN                                                                                                
-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                             QUERY PLAN
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Row Adapter
    ->  Vector Sort
          Sort Key: (sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount))))
@@ -55,16 +55,18 @@ order by
                            ->  Vector Sonic Hash Join
                                  Hash Cond: (orders.o_custkey = customer.c_custkey)
                                  ->  CStore Scan on orders
-                                 ->  Vector Sonic Hash Join
-                                       Hash Cond: (customer.c_nationkey = n2.n_nationkey)
-                                       ->  CStore Scan on customer
-                                       ->  Vector Nest Loop
-                                             Join Filter: (((n1.n_name = 'FRANCE '::bpchar) AND (n2.n_name = 'GERMANY'::bpchar)) OR ((n1.n_name = 'GERMANY'::bpchar) AND (n2.n_name = 'FRANCE'::bpchar)))
+                                 ->  Vector Nest Loop
+                                       Join Filter: (((n1.n_name = 'FRANCE '::bpchar) AND (n2.n_name = 'GERMANY'::bpchar)) OR ((n1.n_name = 'GERMANY'::bpchar) AND (n2.n_name = 'FRANCE'::bpchar)))
+                                       ->  Vector Sonic Hash Join
+                                             Hash Cond: (customer.c_nationkey = n2.n_nationkey)
+                                             ->  CStore Scan on customer
+                                             ->  CStore Scan on nation n2
+                                                   Filter: ((n_name = 'GERMANY'::bpchar) OR (n_name = 'FRANCE'::bpchar))
+                                       ->  Vector Materialize
                                              ->  CStore Scan on nation n1
-                                             ->  Vector Materialize
-                                                   ->  CStore Scan on nation n2
+                                                   Filter: ((n_name = 'FRANCE '::bpchar) OR (n_name = 'GERMANY'::bpchar))
                      ->  CStore Scan on supplier
-(23 rows)
+(25 rows)
 
 select
 	supp_nation,

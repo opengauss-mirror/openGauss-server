@@ -20,10 +20,10 @@ endif
 
 ifeq ($(enable_multiple_nodes), yes)
 OBJS = allpaths.o clausesel.o costsize.o equivclass.o indxpath.o \
-       joinpath.o joinrels.o orindxpath.o pathkeys.o tidpath.o
+       joinpath.o joinrels.o pathkeys.o tidpath.o
 else
 OBJS = allpaths.o clausesel.o costsize.o equivclass.o indxpath.o \
-       joinpath.o joinrels.o orindxpath.o pathkeys.o tidpath.o	\
+       joinpath.o joinrels.o pathkeys.o tidpath.o	\
        pgxcpath_single.o streampath_single.o
 endif
 

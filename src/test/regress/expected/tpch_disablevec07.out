@@ -39,8 +39,8 @@ group by
 	l_year
 order by 
 	revenue;
-                                                                                                      QUERY PLAN                                                                                                      
-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+                                                                                                QUERY PLAN
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  Sort
    Sort Key: (sum((lineitem.l_extendedprice * (1::numeric - lineitem.l_discount))))
    ->  HashAggregate
@@ -58,22 +58,24 @@ order by
                                  ->  Row Adapter
                                        ->  CStore Scan on orders
                                  ->  Hash
-                                       ->  Hash Join
-                                             Hash Cond: (customer.c_nationkey = n2.n_nationkey)
-                                             ->  Row Adapter
-                                                   ->  CStore Scan on customer
-                                             ->  Hash
-                                                   ->  Nested Loop
-                                                         Join Filter: (((n1.n_name = 'FRANCE '::bpchar) AND (n2.n_name = 'GERMANY'::bpchar)) OR ((n1.n_name = 'GERMANY'::bpchar) AND (n2.n_name = 'FRANCE'::bpchar)))
+                                       ->  Nested Loop
+                                             Join Filter: (((n1.n_name = 'FRANCE '::bpchar) AND (n2.n_name = 'GERMANY'::bpchar)) OR ((n1.n_name = 'GERMANY'::bpchar) AND (n2.n_name = 'FRANCE'::bpchar)))
+                                             ->  Hash Join
+                                                   Hash Cond: (customer.c_nationkey = n2.n_nationkey)
+                                                   ->  Row Adapter
+                                                         ->  CStore Scan on customer
+                                                   ->  Hash
                                                          ->  Row Adapter
-                                                               ->  CStore Scan on nation n1
-                                                         ->  Materialize
-                                                               ->  Row Adapter
-                                                                     ->  CStore Scan on nation n2
+                                                               ->  CStore Scan on nation n2
+                                                                     Filter: ((n_name = 'GERMANY'::bpchar) OR (n_name = 'FRANCE'::bpchar))
+                                             ->  Materialize
+                                                   ->  Row Adapter
+                                                         ->  CStore Scan on nation n1
+                                                               Filter: ((n_name = 'FRANCE '::bpchar) OR (n_name = 'GERMANY'::bpchar))
                ->  Hash
                      ->  Row Adapter
                            ->  CStore Scan on supplier
-(32 rows)
+(34 rows)
 
 select
 	supp_nation,

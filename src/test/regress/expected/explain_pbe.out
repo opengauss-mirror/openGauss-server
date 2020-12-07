@@ -3644,12 +3644,13 @@ EXPLAIN(COSTS FALSE) EXECUTE pa(10,10,10,10,11);
                                                                   QUERY PLAN                                                                   
 -----------------------------------------------------------------------------------------------------------------------------------------------
  Hash Join
-   Hash Cond: (pp1.c_int = pp2.c_int)
+   Hash Cond: (pp2.c_int = pp1.c_int)
    Join Filter: (((pp1.c_int = 10) AND (pp1.c_numeric = 10::numeric) AND (pp2.c_int = 10) AND (pp2.c_numeric = 10::numeric)) OR (pp1.id = 11))
-   ->  Seq Scan on pbe_prunning_001 pp1
+   ->  Seq Scan on pbe_prunning_002 pp2
    ->  Hash
-         ->  Seq Scan on pbe_prunning_002 pp2
-(6 rows)
+         ->  Seq Scan on pbe_prunning_001 pp1
+               Filter: (((c_int = 10) AND (c_numeric = 10::numeric)) OR (id = 11))
+(7 rows)
 
 DEALLOCATE PREPARE pa;
 DROP TABLE pbe_prunning_001;

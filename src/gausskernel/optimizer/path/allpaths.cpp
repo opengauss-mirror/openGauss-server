@@ -741,16 +741,6 @@ static void set_plain_rel_size(PlannerInfo* root, RelOptInfo* rel, RangeTblEntry
     if (rte->tablesample == NULL) {
         /* Mark rel with estimated output rows, width, etc */
         set_baserel_size_estimates(root, rel);
-
-        /*
-         * Check to see if we can extract any restriction conditions from join
-         * quals that are OR-of-AND structures.  If so, add them to the rel's
-         * restriction list, and redo the above steps.
-         */
-        if (create_or_index_quals(root, rel)) {
-            check_partial_indexes(root, rel);
-            set_baserel_size_estimates(root, rel);
-        }
     } else {
         /* Sampled relation */
         set_tablesample_rel_size(root, rel, rte);
