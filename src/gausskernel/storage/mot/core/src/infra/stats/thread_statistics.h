@@ -170,9 +170,10 @@ protected:
     /**
      * @brief Allows derived classes to register their statistic variables.
      * @param statVar The statistic variable to register.
-     * @return True if registration succeede, otherwise false.
+     * @note In case of failure the system continues to operate, but the
+     * statistics variable will not be periodically reported to the log.
      */
-    bool RegisterStatistics(StatisticVariable* statVar);
+    void RegisterStatistics(StatisticVariable* statVar);
 
 private:
     /** @var The logical identifier of the thread to which this set of statistic variables belong. */

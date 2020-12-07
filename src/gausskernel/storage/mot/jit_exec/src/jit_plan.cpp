@@ -1571,6 +1571,7 @@ static JitPlan* JitPrepareCompoundPlan(Query* query, Query* subQuery)
     // verify plan yields a single result
     if (!IsSingleResultPlan(sub_query_plan)) {
         MOT_LOG_TRACE("Disqualifying sub-query plan: yielding more than one result");
+        JitDestroyPlan(sub_query_plan);
         return nullptr;
     }
 

@@ -25,9 +25,13 @@
 #ifndef JIT_LLVM_BLOCKS_H
 #define JIT_LLVM_BLOCKS_H
 
-// Be sure to include jit_llvm_query.h before anything else because of global.h.
-// See jit_llvm_query.h for more details.
+/*
+ * ATTENTION: Be sure to include jit_llvm_query.h before anything else because of gscodegen.h
+ * See jit_llvm_query.h for more details.
+ */
 #include "jit_llvm_query.h"
+#include "jit_plan.h"
+#include "jit_llvm_util.h"
 
 namespace JitExec {
 /** @brief Builds a code segment for checking if soft memory limit has been reached. */

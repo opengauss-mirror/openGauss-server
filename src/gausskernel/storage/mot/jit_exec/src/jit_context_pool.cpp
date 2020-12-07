@@ -62,7 +62,9 @@ extern bool InitJitContextPool(JitContextPool* contextPool, JitContextUsage usag
             poolSize,
             allocSize,
             usage == JIT_CONTEXT_GLOBAL ? "global" : "session-local");
-        pthread_spin_destroy(&contextPool->m_lock);
+        if (usage == JIT_CONTEXT_GLOBAL) {
+            pthread_spin_destroy(&contextPool->m_lock);
+        }
         return false;
     }
     errno_t erc = memset_s(contextPool->m_contextPool, allocSize, 0, allocSize);

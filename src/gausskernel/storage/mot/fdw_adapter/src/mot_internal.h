@@ -311,6 +311,15 @@ public:
     static MOT::MOTEngine* m_engine;
     static bool m_initialized;
     static bool m_callbacks_initialized;
+
+private:
+    static void VarcharToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, Oid type, uint8_t* data, size_t len,
+        KEY_OPER oper, uint8_t fill);
+    static void FloatToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, uint8_t* data);
+    static void NumericToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, uint8_t* data);
+    static void TimestampToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, uint8_t* data);
+    static void TimestampTzToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, uint8_t* data);
+    static void DateToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, uint8_t* data);
 };
 
 inline MOT::TxnManager* GetSafeTxn(const char* callerSrc, ::TransactionId txn_id = 0)

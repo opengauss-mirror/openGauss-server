@@ -159,6 +159,8 @@ public:
     bool m_isCompleted;
 
     long m_position;
+private:
+    static FusionType GetMotFusionType(PlannedStmt* plannedStmt);
 };
 
 class SelectFusion : public OpFusion {

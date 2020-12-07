@@ -24,6 +24,11 @@
 
 #include "jit_llvm_funcs.h"
 #include "jit_llvm_blocks.h"
+#include "jit_util.h"
+#include "mot_error.h"
+#include "utilities.h"
+
+#include "catalog/pg_aggregate.h"
 
 using namespace dorado;
 
@@ -568,7 +573,7 @@ llvm::Value* ProcessOpExpr(
     }
 
     if (list_length(op_expr->args) > 3) {
-        MOT_LOG_TRACE("Unsupported operator %d: too many arguments", op_expr->opno);
+        MOT_LOG_TRACE("Unsupported operator %u: too many arguments", op_expr->opno);
         return nullptr;
     }
 

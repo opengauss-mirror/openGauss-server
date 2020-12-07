@@ -22,8 +22,12 @@
  * -------------------------------------------------------------------------
  */
 
-// be careful to include gscodegen.h before anything else to avoid clash with PM definition in datetime.h
-#include "global.h"
+/*
+ * ATTENTION:
+ * 1. Be sure to include gscodegen.h before anything else to avoid clash with PM definition in datetime.h.
+ * 2. Be sure to include libintl.h before gscodegen.h to avoid problem with gettext.
+ */
+#include "libintl.h"
 #include "codegen/gscodegen.h"
 #include "codegen/builtinscodegen.h"
 #include "catalog/pg_operator.h"
@@ -494,35 +498,24 @@ extern bool JitInitialize()
 
     if (JitCanInitThreadCodeGen()) {
         if (IsMotPseudoCodegenForced()) {
-            MOT_LOG_INFO("Forcing TVM on LLVM natively supported platform");
+            MOT_LOG_INFO("Forcing TVM on LLVM natively supported platform by user configuration");
         } else {
             PrintNativeLlvmStartupInfo();
         }
     } else {
-        MOT_LOG_INFO("Using TVM on LLVM natively unsupported platform");
+        if (IsMotPseudoCodegenForced()) {
+            MOT_LOG_INFO("Forcing TVM on LLVM natively unsupported platform by user configuration");
+        } else {
+            MOT_LOG_WARN("Defaulting to TVM on LLVM natively unsupported platform");
+            MOT::GetGlobalConfiguration().m_forcePseudoCodegen = true;
+        }
     }
 
-    enum InitState {
-        JIT_INIT,
-        JIT_ARM_LOCK_INIT,
-        JIT_CTX_POOL_INIT,
-        JIT_SRC_POOL_INIT,
-        JIT_INIT_DONE
-    } initState = JIT_INIT;
+    enum InitState { JIT_INIT, JIT_CTX_POOL_INIT, JIT_SRC_POOL_INIT, JIT_INIT_DONE } initState = JIT_INIT;
     bool result = true;
 
     // instead of goto
     do {
-        // initialize ARM compile lock
-#ifdef __aarch64__
-        result = InitArmCompileLock();
-#endif
-        if (!result) {
-            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "JIT Initialization", "Failed to initialize compilation lock for ARM");
-            break;
-        }
-        initState = JIT_ARM_LOCK_INIT;
-
         // initialize global JIT context pool
         result = InitGlobalJitContextPool();
         if (!result) {
@@ -565,11 +558,6 @@ extern bool JitInitialize()
         case JIT_CTX_POOL_INIT:
             DestroyGlobalJitContextPool();
             // fall through
-        case JIT_ARM_LOCK_INIT:
-#ifdef __aarch64__
-            DestroyArmCompileLock();
-#endif
-            // fall through
         case JIT_INIT:
         default:
             break;
@@ -583,14 +571,11 @@ extern void JitDestroy()
     DestroyJitSourceMap();
     DestroyJitSourcePool();
     DestroyGlobalJitContextPool();
-#ifdef __aarch64__
-    DestroyArmCompileLock();
-#endif
 }
 
 extern bool IsMotCodegenEnabled()
 {
-    return MOT_ATOMIC_LOAD(MOT::GetGlobalConfiguration().m_enableCodegen);
+    return MOT::GetGlobalConfiguration().m_enableCodegen;
 }
 
 extern bool IsMotPseudoCodegenForced()
@@ -606,10 +591,5 @@ extern bool IsMotCodegenPrintEnabled()
 extern uint32_t GetMotCodegenLimit()
 {
     return MOT::GetGlobalConfiguration().m_codegenLimit;
-}
-
-extern void DisableMotCodegen()
-{
-    MOT_ATOMIC_STORE(MOT::GetGlobalConfiguration().m_enableCodegen, false);
 }
 }  // namespace JitExec

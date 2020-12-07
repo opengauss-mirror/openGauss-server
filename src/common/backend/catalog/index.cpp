@@ -1474,7 +1474,7 @@ static void MotFdwDropForeignIndex(Relation userHeapRelation, Relation userIndex
 {
     /* Forward drop stmt to MOT FDW. */
     if (RelationIsForeignTable(userHeapRelation) && isMOTFromTblOid(RelationGetRelid(userHeapRelation))) {
-        FdwRoutine* fdwroutine = GetFdwRoutineByRelId(userHeapRelation->rd_id);
+        FdwRoutine* fdwroutine = GetFdwRoutineByRelId(RelationGetRelid(userHeapRelation));
         if (fdwroutine->ValidateTableDef != NULL) {
             DropForeignStmt stmt;
             stmt.type = T_DropForeignStmt;
@@ -3885,13 +3885,13 @@ static void MotFdwReindex(Relation heapRelation, Relation iRel)
 {
     /* Forward reindex stmt to MOT FDW. */
     if (RelationIsForeignTable(heapRelation) && isMOTFromTblOid(RelationGetRelid(heapRelation))) {
-        FdwRoutine* fdwroutine = GetFdwRoutineByRelId(heapRelation->rd_id);
+        FdwRoutine* fdwroutine = GetFdwRoutineByRelId(RelationGetRelid(heapRelation));
         if (fdwroutine->ValidateTableDef != NULL) {
             ReindexForeignStmt stmt;
             stmt.type = T_ReindexStmt;
             stmt.relkind = RELKIND_INDEX;
-            stmt.reloid = heapRelation->rd_id;
-            stmt.indexoid = iRel->rd_id;
+            stmt.reloid = RelationGetRelid(heapRelation);
+            stmt.indexoid = RelationGetRelid(iRel);
             stmt.name = iRel->rd_rel->relname.data;
 
             fdwroutine->ValidateTableDef((Node*)&stmt);

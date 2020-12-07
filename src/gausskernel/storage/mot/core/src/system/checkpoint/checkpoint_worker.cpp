@@ -133,7 +133,6 @@ int CheckpointWorkerPool::Checkpoint(Buffer* buffer, Sentinel* sentinel, int fd,
 
     if (mainRow != nullptr) {
         bool headerLocked = sentinel->TryLock(threadId);
-
         if (headerLocked == false) {
             if (mainRow->GetTwoPhaseMode() == true) {
                 MOT_LOG_DEBUG("checkpoint: row %p is 2pc", mainRow);
@@ -209,8 +208,9 @@ int CheckpointWorkerPool::Checkpoint(Buffer* buffer, Sentinel* sentinel, int fd,
         sentinel->SetStable(nullptr);
     }
 
-    if (mainRow != nullptr)
+    if (mainRow != nullptr) {
         sentinel->Release();
+    }
     return wrote;
 }
 
@@ -516,8 +516,7 @@ CheckpointWorkerPool::ErrCodes CheckpointWorkerPool::WriteTableDataFile(Table* t
             curSegLen += table->GetTupleSize() + sizeof(CheckpointUtils::EntryHeader);
             if (m_checkpointSegsize > 0 && curSegLen >= m_checkpointSegsize) {
                 if (buffer->Size() > 0) {  // there is data in the buffer that needs to be written
-                    if (CheckpointUtils::WriteFile(fd, (char*)buffer->Data(), buffer->Size()) !=
-                        buffer->Size()) {
+                    if (CheckpointUtils::WriteFile(fd, (char*)buffer->Data(), buffer->Size()) != buffer->Size()) {
                         MOT_LOG_ERROR(
                             "CheckpointWorkerPool::WriteTableDataFile: failed to write data file %u for table %u",
                             maxSegId,

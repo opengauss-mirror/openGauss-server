@@ -99,8 +99,7 @@ private:
     void WorkerFunc();
 
     /**
-     * @brief Appends checkpoint data into a buffer. the buffer will
-     * be flushed in case it is full
+     * @brief Appends a row to the buffer. The buffer will be flushed in case it is full.
      * @param buffer The buffer to fill.
      * @param row The row to write.
      * @param fd The file descriptor to write to.
@@ -109,14 +108,13 @@ private:
     bool Write(Buffer* buffer, Row* row, int fd);
 
     /**
-     * @brief Checkpoints a row, according to whether a stable version
-     * exists or not.
+     * @brief Checkpoints a row, according to whether a stable version exists or not.
      * @param buffer The buffer to fill.
      * @param sentinel The sentinel that holds to row.
      * @param fd The file descriptor to write to.
      * @param threadId The thread id.
      * @param isDeleted The row delete status.
-     * @return Int equal to -1 on error, 0 if nothing was written and 1 if the row was written.
+     * @return -1 on error, 0 if nothing was written and 1 if the row was written.
      */
     int Checkpoint(Buffer* buffer, Sentinel* sentinel, int fd, uint16_t threadId, bool& isDeleted);
 

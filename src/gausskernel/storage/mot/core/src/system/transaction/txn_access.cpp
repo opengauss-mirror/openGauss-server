@@ -450,6 +450,17 @@ RC TxnAccess::AccessLookup(const AccessType type, Sentinel* const originalSentin
         // Filter rows
         switch (curr_acc->m_type) {
             case AccessType::RD:
+                if (m_txnManager->GetTxnIsoLevel() == READ_COMMITED) {
+                    // If Cached row is not valid, remove it!!
+                    if (type == RD and curr_acc->m_stmtCount != m_txnManager->GetStmtCount()) {
+                        auto it = m_rowsSet->find(curr_acc->m_origSentinel);
+                        MOT_ASSERT(it != m_rowsSet->end());
+                        m_rowsSet->erase(it);
+                        ReleaseAccess(curr_acc);
+                        return RC::RC_LOCAL_ROW_NOT_FOUND;
+                    }
+                }
+                break;
             case AccessType::RD_FOR_UPDATE:
             case AccessType::WR:
                 break;

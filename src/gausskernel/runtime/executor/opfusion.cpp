@@ -91,6 +91,25 @@ OpFusion::OpFusion(MemoryContext context, CachedPlanSource* psrc, List* plantree
     m_tmpisnull = NULL;
 }
 
+FusionType OpFusion::GetMotFusionType(PlannedStmt* plannedStmt)
+{
+    FusionType result;
+    switch (plannedStmt->commandType) {
+        case CMD_SELECT:
+            result = MOT_JIT_SELECT_FUSION;
+            break;
+        case CMD_INSERT:
+        case CMD_UPDATE:
+        case CMD_DELETE:
+            result = MOT_JIT_MODIFY_FUSION;
+            break;
+        default:
+            result = NOBYPASS_NO_QUERY_TYPE;
+            break;
+    }
+    return result;
+}
+
 FusionType OpFusion::getFusionType(CachedPlan* plan, ParamListInfo params, List* plantree_list)
 {
     if (IsInitdb == true) {
@@ -130,17 +149,7 @@ FusionType OpFusion::getFusionType(CachedPlan* plan, ParamListInfo params, List*
 
     FusionType result = NONE_FUSION;
     if (plan && plan->mot_jit_context && JitExec::IsMotCodegenEnabled()) {
-        if (((PlannedStmt*)st)->commandType == CMD_SELECT) {
-            result = MOT_JIT_SELECT_FUSION;
-        } else if (((PlannedStmt*)st)->commandType == CMD_INSERT) {
-            result = MOT_JIT_MODIFY_FUSION;
-        } else if (((PlannedStmt*)st)->commandType == CMD_UPDATE) {
-            result = MOT_JIT_MODIFY_FUSION;
-        } else if (((PlannedStmt*)st)->commandType == CMD_DELETE) {
-            result = MOT_JIT_MODIFY_FUSION;
-        } else {
-            result = NOBYPASS_NO_QUERY_TYPE;
-        }
+        result = GetMotFusionType(planned_stmt);
     } else {
         if (planned_stmt->subplans != NULL || planned_stmt->initPlan != NULL) {
             return NOBYPASS_NO_SIMPLE_PLAN;

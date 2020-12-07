@@ -62,23 +62,6 @@ typedef int (*JitFunc)(MOT::Table* table, MOT::Index* index, MOT::Key* key, MOT:
 // the number of arguments in the jitted function
 #define MOT_JIT_FUNC_ARG_COUNT 14
 
-#ifdef __aarch64__
-/**
- * @brief Initializes the global spin-lock used for synchronizing native-LLVM compilation.
- * @return True if operation succeeded, otherwise false.
- */
-bool InitArmCompileLock();
-
-/** @brief Destroys the global spin-lock used for synchronizing native-LLVM compilation. */
-void DestroyArmCompileLock();
-
-/** @brief Locks the global ARM compilation lock. */
-bool AcquireArmCompileLock();
-
-/** @brief Unlocks the global ARM compilation lock. */
-bool ReleaseArmCompileLock();
-#endif
-
 /** @brief Prints startup information regarding LLVM version. */
 void PrintNativeLlvmStartupInfo();
 

@@ -22,9 +22,16 @@
  * -------------------------------------------------------------------------
  */
 
-#include "global.h"
+/*
+ * ATTENTION:
+ * 1. Be sure to include gscodegen.h before anything else to avoid clash with PM definition in datetime.h.
+ * 2. Be sure to include libintl.h before gscodegen.h to avoid problem with gettext.
+ */
+#include "libintl.h"
+#include "codegen/gscodegen.h"
 #include "postgres.h"
 #include "catalog/pg_operator.h"
+#include "global.h"
 #include "jit_common.h"
 #include "utilities.h"
 #include "jit_plan.h"
@@ -247,7 +254,7 @@ static bool IsEqualsWhereOperator(int whereOp)
 #ifdef MOT_JIT_ADVANCED_WHERE_OP
         || (whereOp == INT24EQOID) || (whereOp == INT42EQOID) || (whereOp == INT84EQOID) || (whereOp == INT48EQOID) ||
         (whereOp == INT82EQOID) || (whereOp == INT28EQOID) || (whereOp == FLOAT48EQOID) || (whereOp == FLOAT84EQOID) ||
-        (whereOp == 1108 /* time_eq */) || (whereOp == TIMETZEQOID)(whereOp == 5550 /* smalldatetime_eq */) ||
+        (whereOp == 1108 /* time_eq */) || (whereOp == TIMETZEQOID) || (whereOp == 5550 /* smalldatetime_eq */) ||
         (whereOp == 2347 /* date_eq_timestamp */) || (whereOp == 2373 /* timestamp_eq_date */) ||
         (whereOp == 2360 /* date_eq_timestamptz */) || (whereOp == 2386 /* timestamptz_eq_date */) ||
         (whereOp == 2536 /* timestamp_eq_timestamptz */) || (whereOp == 2542 /* timestamptz_eq_timestamp */) ||
@@ -272,11 +279,11 @@ static bool IsLessThanWhereOperator(int whereOp)
 #ifdef MOT_JIT_ADVANCED_WHERE_OP
         || (whereOp == INT24LTOID) || (whereOp == INT42LTOID) || (whereOp == INT84LTOID) || (whereOp == INT48LTOID) ||
         (whereOp == INT82LTOID) || (whereOp == INT28LTOID) || (whereOp == FLOAT48LTOID) || (whereOp == FLOAT84LTOID) ||
-        (whereOp == 1108 /* time_lt */) || (whereOp == 1552 /* timetz_lt */)(whereOp == 5550 /* smalldatetime_lt */) ||
-        (whereOp == 2347 /* date_lt_timestamp */) || (whereOp == 2373 /* timestamp_lt_date */) ||
-        (whereOp == 2360 /* date_lt_timestamptz */) || (whereOp == 2386 /* timestamptz_lt_date */) ||
-        (whereOp == 2536 /* timestamp_lt_timestamptz */) || (whereOp == 2542 /* timestamptz_lt_timestamp */) ||
-        (whereOp == 1332 /* interval_lt */)
+        (whereOp == 1108 /* time_lt */) || (whereOp == 1552 /* timetz_lt */) ||
+        (whereOp == 5550 /* smalldatetime_lt */) || (whereOp == 2347 /* date_lt_timestamp */) ||
+        (whereOp == 2373 /* timestamp_lt_date */) || (whereOp == 2360 /* date_lt_timestamptz */) ||
+        (whereOp == 2386 /* timestamptz_lt_date */) || (whereOp == 2536 /* timestamp_lt_timestamptz */) ||
+        (whereOp == 2542 /* timestamptz_lt_timestamp */) || (whereOp == 1332 /* interval_lt */)
 #endif
     ) {
         result = true;
@@ -297,11 +304,11 @@ static bool IsGreaterThanWhereOperator(int whereOp)
 #ifdef MOT_JIT_ADVANCED_WHERE_OP
         || (whereOp == INT24GTOID) || (whereOp == INT42GTOID) || (whereOp == INT84GTOID) || (whereOp == INT48GTOID) ||
         (whereOp == INT82GTOID) || (whereOp == INT28GTOID) || (whereOp == FLOAT48GTOID) || (whereOp == FLOAT84GTOID) ||
-        (whereOp == 1112 /* time_gt */) || (whereOp == 1554 /* timetz_gt */)(whereOp == 5554 /* smalldatetime_gt */) ||
-        (whereOp == 2349 /* date_gt_timestamp */) || (whereOp == 2375 /* timestamp_gt_date */) ||
-        (whereOp == 2362 /* date_gt_timestamptz */) || (whereOp == 2388 /* timestamptz_gt_date */) ||
-        (whereOp == 2538 /* timestamp_gt_timestamptz */) || (whereOp == 2544 /* timestamptz_gt_timestamp */) ||
-        (whereOp == 1334 /* interval_gt */)
+        (whereOp == 1112 /* time_gt */) || (whereOp == 1554 /* timetz_gt */) ||
+        (whereOp == 5554 /* smalldatetime_gt */) || (whereOp == 2349 /* date_gt_timestamp */) ||
+        (whereOp == 2375 /* timestamp_gt_date */) || (whereOp == 2362 /* date_gt_timestamptz */) ||
+        (whereOp == 2388 /* timestamptz_gt_date */) || (whereOp == 2538 /* timestamp_gt_timestamptz */) ||
+        (whereOp == 2544 /* timestamptz_gt_timestamp */) || (whereOp == 1334 /* interval_gt */)
 #endif
     ) {
         result = true;
@@ -322,11 +329,11 @@ static bool IsLessEqualsWhereOperator(int whereOp)
 #ifdef MOT_JIT_ADVANCED_WHERE_OP
         || (whereOp == INT24LEOID) || (whereOp == INT42LEOID) || (whereOp == INT84LEOID) || (whereOp == INT48LEOID) ||
         (whereOp == INT82LEOID) || (whereOp == INT28LEOID) || (whereOp == FLOAT48LEOID) || (whereOp == FLOAT84LEOID) ||
-        (whereOp == 1111 /* time_le */) || (whereOp == 1553 /* timetz_le */)(whereOp == 5553 /* smalldatetime_le */) ||
-        (whereOp == 2346 /* date_le_timestamp */) || (whereOp == 2372 /* timestamp_le_date */) ||
-        (whereOp == 2359 /* date_le_timestamptz */) || (whereOp == 2385 /* timestamptz_le_date */) ||
-        (whereOp == 2535 /* timestamp_le_timestamptz */) || (whereOp == 2541 /* timestamptz_le_timestamp */) ||
-        (whereOp == 1333 /* interval_le */)
+        (whereOp == 1111 /* time_le */) || (whereOp == 1553 /* timetz_le */) ||
+        (whereOp == 5553 /* smalldatetime_le */) || (whereOp == 2346 /* date_le_timestamp */) ||
+        (whereOp == 2372 /* timestamp_le_date */) || (whereOp == 2359 /* date_le_timestamptz */) ||
+        (whereOp == 2385 /* timestamptz_le_date */) || (whereOp == 2535 /* timestamp_le_timestamptz */) ||
+        (whereOp == 2541 /* timestamptz_le_timestamp */) || (whereOp == 1333 /* interval_le */)
 #endif
     ) {
         result = true;
@@ -347,11 +354,11 @@ static bool IsGreaterEqualsWhereOperator(int whereOp)
 #ifdef MOT_JIT_ADVANCED_WHERE_OP
         || (whereOp == INT24GEOID) || (whereOp == INT42GEOID) || (whereOp == INT84GEOID) || (whereOp == INT48GEOID) ||
         (whereOp == INT82GEOID) || (whereOp == INT28GEOID) || (whereOp == FLOAT48GEOID) || (whereOp == FLOAT84GEOID) ||
-        (whereOp == 1113 /* time_ge */) || (whereOp == 1555 /* timetz_ge */)(whereOp == 5549 /* smalldatetime_ge */) ||
-        (whereOp == 2348 /* date_ge_timestamp */) || (whereOp == 2374 /* timestamp_ge_date */) ||
-        (whereOp == 2361 /* date_ge_timestamptz */) || (whereOp == 2387 /* timestamptz_ge_date */) ||
-        (whereOp == 2537 /* timestamp_ge_timestamptz */) || (whereOp == 2543 /* timestamptz_ge_timestamp */) ||
-        (whereOp == 1335 /* interval_ge */)
+        (whereOp == 1113 /* time_ge */) || (whereOp == 1555 /* timetz_ge */) ||
+        (whereOp == 5549 /* smalldatetime_ge */) || (whereOp == 2348 /* date_ge_timestamp */) ||
+        (whereOp == 2374 /* timestamp_ge_date */) || (whereOp == 2361 /* date_ge_timestamptz */) ||
+        (whereOp == 2387 /* timestamptz_ge_date */) || (whereOp == 2537 /* timestamp_ge_timestamptz */) ||
+        (whereOp == 2543 /* timestamptz_ge_timestamp */) || (whereOp == 1335 /* interval_ge */)
 #endif
     ) {
         result = true;

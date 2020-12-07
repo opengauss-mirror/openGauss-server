@@ -25,6 +25,12 @@
 #ifndef JIT_LLVM_UTIL_H
 #define JIT_LLVM_UTIL_H
 
+/*
+ * ATTENTION:
+ * 1. Be sure to include gscodegen.h before anything else to avoid clash with PM definition in datetime.h.
+ * 2. Be sure to include libintl.h before gscodegen.h to avoid problem with gettext.
+ */
+#include "libintl.h"
 #include "codegen/gscodegen.h"
 #include "jit_common.h"
 
