@@ -2728,7 +2728,7 @@ SELECT qq, unique1
   ( SELECT COALESCE(q2, -1) AS qq FROM int8_tbl b ) AS ss2
   USING (qq)
   INNER JOIN tenk1 c ON qq = unique2;
-                                              QUERY PLAN
+                                              QUERY PLAN                                               
 -------------------------------------------------------------------------------------------------------
  Nested Loop
    ->  Hash Full Join
@@ -2872,7 +2872,7 @@ select * from
   int4(sin(1)) q1,
   int4(sin(0)) q2
 where q1 = thousand or q2 = thousand;
-                               QUERY PLAN
+                               QUERY PLAN                               
 ------------------------------------------------------------------------
  Hash Join
    Hash Cond: (tenk1.twothousand = int4_tbl.f1)
@@ -2897,7 +2897,7 @@ select * from
   int4(sin(1)) q1,
   int4(sin(0)) q2
 where thousand = (q1 + q2);
-                          QUERY PLAN
+                          QUERY PLAN                          
 --------------------------------------------------------------
  Hash Join
    Hash Cond: (tenk1.twothousand = int4_tbl.f1)
@@ -2920,12 +2920,12 @@ where thousand = (q1 + q2);
 explain (costs off)
 select * from tenk1 a join tenk1 b on
         (a.unique1 = 1 and b.unique1 = 2) or (a.unique2 = 3 and b.hundred = 4);
-                                           QUERY PLAN
+                                           QUERY PLAN                                            
 -------------------------------------------------------------------------------------------------
  Nested Loop
    Join Filter: (((a.unique1 = 1) AND (b.unique1 = 2)) OR ((a.unique2 = 3) AND (b.hundred = 4)))
    ->  Seq Scan on tenk1 b
-         Filter: ((unique1 = 2) OR (hundred = 4))
+         Filter: ((unique1 = 2) OR (unique1 = 2) OR (hundred = 4) OR (hundred = 4))
    ->  Bitmap Heap Scan on tenk1 a
          Recheck Cond: ((unique1 = 1) OR (unique2 = 3))
          ->  BitmapOr
@@ -2938,12 +2938,12 @@ select * from tenk1 a join tenk1 b on
 explain (costs off)
 select * from tenk1 a join tenk1 b on
         (a.unique1 = 1 and b.unique1 = 2) or (a.unique2 = 3 and b.ten = 4);
-                                         QUERY PLAN
+                                         QUERY PLAN                                          
 ---------------------------------------------------------------------------------------------
  Nested Loop
    Join Filter: (((a.unique1 = 1) AND (b.unique1 = 2)) OR ((a.unique2 = 3) AND (b.ten = 4)))
    ->  Seq Scan on tenk1 b
-         Filter: ((unique1 = 2) OR (ten = 4))
+         Filter: ((unique1 = 2) OR (unique1 = 2) OR (ten = 4) OR (ten = 4))
    ->  Bitmap Heap Scan on tenk1 a
          Recheck Cond: ((unique1 = 1) OR (unique2 = 3))
          ->  BitmapOr
@@ -2953,6 +2953,25 @@ select * from tenk1 a join tenk1 b on
                      Index Cond: (unique2 = 3)
 (11 rows)
 
+explain (costs off)
+select * from tenk1 a join tenk1 b on
+        (a.unique1 = 1 and b.unique1 = 2) or
+        ((a.unique2 = 3 or a.unique2 = 7) and b.hundred = 4);
+                                                      QUERY PLAN                                                      
+----------------------------------------------------------------------------------------------------------------------
+ Nested Loop
+   Join Filter: (((a.unique1 = 1) AND (b.unique1 = 2)) OR (((a.unique2 = 3) OR (a.unique2 = 7)) AND (b.hundred = 4)))
+   ->  Seq Scan on tenk1 a
+   ->  Materialize
+         ->  Bitmap Heap Scan on tenk1 b
+               Recheck Cond: ((unique1 = 2) OR (hundred = 4))
+               ->  BitmapOr
+                     ->  Bitmap Index Scan on tenk1_unique1
+                           Index Cond: (unique1 = 2)
+                     ->  Bitmap Index Scan on tenk1_hundred
+                           Index Cond: (hundred = 4)
+(11 rows)
+
 --
 -- test ability to generate a suitable plan for a star-schema query
 --
@@ -2960,7 +2979,7 @@ explain (costs off)
 select * from
   tenk1, int8_tbl a, int8_tbl b
 where thousand = a.q1 and tenthous = b.q1 and a.q2 = 1 and b.q2 = 2;
-                             QUERY PLAN
+                             QUERY PLAN                              
 ---------------------------------------------------------------------
  Nested Loop
    ->  Seq Scan on int8_tbl b
@@ -2988,7 +3007,7 @@ select t1.unique2, t1.stringu1, t2.unique1, t2.stringu2 from
   left join tenk1 t2
   on (subq1.y1 = t2.unique1)
 where t1.unique2 < 42 and t1.stringu1 > t2.stringu2;
-                                 QUERY PLAN
+                                 QUERY PLAN                                 
 ----------------------------------------------------------------------------
  Nested Loop
    Join Filter: (t1.stringu1 > t2.stringu2)
@@ -3071,7 +3090,7 @@ select count(*) from
   tenk1 a join tenk1 b on a.unique1 = b.unique2
   left join tenk1 c on a.unique2 = b.unique1 and c.thousand = a.thousand
   join int4_tbl on b.thousand = f1;
-                               QUERY PLAN
+                               QUERY PLAN                                
 -------------------------------------------------------------------------
  Aggregate
    ->  Nested Loop Left Join
@@ -3105,7 +3124,7 @@ select b.unique1 from
   join int4_tbl i1 on b.thousand = f1
   right join int4_tbl i2 on i2.f1 = b.tenthous
   order by 1;
-                                       QUERY PLAN
+                                       QUERY PLAN                                        
 -----------------------------------------------------------------------------------------
  Sort
    Sort Key: b.unique1
@@ -3220,7 +3239,7 @@ select * from
 --
 explain (num_nodes off, nodes off, costs off)
   select * from int4_tbl a left join tenk1 b on f1 = unique2 where f1 = 0;
-                   QUERY PLAN
+                   QUERY PLAN                    
 -------------------------------------------------
  Nested Loop Left Join
    Join Filter: (a.f1 = b.unique2)
@@ -3548,7 +3567,7 @@ select t1.* from
   on (t1.f1 = b1.d1)
   left join int4_tbl i4
   on (i8.q2 = i4.f1);
-                                 QUERY PLAN
+                                 QUERY PLAN                                 
 ----------------------------------------------------------------------------
  Hash Left Join
    Output: t1.f1
@@ -3617,7 +3636,7 @@ select t1.* from
   on (t1.f1 = b1.d1)
   left join int4_tbl i4
   on (i8.q2 = i4.f1);
-                                 QUERY PLAN
+                                 QUERY PLAN                                 
 ----------------------------------------------------------------------------
  Hash Left Join
    Output: t1.f1
