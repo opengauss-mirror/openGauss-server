@@ -104,6 +104,8 @@ void *dsm_create(void)
 
             u_sess->parallel_ctx[i].used = true;
             slist_init(&u_sess->parallel_ctx[i].on_detach);
+
+            t_thrd.bgworker_cxt.memCxt = u_sess->parallel_ctx[i].memCtx;
             return &(u_sess->parallel_ctx[i]);
         }
     }

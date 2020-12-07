@@ -873,7 +873,7 @@ static void _outBitmapOr(StringInfo str, BitmapOr* node)
     WRITE_NODE_TYPE("BITMAPOR");
 
     _outPlanInfo(str, (Plan*)node);
-
+    WRITE_BOOL_FIELD(isshared);
     WRITE_NODE_FIELD(bitmapplans);
 }
 static void _outCStoreIndexOr(StringInfo str, CStoreIndexOr* node)
@@ -1176,6 +1176,7 @@ static void _outBitmapIndexScan(StringInfo str, BitmapIndexScan* node)
     _outScanInfo(str, (Scan*)node);
 
     WRITE_OID_FIELD(indexid);
+    WRITE_BOOL_FIELD(isshared);
     WRITE_NODE_FIELD(indexqual);
     WRITE_NODE_FIELD(indexqualorig);
 #ifdef STREAMPLAN

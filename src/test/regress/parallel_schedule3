@@ -26,5 +26,7 @@ test: upsert_grammer_test_02 upsert_restriction upsert_composite
 test: upsert_trigger_test upsert_explain
 test: upsert_clean
 
-# test parallel query
-test: parallel_query parallel_nested_loop parallel_hashjoin parallel_append parallel_create_index
+# test parallel query, don't put more than 2 parallel query testcases into one test group
+test: parallel_query parallel_nested_loop
+test: parallel_hashjoin parallel_append
+test: parallel_create_index

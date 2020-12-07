@@ -158,7 +158,8 @@ static const char *BuiltinTrancheNames[] = {
     "PLdebugger",
     "SharedTupleStore",
     "parallel_append",
-    "ParallelHashJoinLock"
+    "ParallelHashJoinLock",
+    "TidBitMapLock"
 };
 
 static void RegisterLWLockTranches(void);

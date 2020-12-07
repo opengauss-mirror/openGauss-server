@@ -918,6 +918,7 @@ void ParallelWorkerMain(Datum main_arg)
 
     /* Set flag to indicate that we're initializing a parallel worker. */
     t_thrd.bgworker_cxt.InitializingParallelWorker = true;
+    t_thrd.bgworker_cxt.memCxt = ctx->memCtx;
 
     /* Establish signal handlers. */
     gspqsignal(SIGTERM, die);

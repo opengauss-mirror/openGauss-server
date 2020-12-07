@@ -2838,6 +2838,7 @@ static BitmapOr* _readBitmapOr(BitmapOr* local_node)
     READ_TEMP_LOCALS();
 
     _readPlan(&local_node->plan);
+    READ_BOOL_FIELD(isshared);
     READ_NODE_FIELD(bitmapplans);
 
     READ_DONE();
@@ -3059,6 +3060,7 @@ static BitmapIndexScan* _readBitmapIndexScan(BitmapIndexScan* local_node)
     _readScan(&local_node->scan);
 
     READ_OID_FIELD(indexid);
+    READ_BOOL_FIELD(isshared);
     READ_NODE_FIELD(indexqual);
     READ_NODE_FIELD(indexqualorig);
 #ifdef STREAMPLAN

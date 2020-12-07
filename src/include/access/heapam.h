@@ -101,6 +101,10 @@ extern void heapgetpage(HeapScanDesc scan, BlockNumber page);
 extern void heap_rescan(HeapScanDesc scan, ScanKey key);
 extern void heap_endscan(HeapScanDesc scan);
 extern HeapTuple heap_getnext(HeapScanDesc scan, ScanDirection direction);
+/*
+ * Update snapshot used by the scan.
+ */
+extern void heap_scan_update_snapshot(HeapScanDesc scan, Snapshot snapshot);
 
 extern Size heap_parallelscan_estimate(Snapshot snapshot);
 extern void heap_parallelscan_initialize(ParallelHeapScanDesc target, Size pscan_len, Relation relation,

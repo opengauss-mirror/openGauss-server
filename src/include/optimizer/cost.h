@@ -179,6 +179,8 @@ extern double estimate_hash_num_distinct(PlannerInfo* root, List* hashkey, Path*
     double local_ndistinct, double global_ndistinct, bool* usesinglestats);
 extern RelOptInfo* find_join_input_rel(PlannerInfo* root, Relids relids);
 extern double compute_sort_disk_cost(double input_bytes, double sort_mem_bytes);
+extern double compute_bitmap_pages(PlannerInfo *root, RelOptInfo *baserel,
+    Path *bitmapqual, double loop_count, Cost *cost, double *tuple, bool ispartitionedindex);
 
 extern double approx_tuple_count(PlannerInfo* root, JoinPath* path, List* quals);
 extern void set_rel_path_rows(Path* path, RelOptInfo* rel, ParamPathInfo* param_info);

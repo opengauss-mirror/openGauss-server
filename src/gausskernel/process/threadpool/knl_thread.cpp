@@ -1432,6 +1432,7 @@ void knl_t_bgworker_init(knl_t_bgworker_context* bgworker_cxt)
     bgworker_cxt->pcxt_list = DLIST_STATIC_INIT(bgworker_cxt->pcxt_list);
     bgworker_cxt->save_pgBufferUsage = NULL;
     bgworker_cxt->hpm_context = NULL;
+    bgworker_cxt->memCxt = NULL;
 }
 
 void knl_t_msqueue_init(knl_t_msqueue_context* msqueue_cxt)

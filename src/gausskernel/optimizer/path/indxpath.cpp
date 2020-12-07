@@ -279,8 +279,13 @@ void create_index_paths(PlannerInfo* root, RelOptInfo* rel)
         BitmapHeapPath* bpath = NULL;
 
         bitmapqual = choose_bitmap_and(root, rel, bitindexpaths);
-        bpath = create_bitmap_heap_path(root, rel, bitmapqual, NULL, 1.0);
+        bpath = create_bitmap_heap_path(root, rel, bitmapqual, NULL, 1.0, 0);
         add_path(root, rel, (Path*)bpath);
+
+        /* create a partial bitmap heap path */
+        if (rel->consider_parallel) {
+            create_partial_bitmap_paths(root, rel, bitmapqual);
+        }
     }
 
     /*
@@ -348,7 +353,7 @@ void create_index_paths(PlannerInfo* root, RelOptInfo* rel)
             /* And push that path into the mix */
             required_outer = get_bitmap_tree_required_outer(bitmapqual);
             loop_count = get_loop_count(root, required_outer);
-            bpath = create_bitmap_heap_path(root, rel, bitmapqual, required_outer, loop_count);
+            bpath = create_bitmap_heap_path(root, rel, bitmapqual, required_outer, loop_count, 0);
             add_path(root, rel, (Path*)bpath);
         }
     }
@@ -1650,6 +1655,11 @@ static Cost bitmap_scan_cost_est(PlannerInfo* root, RelOptInfo* rel, Path* ipath
     bpath.path.pathkeys = NIL;
     bpath.bitmapqual = ipath;
 
+    /*
+     * Check the cost of temporary path without considering parallelism.
+     * Parallel bitmap heap path will be considered at later stage.
+     */
+    bpath.path.parallel_workers = 0;
     cost_bitmap_heap_scan(&bpath.path, root, rel, bpath.path.param_info, ipath, get_loop_count(root, required_outer));
 
     return bpath.path.total_cost;
@@ -1685,6 +1695,11 @@ static Cost bitmap_and_cost_est(PlannerInfo* root, RelOptInfo* rel, List* paths)
     bpath.path.pathkeys = NIL;
     bpath.bitmapqual = (Path*)&apath;
 
+    /*
+     * Check the cost of temporary path without considering parallelism.
+     * Parallel bitmap heap path will be considered at later stage.
+     */
+    bpath.path.parallel_workers = 0;
     /* Now we can do cost_bitmap_heap_scan */
     cost_bitmap_heap_scan(
         &bpath.path, root, rel, bpath.path.param_info, (Path*)&apath, get_loop_count(root, required_outer));

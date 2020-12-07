@@ -2058,8 +2058,8 @@ IndexPath* create_index_path(PlannerInfo* root, IndexOptInfo* index, List* index
  * loop_count should match the value used when creating the component
  * IndexPaths.
  */
-BitmapHeapPath* create_bitmap_heap_path(
-    PlannerInfo* root, RelOptInfo* rel, Path* bitmapqual, Relids required_outer, double loop_count)
+BitmapHeapPath* create_bitmap_heap_path(PlannerInfo* root, RelOptInfo* rel, Path* bitmapqual,
+    Relids required_outer, double loop_count, int parallel_degree)
 {
     BitmapHeapPath* pathnode = makeNode(BitmapHeapPath);
 
@@ -2067,15 +2067,23 @@ BitmapHeapPath* create_bitmap_heap_path(
     pathnode->path.parent = rel;
     pathnode->path.param_info = get_baserel_parampathinfo(root, rel, required_outer);
     pathnode->path.pathkeys = NIL; /* always unordered */
+    pathnode->path.parallel_aware = parallel_degree > 0 ? true : false;
+    pathnode->path.parallel_safe = rel->consider_parallel;
+    pathnode->path.parallel_workers = parallel_degree;
 
     pathnode->bitmapqual = bitmapqual;
 
     cost_bitmap_heap_scan(&pathnode->path, root, rel, pathnode->path.param_info, bitmapqual, loop_count);
 
 #ifdef STREAMPLAN
+    /* 
+     * We need to set locator_type for parallel query, cause we may send
+     * this value to bg worker. If not, locator_type is the initial value '\0',
+     * which make the later serialized plan truncated.
+     */
+    pathnode->path.locator_type = rel->locator_type;
     if (IS_STREAM_PLAN) {
         pathnode->path.distribute_keys = rel->distribute_keys;
-        pathnode->path.locator_type = rel->locator_type;
 
         /* add location information for bitmap heap path */
         RangeTblEntry* rte = root->simple_rte_array[rel->relid];
@@ -3971,7 +3979,7 @@ Path* reparameterize_path(PlannerInfo* root, Path* path, Relids required_outer, 
         case T_BitmapHeapScan: {
             BitmapHeapPath* bpath = (BitmapHeapPath*)path;
 
-            return (Path*)create_bitmap_heap_path(root, rel, bpath->bitmapqual, required_outer, loop_count);
+            return (Path*)create_bitmap_heap_path(root, rel, bpath->bitmapqual, required_outer, loop_count, 0);
         }
         case T_SubqueryScan:
             return create_subqueryscan_path(root, rel, path->pathkeys, required_outer);

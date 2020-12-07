@@ -488,7 +488,7 @@ void finalize_node_id(Plan* result_plan, int* plan_node_id, int* parent_node_id,
         int save_parent_id = *parent_node_id;
         (*plan_node_id)++;
         (*num_plannodes)++;
-        if (result_plan->initPlan && IS_STREAM_PLAN) {
+        if (result_plan->initPlan && (IS_SINGLE_NODE || IS_STREAM_PLAN)) {
             List* cteLinkList = NIL;
             ListCell* lc = NULL;
             foreach (lc, result_plan->initPlan) {
@@ -496,6 +496,7 @@ void finalize_node_id(Plan* result_plan, int* plan_node_id, int* parent_node_id,
                 if (plan->subLinkType == CTE_SUBLINK)
                     cteLinkList = lappend(cteLinkList, plan);
             }
+#ifdef ENABLE_MULTIPLE_NODES
             if (cteLinkList != NIL) {
                 if (IsA(result_plan, ValuesScan)) {
                     sprintf_rc = sprintf_s(u_sess->opt_cxt.not_shipping_info->not_shipping_reason,
@@ -505,7 +506,8 @@ void finalize_node_id(Plan* result_plan, int* plan_node_id, int* parent_node_id,
                     mark_stream_unsupport();
                 }
             }
-            if (IS_STREAM_PLAN)
+#endif
+            if (IS_SINGLE_NODE || IS_STREAM_PLAN)
                 *initplans = list_concat(*initplans, list_copy(result_plan->initPlan));
         }
         switch (nodeTag(result_plan)) {
@@ -876,7 +878,7 @@ void finalize_node_id(Plan* result_plan, int* plan_node_id, int* parent_node_id,
                 }
                 break;
         }
-        if (IS_STREAM_PLAN) {
+        if (IS_STREAM_PLAN || IS_SINGLE_NODE) {
             if (is_replicated_plan(result_plan) && is_execute_on_multinodes(result_plan)) {
                 List* nodelist = check_random_expr(result_plan);
                 if (list_length(nodelist) > 0) {
@@ -924,6 +926,7 @@ void finalize_node_id(Plan* result_plan, int* plan_node_id, int* parent_node_id,
                 } else
                     subplan_ids[subplan->plan_id] = subplan_ids[0];
                 if (!has_finalized) {
+#ifdef ENABLE_MULTIPLE_NODES
                     if (is_execute_on_coordinator(result_plan) ||
                         (is_execute_on_allnodes(result_plan) && !is_data_node_exec)) {
                         Plan* child_plan = NULL;
@@ -973,6 +976,7 @@ void finalize_node_id(Plan* result_plan, int* plan_node_id, int* parent_node_id,
                         }
                         pushdown_execnodes(plan, result_plan->exec_nodes, false, true);
                     }
+#endif
                     if (check_stream_support()) {
                         PlannerInfo* subroot = NULL;
                         Plan* child_root = NULL;

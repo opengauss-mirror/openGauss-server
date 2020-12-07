@@ -29,8 +29,10 @@ test: misc
 test: stats
 test: alter_system_set
 
-# parallel query
-test: parallel_query parallel_nested_loop parallel_hashjoin parallel_append parallel_create_index
+# parallel query, don't put more than 2 parallel query testcases into one test group
+test: parallel_query parallel_nested_loop
+test: parallel_hashjoin parallel_append
+test: parallel_create_index
 
 #dispatch from 13
 test: function

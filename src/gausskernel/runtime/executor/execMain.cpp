@@ -2066,7 +2066,6 @@ static void ExecutePlan(EState *estate, PlanState *planstate, bool use_parallel_
          * process so we just end the loop...
          */
         if (TupIsNull(slot)) {
-            (void)ExecShutdownNode(planstate);
             ExecEarlyFree(planstate);
             break;
         }
@@ -2134,6 +2133,14 @@ static void ExecutePlan(EState *estate, PlanState *planstate, bool use_parallel_
             t_thrd.shemem_ptr_cxt.mySessionMemoryEntry->initMemInChunks)
             << (chunkSizeInBits - BITS_IN_MB);
         u_sess->instr_cxt.global_instr->SetPeakNodeMemory(planstate->plan->plan_node_id, peak_memory);
+    }
+
+    /*
+     * If we know we won't need to back up, we can release resources at this
+     * point.
+     */
+    if (!(estate->es_top_eflags & EXEC_FLAG_BACKWARD)) {
+        (void)ExecShutdownNode(planstate);
     }
 
     if (use_parallel_mode) {
