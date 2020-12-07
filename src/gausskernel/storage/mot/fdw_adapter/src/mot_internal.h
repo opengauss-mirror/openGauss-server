@@ -104,6 +104,7 @@ void report_pg_error(MOT::RC rc, MOT::TxnManager* txn, void* arg1 = nullptr, voi
 #define MAX_VARCHAR_LEN 1024
 
 typedef enum : uint8_t { SORTDIR_NONE = 0, SORTDIR_ASC = 1, SORTDIR_DESC = 2 } SORTDIR_ENUM;
+typedef enum : uint8_t { FDW_LIST_STATE = 1, FDW_LIST_BITMAP = 2 } FDW_LIST_TYPE;
 
 typedef struct Order_St {
     SORTDIR_ENUM m_order;

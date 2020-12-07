@@ -191,14 +191,22 @@ static int MOTGetFdwType()
 
 static inline void BitmapDeSerialize(uint8_t* bitmap, int16_t len, ListCell** cell)
 {
-    for (int i = 0; i < len; i++) {
-        bitmap[i] = (uint8_t)((Const*)lfirst(*cell))->constvalue;
-        *cell = lnext(*cell);
+    if (cell != nullptr && *cell != nullptr) {
+        int type = ((Const*)lfirst(*cell))->constvalue;
+        if (type == FDW_LIST_BITMAP) {
+            *cell = lnext(*cell);
+            for (int i = 0; i < len; i++) {
+                bitmap[i] = (uint8_t)((Const*)lfirst(*cell))->constvalue;
+                *cell = lnext(*cell);
+            }
+        }
     }
 }
 
 static inline List* BitmapSerialize(List* result, uint8_t* bitmap, int16_t len)
 {
+    // set list type to FDW_LIST_BITMAP
+    result = lappend(result, makeConst(INT4OID, -1, InvalidOid, 4, FDW_LIST_BITMAP, false, true));
     for (int i = 0; i < len; i++)
         result = lappend(result, makeConst(INT1OID, -1, InvalidOid, 1, Int8GetDatum(bitmap[i]), false, true));
 
@@ -1989,51 +1997,59 @@ MOTFdwStateSt* InitializeFdwState(void* fdwState, List** fdwExpr, uint64_t exTab
 {
     MOTFdwStateSt* state = (MOTFdwStateSt*)palloc0(sizeof(MOTFdwStateSt));
     List* values = (List*)fdwState;
-    ListCell* cell = list_head(values);
 
     state->m_allocInScan = true;
-    state->m_cmdOper = (CmdType)((Const*)lfirst(cell))->constvalue;
-    cell = lnext(cell);
-    state->m_order = (SORTDIR_ENUM)((Const*)lfirst(cell))->constvalue;
-    cell = lnext(cell);
-    state->m_hasForUpdate = (bool)((Const*)lfirst(cell))->constvalue;
-    cell = lnext(cell);
-    state->m_foreignTableId = ((Const*)lfirst(cell))->constvalue;
-    cell = lnext(cell);
-    state->m_numAttrs = ((Const*)lfirst(cell))->constvalue;
-    cell = lnext(cell);
-    state->m_ctidNum = ((Const*)lfirst(cell))->constvalue;
-    cell = lnext(cell);
-    state->m_numExpr = ((Const*)lfirst(cell))->constvalue;
-    cell = lnext(cell);
+    state->m_foreignTableId = exTableID;
+    if (list_length(values) > 0) {
+        ListCell* cell = list_head(values);
+        int type = ((Const*)lfirst(cell))->constvalue;
+        if (type != FDW_LIST_STATE) {
+            return state;
+        }
+        cell = lnext(cell);
+        state->m_cmdOper = (CmdType)((Const*)lfirst(cell))->constvalue;
+        cell = lnext(cell);
+        state->m_order = (SORTDIR_ENUM)((Const*)lfirst(cell))->constvalue;
+        cell = lnext(cell);
+        state->m_hasForUpdate = (bool)((Const*)lfirst(cell))->constvalue;
+        cell = lnext(cell);
+        state->m_foreignTableId = ((Const*)lfirst(cell))->constvalue;
+        cell = lnext(cell);
+        state->m_numAttrs = ((Const*)lfirst(cell))->constvalue;
+        cell = lnext(cell);
+        state->m_ctidNum = ((Const*)lfirst(cell))->constvalue;
+        cell = lnext(cell);
+        state->m_numExpr = ((Const*)lfirst(cell))->constvalue;
+        cell = lnext(cell);
 
-    int len = BITMAP_GETLEN(state->m_numAttrs);
-    state->m_attrsUsed = (uint8_t*)palloc0(len);
-    state->m_attrsModified = (uint8_t*)palloc0(len);
-    BitmapDeSerialize(state->m_attrsUsed, len, &cell);
+        int len = BITMAP_GETLEN(state->m_numAttrs);
+        state->m_attrsUsed = (uint8_t*)palloc0(len);
+        state->m_attrsModified = (uint8_t*)palloc0(len);
+        BitmapDeSerialize(state->m_attrsUsed, len, &cell);
 
-    if (cell != NULL) {
-        state->m_bestIx = &state->m_bestIxBuf;
-        state->m_bestIx->Deserialize(cell, exTableID);
-    }
-
-    if (fdwExpr != NULL && *fdwExpr != NULL) {
-        ListCell* c = NULL;
-        int i = 0;
-
-        // divide fdw expr to param list and original expr
-        state->m_remoteCondsOrig = NULL;
-
-        foreach (c, *fdwExpr) {
-            if (i < state->m_numExpr) {
-                i++;
-                continue;
-            } else {
-                state->m_remoteCondsOrig = lappend(state->m_remoteCondsOrig, lfirst(c));
-            }
+        if (cell != NULL) {
+            state->m_bestIx = &state->m_bestIxBuf;
+            state->m_bestIx->Deserialize(cell, exTableID);
         }
 
-        *fdwExpr = list_truncate(*fdwExpr, state->m_numExpr);
+        if (fdwExpr != NULL && *fdwExpr != NULL) {
+            ListCell* c = NULL;
+            int i = 0;
+
+            // divide fdw expr to param list and original expr
+            state->m_remoteCondsOrig = NULL;
+
+            foreach (c, *fdwExpr) {
+                if (i < state->m_numExpr) {
+                    i++;
+                    continue;
+                } else {
+                    state->m_remoteCondsOrig = lappend(state->m_remoteCondsOrig, lfirst(c));
+                }
+            }
+
+            *fdwExpr = list_truncate(*fdwExpr, state->m_numExpr);
+        }
     }
     return state;
 }
@@ -2042,6 +2058,8 @@ void* SerializeFdwState(MOTFdwStateSt* state)
 {
     List* result = NULL;
 
+    // set list type to FDW_LIST_STATE
+    result = lappend(result, makeConst(INT4OID, -1, InvalidOid, 4, FDW_LIST_STATE, false, true));
     result = lappend(result, makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum(state->m_cmdOper), false, true));
     result = lappend(result, makeConst(INT1OID, -1, InvalidOid, 4, Int8GetDatum(state->m_order), false, true));
     result = lappend(result, makeConst(BOOLOID, -1, InvalidOid, 1, BoolGetDatum(state->m_hasForUpdate), false, true));
