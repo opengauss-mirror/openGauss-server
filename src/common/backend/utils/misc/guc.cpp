@@ -21550,12 +21550,9 @@ int find_guc_option(
         }
     }
     
-    /* The line of last one will be returned */
-    if (matchTimes > 0) {
-        return targetLine;
-    }
-
-    return INVALID_LINES_IDX;
+    /* The line of last one will be returned, otherwise it return invaild line */
+    return (matchTimes > 0) ? targetLine : INVALID_LINES_IDX;
+    
 }
 /*
  * @@GaussDB@@
