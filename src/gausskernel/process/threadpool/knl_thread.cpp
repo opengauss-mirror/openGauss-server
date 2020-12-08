@@ -1549,7 +1549,7 @@ void knl_thread_set_name(const char* name, bool isCommandTag)
      */
     char dynamic_tag[MAX_THREAD_NAME_LENGTH];
     int rc = 0;
-    if(isCommandTag) {
+    if (isCommandTag) {
         dynamic_tag[0] = '>';
         /*
          * MAX_THREAD_NAME_LENGTH - 1 means minus the length of '>'
