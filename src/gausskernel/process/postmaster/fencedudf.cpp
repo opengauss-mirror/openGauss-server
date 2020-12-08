@@ -221,7 +221,7 @@ void FencedUDFMasterMain(int argc, char* argv[])
 {
     /* Just make set_ps_dispaly ok */
     IsUnderPostmaster = true;
-    u_sess->attr.attr_common.update_process_title = false;
+
     set_ps_display("gaussdb fenced UDF master process", true);
 
     knl_thread_set_name("FencedUDFMaster");
@@ -420,7 +420,7 @@ pid_t StartUDFWorker(int socket)
         }
         case 0: {
             /* Child process */
-            u_sess->attr.attr_common.update_process_title = false;
+
             /* Just make set_ps_dispaly ok */
             IsUnderPostmaster = true;
 
