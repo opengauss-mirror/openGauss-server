@@ -12552,7 +12552,7 @@ static void init_single_node_unsupport_guc()
     u_sess->attr.attr_sql.agg_redistribute_enhancement = false;
     u_sess->attr.attr_sql.enable_agg_pushdown_for_cooperation_analysis = true;
     u_sess->attr.attr_common.enable_tsdb = false;
-	u_sess->attr.attr_common.update_process_title = false;
+    u_sess->attr.attr_common.update_process_title = false;
     u_sess->attr.attr_sql.acceleration_with_compute_pool = false;
     u_sess->attr.attr_sql.enable_constraint_optimization = true;
     u_sess->attr.attr_sql.enable_csqual_pushdown = true;
