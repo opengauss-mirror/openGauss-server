@@ -71,6 +71,7 @@ bool RecoveryManager::RecoverDbStart()
     MOT_LOG_INFO("Starting MOT recovery");
 
     if (m_recoverFromCkptDone) {
+        SetLsn(m_lastReplayLsn);
         return true;
     }
 

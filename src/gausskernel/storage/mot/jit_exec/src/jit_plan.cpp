@@ -22,10 +22,10 @@
  * -------------------------------------------------------------------------
  */
 
-#include <algorithm>
-
-// Be sure to include global.h before postgres.h to avoid conflict between libintl.h (included in global.h)
-// and c.h (included in postgres.h).
+/*
+ * ATTENTION: Be sure to include global.h before postgres.h to avoid conflict between libintl.h (included in global.h)
+ * and c.h (included in postgres.h).
+ */
 #include "global.h"
 #include "jit_plan.h"
 #include "jit_common.h"
@@ -33,6 +33,8 @@
 #include "utilities.h"
 #include "nodes/pg_list.h"
 #include "catalog/pg_aggregate.h"
+
+#include <algorithm>
 
 namespace JitExec {
 DECLARE_LOGGER(JitPlan, JitExec)

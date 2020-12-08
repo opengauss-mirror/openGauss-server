@@ -25,9 +25,12 @@
 #ifndef JIT_TVM_FUNCS_H
 #define JIT_TVM_FUNCS_H
 
-// Be sure to include jit_tvm_query.h before anything else because of global.h.
-// See jit_tvm_query.h for more details.
+/*
+ * ATTENTION: Be sure to include jit_tvm_query.h before anything else because of libintl.h
+ * See jit_tvm_query.h for more details.
+ */
 #include "jit_tvm_query.h"
+#include "jit_plan_expr.h"
 #include "logger.h"
 
 namespace JitExec {

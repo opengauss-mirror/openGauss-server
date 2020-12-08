@@ -31,6 +31,7 @@
 #include "storage/mot/jit_def.h"
 #include "jit_common.h"
 #include "utilities.h"
+
 #include <algorithm>
 
 namespace JitExec {

@@ -55,11 +55,9 @@
 
 #include "mot_engine.h"
 #include "utilities.h"
-#include "mot_internal.h"
 #include "catalog_column_types.h"
 #include "mot_error.h"
 #include "utilities.h"
-#include "mot_internal.h"
 #include "cycles.h"
 
 #include <assert.h>
@@ -195,7 +193,7 @@ static void ProcessJitResult(MOT::RC result, JitContext* jitContext, int newScan
         } else {
             JitStatisticsProvider::GetInstance().AddFailExecQuery();
         }
-        report_pg_error(result, currTxn, (void*)arg1, (void*)arg2);
+        report_pg_error(result, (void*)arg1, (void*)arg2);
     }
 }
 
@@ -369,7 +367,7 @@ extern int JitExecQuery(
             "Execute JIT",
             "Cannot execute jitted function: function is null. Aborting transaction.");
         JitStatisticsProvider::GetInstance().AddFailExecQuery();
-        report_pg_error(MOT::RC_ERROR, NULL);  // execution control ends, calls ereport(error,...)
+        report_pg_error(MOT::RC_ERROR);  // execution control ends, calls ereport(error,...)
     }
 
     // when running under thread-pool, it is possible to be executed from a thread that hasn't yet executed any MOT code
@@ -384,7 +382,7 @@ extern int JitExecQuery(
             "Execute JIT",
             "Cannot execute jitted code: Current transaction is undefined. Aborting transaction.");
         JitStatisticsProvider::GetInstance().AddFailExecQuery();
-        report_pg_error(MOT::RC_MEMORY_ALLOCATION_ERROR, NULL);  // execution control ends, calls ereport(error,...)
+        report_pg_error(MOT::RC_MEMORY_ALLOCATION_ERROR);  // execution control ends, calls ereport(error,...)
     }
 
     // during the very first invocation of the query we need to setup the reusable search keys
@@ -395,7 +393,7 @@ extern int JitExecQuery(
             MOT_REPORT_ERROR(
                 MOT_ERROR_OOM, "Execute JIT", "Failed to prepare for executing jitted code, aborting transaction");
             JitStatisticsProvider::GetInstance().AddFailExecQuery();
-            report_pg_error(MOT::RC_MEMORY_ALLOCATION_ERROR, NULL);  // execution control ends, calls ereport(error,...)
+            report_pg_error(MOT::RC_MEMORY_ALLOCATION_ERROR);  // execution control ends, calls ereport(error,...)
         }
     }
 

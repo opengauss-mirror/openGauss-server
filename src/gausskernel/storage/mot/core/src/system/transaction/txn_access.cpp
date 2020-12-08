@@ -24,7 +24,7 @@
 
 #include <map>
 
-#include "../storage/table.h"
+#include "table.h"
 #include "row.h"
 #include "txn.h"
 #include "txn_access.h"

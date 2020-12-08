@@ -305,7 +305,7 @@ private:
             memCfg.format("%" PRIu64 " MB", newLocalMemoryMb);
             result = AddExtStringConfigItem("", "max_mot_local_memory", memCfg.c_str());
         }
-        if (result) {
+        if (result && (motCfg.m_sessionLargeBufferStoreSizeMB != newSessionLargeStoreMemoryMb)) {
             memCfg.format("%" PRIu64 " MB", newSessionLargeStoreMemoryMb);
             result = AddExtStringConfigItem("", "session_large_buffer_store_size", memCfg.c_str());
         }
