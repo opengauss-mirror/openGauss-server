@@ -459,6 +459,10 @@ typedef struct ExplainState {
     bool is_explain_gplan;
 } ExplainState;
 
+/* Hook for plugins to get control in explain_get_index_name() */
+typedef const char *(*explain_get_index_name_hook_type) (Oid indexId);
+extern THR_LOCAL PGDLLIMPORT explain_get_index_name_hook_type explain_get_index_name_hook;
+
 extern void ExplainQuery(
     ExplainStmt* stmt, const char* queryString, ParamListInfo params, DestReceiver* dest, char* completionTag);
 

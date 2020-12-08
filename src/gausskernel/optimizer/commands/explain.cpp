@@ -123,6 +123,9 @@ const int KB_PER_MB = 1024;    /* KB per MB */
         IsA(plan, DfsScan) || IsA(plan, IndexScan) || IsA(plan, IndexOnlyScan) || IsA(plan, CteScan) ||             \
         IsA(plan, ForeignScan) || IsA(plan, VecForeignScan) || IsA(plan, BitmapHeapScan))
 
+/* Hook for plugins to get control in explain_get_index_name() */
+THR_LOCAL explain_get_index_name_hook_type explain_get_index_name_hook = NULL;
+
 static void ExplainOneQuery(
     Query* query, IntoClause* into, ExplainState* es, const char* queryString, ParamListInfo params);
 static void report_triggers(ResultRelInfo* rInfo, bool show_relname, ExplainState* es);
@@ -7799,6 +7802,12 @@ static void ShowRoughCheckInfo(ExplainState* es, struct Instrumentation* instrum
 static const char* explain_get_index_name(Oid indexId)
 {
     const char* result = NULL;
+
+    if (explain_get_index_name_hook) {
+       result = (*explain_get_index_name_hook) (indexId);
+       if(result)
+           return result;
+    }
 
     /* default behavior: look in the catalogs and quote it */
     result = get_rel_name(indexId);

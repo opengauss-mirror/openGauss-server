@@ -2557,6 +2557,11 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  4705 | has_directory_privilege
  4789 | remote_rto_stat
  4888 | gs_index_advise
+ 4889 | hypopg_create_index
+ 4890 | hypopg_display_index
+ 4891 | hypopg_drop_index
+ 4892 | hypopg_estimate_size
+ 4893 | hypopg_reset_index
  4999 | remote_recovery_status
  5000 | get_instr_workload_info
  5001 | pg_stat_get_wlm_session_info_internal
@@ -2683,7 +2688,7 @@ WHERE d.classoid IS NULL AND p1.oid <= 9999 order by 1;
  9016 | pg_advisory_lock
  9017 | pgxc_unlock_for_sp_database
  9999 | pg_test_err_contain_err
-(2282 rows)
+(2287 rows)
 
 -- Check prokind
 select count(*) from pg_proc where prokind = 'a';

@@ -173,6 +173,9 @@ typedef struct knl_g_stat_context {
     MemoryContext UniqueSqlContext;
     HTAB* UniqueSQLHashtbl;
 
+    /* hypothetical index */
+    MemoryContext HypopgContext;
+
     /* user logon/logout stat */
     MemoryContext InstrUserContext;
     HTAB* InstrUserHTAB;
