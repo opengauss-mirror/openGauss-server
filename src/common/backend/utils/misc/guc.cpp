@@ -21524,15 +21524,17 @@ int find_guc_option(
         }
     }
 
-    /* Only the last one will be returned when there are the parameters with the same name in postgresql.conf */
-    if (matchTimes > 0) {
-        if (matchTimes > 1) {
+    /* The line of last one will be recorded when there are parameters with the same name in postgresql.conf */
+    if (matchTimes > 1) {
             ereport(NOTICE, (errmsg("There are %d \'%s\' not commented in \"postgresql.conf\", and only the "
                                 "last one in %dth line will be set and used.",
                 matchTimes,
                 opt_name,
                 (targetLine + 1))));
         }
+
+    /* The line of last one will be returned */
+    if (matchTimes > 0) {
         return targetLine;
     }
 
@@ -21548,7 +21550,7 @@ int find_guc_option(
         }
     }
     
-    /* The last one will straightly be returned */
+    /* The line of last one will be returned */
     if (matchTimes > 0) {
         return targetLine;
     }
