@@ -27,6 +27,23 @@
 
 const int PAGE_QUEUE_SLOT_MULTI_NBUFFERS = 5;
 
+static inline void MemsetPageQueue(char *buffer, Size len)
+{
+    int rc;
+    while (len > 0) {
+        if (len < SECUREC_MEM_MAX_LEN) {
+            rc = memset_s(buffer, len, 0, len);
+            securec_check(rc, "", "");
+            return;
+        } else {
+            rc = memset_s(buffer, SECUREC_MEM_MAX_LEN, 0, SECUREC_MEM_MAX_LEN);
+            securec_check(rc, "", "");
+            len -= SECUREC_MEM_MAX_LEN;
+            buffer += SECUREC_MEM_MAX_LEN;
+        }
+    }
+}
+
 /*
  * Data Structures:
  *		buffers live in a freelist and a lookup data structure.
@@ -95,7 +112,6 @@ void InitBufferPool(void)
         "Checkpoint BufferIds", g_instance.attr.attr_storage.NBuffers * sizeof(CkptSortItem), &found_buf_ckpt);
 
     if (g_instance.attr.attr_storage.enableIncrementalCheckpoint && g_instance.ckpt_cxt_ctl->dirty_page_queue == NULL) {
-        errno_t rc;
         g_instance.ckpt_cxt_ctl->dirty_page_queue_size =
             g_instance.attr.attr_storage.NBuffers * PAGE_QUEUE_SLOT_MULTI_NBUFFERS;
         MemoryContext oldcontext = MemoryContextSwitchTo(g_instance.increCheckPoint_context);
@@ -106,9 +122,7 @@ void InitBufferPool(void)
             ereport(ERROR, (errmodule(MOD_INCRE_CKPT), errmsg("Memory allocation failed.\n")));
         }
 
-        rc = memset_s(g_instance.ckpt_cxt_ctl->dirty_page_queue, queue_mem_size, 0, queue_mem_size);
-        securec_check(rc, "", "");
-
+        MemsetPageQueue((char*)g_instance.ckpt_cxt_ctl->dirty_page_queue, queue_mem_size);
         (void)MemoryContextSwitchTo(oldcontext);
     }
 
