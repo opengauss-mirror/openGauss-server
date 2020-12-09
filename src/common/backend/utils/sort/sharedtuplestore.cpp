@@ -582,3 +582,8 @@ static void sts_filename(char* name, size_t length, SharedTuplestoreAccessor* ac
     error_t rc = snprintf_s(name, length, length - 1, "%s.p%d", accessor->sts->name, participant);
     securec_check_ss(rc, "", "");
 }
+
+uint64 get_header_size(SharedTuplestoreAccessor* accessor)
+{
+    return (uint64)accessor->sts->meta_data_size;
+}

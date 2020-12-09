@@ -4014,8 +4014,9 @@ static void check_report_parameter(report_params* params)
      */
     if (!g_instance.attr.attr_common.PGXCNodeName || g_instance.attr.attr_common.PGXCNodeName[0] == '\0') {
         currentNodeName = "unknown name";
+    } else {
+        currentNodeName = g_instance.attr.attr_common.PGXCNodeName;
     }
-    currentNodeName = g_instance.attr.attr_common.PGXCNodeName;
 
     if ((strncmp(params->report_scope, g_nodeScope, strlen(g_nodeScope)) == 0) &&
         ((params->report_node == NULL) || 
