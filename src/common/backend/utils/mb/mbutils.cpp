@@ -877,7 +877,11 @@ int pg_mbcharcliplen(const char* mbstr, int len, int limit)
     }
     while (len > 0 && *mbstr) {
         l = pg_mblen(mbstr);
-        nch += l;
+        if (DB_IS_CMPT(DB_CMPT_PG)) {
+            nch++;
+        } else {
+            nch += l;
+        }
         if (nch > limit) {
             break;
         }
