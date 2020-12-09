@@ -931,7 +931,7 @@ class ErrorCode():
         'GAUSS_53012': "[GAUSS-53012] : Failed to insert pmk data to "
                        "database.",
         'GAUSS_53013': "[GAUSS-53013] : %s can not be empty.",
-        'GAUSS_53014': "[GAUSS-53014] : %s must be integer.",
+        'GAUSS_53014': "[GAUSS-53014] : %s must be a nonnegative integer.",
         'GAUSS_53015': "[GAUSS-53015] : The threshold Threshold_NG[%d] "
                        "must be greater than Threshold_Warning[%d].",
         'GAUSS_53016': "[GAUSS-53016] : The threshold Threshold_NG[%d] and "
