@@ -68,7 +68,7 @@ select * from parallel_hashjoin_test_a left outer join parallel_hashjoin_test_b 
 
 -- Forbid parallel Hash Right Join or Hash Full Join.
 explain (costs off)select * from parallel_hashjoin_test_a full join parallel_hashjoin_test_b on parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id order by parallel_hashjoin_test_a.id limit 10;
-                                      QUERY PLAN
+                                      QUERY PLAN                                      
 --------------------------------------------------------------------------------------
  Limit
    ->  Sort
@@ -96,6 +96,7 @@ select * from parallel_hashjoin_test_a full join parallel_hashjoin_test_b on par
 (10 rows)
 
 -- parallel increase hash buckets
+set enable_mergejoin=off;
 DROP TABLE IF EXISTS par_hash_incr_bucket_a;
 NOTICE:  table "par_hash_incr_bucket_a" does not exist, skipping
 DROP TABLE IF EXISTS par_hash_incr_bucket_b;
@@ -117,23 +118,23 @@ where par_hash_incr_bucket_c.a = par_hash_incr_bucket_d.b
  and par_hash_incr_bucket_a.c = par_hash_incr_bucket_b.d
  and par_hash_incr_bucket_b.d = par_hash_incr_bucket_c.a
  and par_hash_incr_bucket_b.e %2 =0;
-                                  QUERY PLAN
+                                         QUERY PLAN                                         
 --------------------------------------------------------------------------------------------
  Aggregate
    ->  Hash Join
          Hash Cond: (par_hash_incr_bucket_a.c = par_hash_incr_bucket_d.b)
-         ->  Gather
-               Number of Workers: 2
-               ->  Parallel Hash Join
-                     Hash Cond: (par_hash_incr_bucket_a.c = par_hash_incr_bucket_c.a)
+         ->  Hash Join
+               Hash Cond: (par_hash_incr_bucket_a.c = par_hash_incr_bucket_c.a)
+               ->  Gather
+                     Number of Workers: 2
                      ->  Parallel Hash Join
                            Hash Cond: (par_hash_incr_bucket_a.c = par_hash_incr_bucket_b.d)
                            ->  Parallel Seq Scan on par_hash_incr_bucket_a
                            ->  Parallel Hash
                                  ->  Parallel Seq Scan on par_hash_incr_bucket_b
                                        Filter: ((e % 2) = 0)
-                     ->  Parallel Hash
-                           ->  Parallel Seq Scan on par_hash_incr_bucket_c
+               ->  Hash
+                     ->  Seq Scan on par_hash_incr_bucket_c
          ->  Hash
                ->  Seq Scan on par_hash_incr_bucket_d
 (17 rows)
@@ -143,7 +144,7 @@ where par_hash_incr_bucket_c.a = par_hash_incr_bucket_d.b
  and par_hash_incr_bucket_a.c = par_hash_incr_bucket_b.d
  and par_hash_incr_bucket_b.d = par_hash_incr_bucket_c.a
  and par_hash_incr_bucket_b.e %2 =0;
- count
+ count 
 -------
  50000
 (1 row)
@@ -158,4 +159,5 @@ reset parallel_setup_cost;
 reset min_parallel_table_scan_size;
 reset parallel_tuple_cost;
 reset enable_nestloop;
+reset enable_mergejoin;
 reset force_parallel_mode;

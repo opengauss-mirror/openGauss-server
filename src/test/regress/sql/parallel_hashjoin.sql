@@ -21,6 +21,7 @@ explain (costs off)select * from parallel_hashjoin_test_a full join parallel_has
 select * from parallel_hashjoin_test_a full join parallel_hashjoin_test_b on parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id order by parallel_hashjoin_test_a.id limit 10;
 
 -- parallel increase hash buckets
+set enable_mergejoin=off;
 DROP TABLE IF EXISTS par_hash_incr_bucket_a;
 DROP TABLE IF EXISTS par_hash_incr_bucket_b;
 DROP TABLE IF EXISTS par_hash_incr_bucket_c;
@@ -54,6 +55,7 @@ reset parallel_setup_cost;
 reset min_parallel_table_scan_size;
 reset parallel_tuple_cost;
 reset enable_nestloop;
+reset enable_mergejoin;
 reset force_parallel_mode;
 
 

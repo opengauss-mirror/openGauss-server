@@ -215,7 +215,34 @@ void pq_parse_errornotice(StringInfo msg, ErrorData *edata)
 
         switch (code) {
             case PG_DIAG_SEVERITY:
-                /* ignore, trusting we'll get a nonlocalized version */
+                if (strcmp(value, "DEBUG") == 0) {
+                    /*
+                     * We can't reconstruct the exact DEBUG level, but
+                     * presumably it was >= client_min_messages, so select
+                     * DEBUG1 to ensure we'll pass it on to the client.
+                     */
+                    edata->elevel = DEBUG1;
+                } else if (strcmp(value, "LOG") == 0) {
+                    /*
+                     * It can't be LOG_SERVER_ONLY, or the worker wouldn't
+                     * have sent it to us; so LOG is the correct value.
+                     */
+                    edata->elevel = LOG;
+                } else if (strcmp(value, "INFO") == 0) {
+                    edata->elevel = INFO;
+                } else if (strcmp(value, "NOTICE") == 0) {
+                    edata->elevel = NOTICE;
+                } else if (strcmp(value, "WARNING") == 0) {
+                    edata->elevel = WARNING;
+                } else if (strcmp(value, "ERROR") == 0) {
+                    edata->elevel = ERROR;
+                } else if (strcmp(value, "FATAL") == 0) {
+                    edata->elevel = FATAL;
+                } else if (strcmp(value, "PANIC") == 0) {
+                    edata->elevel = PANIC;
+                } else {
+                    elog(ERROR, "unrecognized error severity: \"%s\"", value);
+                }
                 break;
             case PG_DIAG_INTERNEL_ERRCODE:
                 /* ignore */

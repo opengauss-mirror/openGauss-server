@@ -332,15 +332,15 @@ FROM t_result t;
                              ->  Parallel Index Scan using test_with_rescan_sj_dm_idx on test_with_rescan
                                    Index Cond: (sj_dm < 10)
            ->  Merge Join
-                 Merge Cond: (t1.dm = t2.sj_dm)
-                 ->  Sort
-                       Sort Key: t1.dm
-                       ->  WorkTable Scan on t_result t1
+                 Merge Cond: (t2.sj_dm = t1.dm)
                  ->  Sort
                        Sort Key: t2.sj_dm
                        ->  Gather
                              Number of Workers: 1
                              ->  Parallel Index Scan using test_with_rescan_sj_dm_idx on test_with_rescan t2
+                 ->  Sort
+                       Sort Key: t1.dm
+                       ->  WorkTable Scan on t_result t1
 (20 rows)
 
 WITH recursive t_result AS (
@@ -1078,7 +1078,21 @@ select boo_3.a  from subplan_tb1 boo_3 ) then boo_1.a end ) in
 ---------------------------------------------------------------------------------------------------
  Merge Join
    Output: boo_1.a
-   Merge Cond: ((max(boo.a)) = (CASE WHEN (hashed SubPlan 1) THEN boo_1.a ELSE NULL::integer END))
+   Merge Cond: ((CASE WHEN (hashed SubPlan 1) THEN boo_1.a ELSE NULL::integer END) = (max(boo.a)))
+   ->  Sort
+         Output: boo_1.a, (CASE WHEN (hashed SubPlan 1) THEN boo_1.a ELSE NULL::integer END)
+         Sort Key: (CASE WHEN (hashed SubPlan 1) THEN boo_1.a ELSE NULL::integer END)
+         ->  Gather
+               Output: boo_1.a, CASE WHEN (hashed SubPlan 1) THEN boo_1.a ELSE NULL::integer END
+               Number of Workers: 2
+               ->  Parallel Seq Scan on public.subplan_tb1 boo_1
+                     Output: boo_1.a
+               SubPlan 1
+                 ->  Gather
+                       Output: boo_3.a
+                       Number of Workers: 2
+                       ->  Parallel Seq Scan on public.subplan_tb1 boo_3
+                             Output: boo_3.a
    ->  Sort
          Output: (max(boo.a))
          Sort Key: (max(boo.a))
@@ -1096,20 +1110,6 @@ select boo_3.a  from subplan_tb1 boo_3 ) then boo_1.a end ) in
                      Number of Workers: 2
                      ->  Parallel Seq Scan on public.subplan_tb1 boo_2
                            Output: boo_2.a, boo_2.b
-   ->  Sort
-         Output: boo_1.a, (CASE WHEN (hashed SubPlan 1) THEN boo_1.a ELSE NULL::integer END)
-         Sort Key: (CASE WHEN (hashed SubPlan 1) THEN boo_1.a ELSE NULL::integer END)
-         ->  Gather
-               Output: boo_1.a, CASE WHEN (hashed SubPlan 1) THEN boo_1.a ELSE NULL::integer END
-               Number of Workers: 2
-               ->  Parallel Seq Scan on public.subplan_tb1 boo_1
-                     Output: boo_1.a
-               SubPlan 1
-                 ->  Gather
-                       Output: boo_3.a
-                       Number of Workers: 2
-                       ->  Parallel Seq Scan on public.subplan_tb1 boo_3
-                             Output: boo_3.a
 (34 rows)
 
 --clean up
@@ -1163,6 +1163,45 @@ explain (costs off, analyse on) select schemaname, tablename from pg_tables wher
 --? Total runtime: [0-9]*\.[0-9]*\.\.[0-9]*\.[0-9]* ms
 (10 rows)
 
+--worker send NOTICE message to leader
+CREATE FUNCTION f_parallel_notice (text)
+       RETURNS bool LANGUAGE 'plpgsql' COST 0.0000001
+       AS 'BEGIN RAISE NOTICE ''notice => %'', $1; RETURN true; END';
+CREATE TABLE notice_table(a int);
+insert into notice_table values(generate_series(1,5));
+--let worker do the work
+set parallel_leader_participation=off;
+explain select * from notice_table where f_parallel_notice(a);
+                                  QUERY PLAN                                  
+------------------------------------------------------------------------------
+ Gather  (cost=0.00..20.02 rows=801 width=4)
+   Number of Workers: 2
+   ->  Parallel Seq Scan on notice_table  (cost=0.00..20.01 rows=400 width=4)
+         Filter: f_parallel_notice((a)::text)
+(4 rows)
+
+select * from notice_table where f_parallel_notice(a);
+NOTICE:  notice => 1
+CONTEXT:  parallel worker
+NOTICE:  notice => 2
+CONTEXT:  parallel worker
+NOTICE:  notice => 3
+CONTEXT:  parallel worker
+NOTICE:  notice => 4
+CONTEXT:  parallel worker
+NOTICE:  notice => 5
+CONTEXT:  parallel worker
+ a 
+---
+ 1
+ 2
+ 3
+ 4
+ 5
+(5 rows)
+
+drop table notice_table;
+drop function f_parallel_notice;
 --clean up
 reset force_parallel_mode;
 reset parallel_setup_cost;
