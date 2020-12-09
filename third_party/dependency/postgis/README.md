@@ -60,12 +60,12 @@ For their installation, you could freely  choose to install them by yourself, an
 
    https://opengauss.obs.cn-south-1.myhuaweicloud.com/dependency/postgis-xc-master-2020-09-17.tar.gz
 
-2. copy it to *$GAUSSHOME/thirdparty/dependency/postgis/ path, unzip the tar.gz* and rename to **postgis-xc**
+2. copy it to *$GAUSSHOME/third_party/dependency/postgis/ path, unzip the tar.gz* and rename to **postgis-xc**
 3. the tools should be installed under the *$GAUSSHOME/pggis_tools* dir :
 
 ```
 #install geos
-cd $GAUSSHOME/thirdparty/dependency/postgis/postgis-xc/geos-3.6.2
+cd $GAUSSHOME/third_party/dependency/postgis/postgis-xc/geos-3.6.2
 chmod +x ./configure
 ./configure --prefix=$GAUSSHOME/pggis_tools/geos
 make -sj
@@ -76,6 +76,15 @@ cd $GAUSSHOME/postgis-xc/proj-4.9.2
 chmod +x ./configure
 ./configure --prefix=$GAUSSHOME/pggis_tools/proj
 make –sj
+make install -sj
+
+#install Gdal
+cd $GAUSSHOME/third_party/dependency/postgis/postgis-xc/gdal-1.11.0
+chmod +x ./configure
+chmod +x ./install-sh
+【NOTE : please add "--build=aarch64-unknown-linux-gnu" cofigure option if your system is openeuler_aarch64】
+./configure --prefix=$toolhome/gdal --with-xml2=$toolhome/libxml2/bin/xml2-config --with-geos=$toolhome/geos/bin/geos-config --with-static-proj4=$toolhome/proj CFLAGS='-O2 -fpermissive -pthread'
+make -sj || make -sj
 make install -sj
 
 #install json
@@ -98,7 +107,7 @@ make install -sj
 ```
 export toolhome=$GAUSSHOME/pggis_tools
 cd $CODE_BASE
-patch -p1 < thirdparty/dependency/postgis/postgis.patch
+patch -p1 < third_party/dependency/postgis/postgis.patch
 cd $PGGIS_DIR/postgis-xc/postgis-2.4.2
 
 #complile
