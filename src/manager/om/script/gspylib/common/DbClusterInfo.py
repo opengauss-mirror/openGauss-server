@@ -1934,6 +1934,8 @@ class dbClusterInfo():
                         if statusMap[dbNode.name] != 'Success' or output.find(
                                 "failed to connect") >= 0:
                             continue
+                        else:
+                            output='\n'.join(output.split('\n')[1:])
                     else:
                         cmd = "gsql -m -d postgres -p %s -c \"%s\"" % (
                             dnInst.port, secondSql)
