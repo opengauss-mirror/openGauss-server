@@ -2706,7 +2706,7 @@ select count(*) from pg_proc where prokind = 'w';
 select count(*) from pg_proc where prokind = 'f';
  count 
 -------
-  3156
+  3161
 (1 row)
 
 select count(*) from pg_proc where prokind = 'p';
