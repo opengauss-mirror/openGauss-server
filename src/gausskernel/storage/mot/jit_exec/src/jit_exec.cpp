@@ -203,10 +203,11 @@ static JitContext* GenerateJitContext(Query* query, const char* queryString, Jit
     JitContext* sourceJitContext = nullptr;
 
     uint64_t startTime = GetSysClock();
-    if (JitCanInitThreadCodeGen() && !IsMotPseudoCodegenForced()) {
+    if (g_instance.mot_cxt.jitExecMode == JIT_EXEC_MODE_LLVM) {
         MOT_LOG_TRACE("Generating LLVM JIT context for query: %s", queryString);
         sourceJitContext = JitCodegenLlvmQuery(query, queryString, jitPlan);
     } else {
+        MOT_ASSERT(g_instance.mot_cxt.jitExecMode == JIT_EXEC_MODE_TVM);
         MOT_LOG_TRACE("Generating TVM JIT context for query: %s", queryString);
         sourceJitContext = JitCodegenTvmQuery(query, queryString, jitPlan);
     }
@@ -497,16 +498,18 @@ extern bool JitInitialize()
     if (JitCanInitThreadCodeGen()) {
         if (IsMotPseudoCodegenForced()) {
             MOT_LOG_INFO("Forcing TVM on LLVM natively supported platform by user configuration");
+            g_instance.mot_cxt.jitExecMode = JIT_EXEC_MODE_TVM;
         } else {
             PrintNativeLlvmStartupInfo();
+            g_instance.mot_cxt.jitExecMode = JIT_EXEC_MODE_LLVM;
         }
     } else {
         if (IsMotPseudoCodegenForced()) {
             MOT_LOG_INFO("Forcing TVM on LLVM natively unsupported platform by user configuration");
         } else {
             MOT_LOG_WARN("Defaulting to TVM on LLVM natively unsupported platform");
-            MOT::GetGlobalConfiguration().m_forcePseudoCodegen = true;
         }
+        g_instance.mot_cxt.jitExecMode = JIT_EXEC_MODE_TVM;
     }
 
     enum InitState { JIT_INIT, JIT_CTX_POOL_INIT, JIT_SRC_POOL_INIT, JIT_INIT_DONE } initState = JIT_INIT;

@@ -71,14 +71,24 @@ bool RecoveryManager::RecoverDbStart()
     MOT_LOG_INFO("Starting MOT recovery");
 
     if (m_recoverFromCkptDone) {
-        SetLsn(m_lastReplayLsn);
+        /*
+         * This is switchover case.
+         * In case of CASCADE switchover (CASCADE node switchover with STANDBY node), we need to
+         * set the correct m_lsn to make sure that we skip any redo which are already replayed.
+         * After switchover, envelope will start sync from the previous ckpt position.
+         * In MOT engine, we should skip any redo before m_lastReplayLsn.
+         */
+        if (m_lsn < m_lastReplayLsn) {
+            m_lsn = m_lastReplayLsn;
+        }
         return true;
     }
 
     if (!m_checkpointRecovery.Recover()) {
         return false;
     }
-    SetLsn(m_checkpointRecovery.GetLsn());
+
+    m_lsn = m_checkpointRecovery.GetLsn();
     m_recoverFromCkptDone = true;
     return true;
 }

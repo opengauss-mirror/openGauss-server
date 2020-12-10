@@ -44,7 +44,7 @@ DECLARE_LOGGER(JitLlvm, JitExec);
 using namespace dorado;
 
 /** @brief Checks whether the current platforms natively supports LLVM. */
-extern bool JitCanInitThreadCodeGen()
+bool JitCanInitThreadCodeGen()
 {
     // Make sure that system type is not generic.
     llvm::StringRef hostCPUName = llvm::sys::getHostCPUName();
@@ -64,7 +64,7 @@ extern bool JitCanInitThreadCodeGen()
     if (IS_PGXC_DATANODE && IsMotCodegenEnabled()) {
         canInit = GlobalCodeGenEnvironmentSuccess;
         if (!canInit) {
-            MOT_LOG_WARN("SSE4.2 is not supported, native LLVM will not be used.");
+            MOT_LOG_WARN("LLVM environment is not initialized, native LLVM will not be used.");
         }
     }
     return canInit;
@@ -74,13 +74,7 @@ extern bool JitCanInitThreadCodeGen()
 /** @brief Prepares for code generation. */
 GsCodeGen* SetupCodegenEnv()
 {
-    // verify that native LLVM is supported
-    if (!t_thrd.mot_cxt.init_codegen_once) {
-        t_thrd.mot_cxt.init_codegen_once = true;
-        if (!JitCanInitThreadCodeGen()) {
-            return nullptr;
-        }
-    }
+    MOT_ASSERT(g_instance.mot_cxt.jitExecMode == JIT_EXEC_MODE_LLVM);
 
     // create GsCodeGen object for LLVM code generation
     GsCodeGen* code_gen = New(g_instance.instance_context) GsCodeGen();

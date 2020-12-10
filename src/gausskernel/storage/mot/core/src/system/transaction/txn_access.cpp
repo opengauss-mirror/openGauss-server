@@ -536,11 +536,7 @@ Row* TxnAccess::AddInsertToLocalAccess(Sentinel* org_sentinel, Row* org_row, RC&
     auto search = m_rowsSet->find(org_sentinel);
     if (likely(search == m_rowsSet->end())) {
         if (isUpgrade == true) {
-            if (org_sentinel->IsPrimaryIndex()) {
-                curr_access = GetNewRowAccess(org_sentinel->GetData(), INS, rc);
-            } else {
-                curr_access = GetNewRowAccess(org_row, INS, rc);
-            }
+            curr_access = GetNewRowAccess(org_sentinel->GetData(), INS, rc);
             // Check if draft is valid
             if (curr_access == nullptr) {
                 return nullptr;

@@ -340,6 +340,11 @@ static void knl_g_bgworker_init(knl_g_bgworker_context* bgworker_cxt)
     bgworker_cxt->have_crashed_worker = false;
 }
 
+static void knl_g_mot_init(knl_g_mot_context* mot_cxt)
+{
+    mot_cxt->jitExecMode = JitExec::JIT_EXEC_MODE_INVALID;
+}
+
 void knl_instance_init()
 {
     g_instance.binaryupgrade = false;
@@ -388,6 +393,7 @@ void knl_instance_init()
     knl_g_dw_init(&g_instance.dw_cxt);
     knl_g_xlog_init(&g_instance.xlog_cxt);
     knl_g_numa_init(&g_instance.numa_cxt);
+    knl_g_mot_init(&g_instance.mot_cxt);
     knl_g_bgworker_init(&g_instance.bgworker_cxt);
 
     MemoryContextSwitchTo(old_cxt);

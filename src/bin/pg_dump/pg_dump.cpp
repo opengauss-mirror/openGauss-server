@@ -13802,6 +13802,22 @@ static void dumpForeignDataWrapper(Archive* fout, FdwInfo* fdwinfo)
     destroyPQExpBuffer(labelq);
 }
 
+static inline bool IsDefaultForeignServer(const char* serverName)
+{
+    /*
+     * gsmpp_server, gsmpp_errorinfo_server, mot_server are created by default at the time of initdb.
+     */
+    if ((0 == strncmp(serverName, "gsmpp_server", strlen("gsmpp_server") + 1)) ||
+        (0 == strncmp(serverName, "\"gsmpp_server\"", strlen("\"gsmpp_server\"") + 1)) ||
+        (0 == strncmp(serverName, "gsmpp_errorinfo_server", strlen("gsmpp_errorinfo_server") + 1)) ||
+        (0 == strncmp(serverName, "\"gsmpp_errorinfo_server\"", strlen("\"gsmpp_errorinfo_server\"") + 1)) ||
+        (0 == strncmp(serverName, "mot_server", strlen("mot_server") + 1)) ||
+        (0 == strncmp(serverName, "\"mot_server\"", strlen("\"mot_server\"") + 1))) {
+        return true;
+    }
+    return false;
+}
+
 /*
  * dumpForeignServer
  *	  write out a foreign server definition
@@ -13823,17 +13839,13 @@ static void dumpForeignServer(Archive* fout, ForeignServerInfo* srvinfo)
 
     if (isExecUserNotObjectOwner(fout, srvinfo->rolname))
         return;
+
     /*
      * gsmpp_server, gsmpp_errorinfo_server, mot_server are created by default at the time of initdb,
-     * so. skip it.
+     * so skip it.
      */
     qsrvname = gs_strdup(fmtId(srvinfo->dobj.name));
-    if ((0 == strncmp(qsrvname, "gsmpp_server", strlen("gsmpp_server") + 1)) ||
-        (0 == strncmp(qsrvname, "\"gsmpp_server\"", strlen("\"gsmpp_server\"") + 1)) ||
-        (0 == strncmp(qsrvname, "gsmpp_errorinfo_server", strlen("gsmpp_errorinfo_server") + 1)) ||
-        (0 == strncmp(qsrvname, "\"gsmpp_errorinfo_server\"", strlen("\"gsmpp_errorinfo_server\"") + 1)) ||
-        (0 == strncmp(qsrvname, "mot_server", strlen("mot_server") + 1)) ||
-        (0 == strncmp(qsrvname, "\"mot_server\"", strlen("\"mot_server\"") + 1))) {
+    if (IsDefaultForeignServer(qsrvname)) {
         free(qsrvname);
         qsrvname = NULL;
         return;

@@ -66,7 +66,7 @@ typedef int (*JitFunc)(MOT::Table* table, MOT::Index* index, MOT::Key* key, MOT:
 void PrintNativeLlvmStartupInfo();
 
 /** @brief Checks whether the current platforms natively supports LLVM. */
-extern bool JitCanInitThreadCodeGen();
+bool JitCanInitThreadCodeGen();
 
 /** @brief Allocates a GsCodeGen object. */
 dorado::GsCodeGen* SetupCodegenEnv();
