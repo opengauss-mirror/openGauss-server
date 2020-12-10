@@ -1,0 +1,60 @@
+# -----------------------------
+# X-Tuner configuration file
+# -----------------------------
+#
+# This file consists of lines of the form:
+#
+#   name = value
+#
+# Comments are introduced with "#" anywhere on a line.
+
+#------------------------------------------------------------------------------
+# Main Configurations
+#------------------------------------------------------------------------------
+[Master]
+logfile = log/opengauss_tuner.log
+output_tuning_result = tuned_knobs.json
+verbose = on
+recorder_file = log/recorder.log
+tune_strategy = auto  # rl, gop or auto
+drop_cache = on  # You must modify the permission of the login user in the /etc/sudoers file and grant the NOPASSWD permission to the user.
+used_mem_penalty_term = 1e-9  # Prevent taking up more memory.
+
+
+#------------------------------------------------------------------------------
+# Reinforcement Learning
+#------------------------------------------------------------------------------
+[Reinforcement Learning]
+rl_algorithm = ddpg  # ddpg, dqn. Not support dqn yet.
+rl_model_path = model/rl.model
+rl_steps = 100
+max_episode_steps = 10
+test_episode = 1
+
+#------------------------------------------------------------------------------
+# Global Optimization Algorithm
+#------------------------------------------------------------------------------
+[Gloabal Optimization Algorithm]
+gop_algorithm = bayes  # bayes, pso
+max_iterations = 100
+particle_nums = 3  # A larger value indicates higher accuracy but slower speed.
+
+#------------------------------------------------------------------------------
+# Benchmark Configurations
+#------------------------------------------------------------------------------
+[Benchmark]
+# Some examples of benchmark script implementation are provided in the benchmark directory.
+# Implement the benchmark script based on the specified interface.
+benchmark_script = tpch
+# These parameters are used to replace the path and cmd in the benchmark script.
+# The path and cmd variables in the benchmark script are examples. You can set the parameters
+# by referring to the benchmark script file in the benchmark directory.
+benchmark_path =  # If this parameter is blank, the default path in the benchmark script is used.
+benchmark_cmd =   # If this parameter is blank, the default cmd in the benchmark script is used.
+
+#------------------------------------------------------------------------------
+# Tuning Knobs Configurations
+#------------------------------------------------------------------------------
+[Knobs]
+scenario = auto  # ap, tp, htap or auto
+tuning_list =  # template: share/knobs.json.template

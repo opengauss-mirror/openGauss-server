@@ -13,68 +13,64 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details.
 """
 
+import logging
 import re
 
-from ssh import ExecutorFactory
-from exceptions import ExecutionError
+from tuner.character import OpenGaussMetric
+from tuner.exceptions import DBStatusError, SecurityError, ExecutionError, OptionError
+from tuner.executor import ExecutorFactory
+from tuner.knob import RecommendedKnobs
+from tuner.utils import clip
+from tuner.utils import construct_header
 
 
-def check_validity(name):
-    PATH_CHECK_LIST = [" ","|",";","&","$","<",">","`","\\","'","\"","{","}","(",")","[","]","~","*","?","!","\n"]
-    if(name.strip() == ""):
+def check_special_character(phrase):
+    """
+    This function checks whether a phrase contains invalid characters.
+    This function is used for security verification to prevent potential security risks.
+
+    :param phrase: String type. Phrase to be checked
+    :raise: Raise SecurityError if security risks exists.
+    """
+    check_list = (' ', '|', ';', '&', '$', '<', '>', '`',
+                  '\\', '\'', '"', '{', '}', '(', ')', '[',
+                  ']', '~', '*', '?', '!', '\n')
+    if phrase.strip() == '':
         return
-    for rac in PATH_CHECK_LIST:
-        flag = name.find(rac)
-        if flag >= 0:
-            raise ExecutionError
-        else:
-            continue
+
+    for char in check_list:
+        if phrase.find(char) >= 0:
+            raise SecurityError
 
 
-class Knob(object):
-    def __init__(self, name, knob):
-        if not isinstance(knob, dict):
-            raise AssertionError
-        self.name = name
-        self.type = knob.get('type')
-        self.min = float(knob.get('min'))
-        self.max = float(knob.get('max'))
-        self.scale = self.max - self.min
-        self.default = knob.get('default')
-        self.reboot = knob.get('reboot', False)
-
-        if self.type == 'bool':
-            self.min = 0
-            self.max = 1
-
-    def to_string(self, val):
-        rv = val * self.scale + float(self.min) if self.type in ['int', 'float'] else val
-        if self.type == 'int':
-            rv = str(int(round(rv)))
-        elif self.type == 'bool':
-            rv = 'on' if rv >= .5 else 'off'
-        elif self.type == 'float':
-            rv = str(round(rv, 2))
-        else:
-            raise ValueError('bad type: ' + self.type)
-
-        return rv
-
-    def to_numeric(self, val):
-        if self.type in ['float', 'int']:
-            rv = (float(val) - float(self.min)) / self.scale
-        elif self.type == 'bool':
-            rv = 0. if val == 'off' else 1.
-        else:
-            raise ValueError('bad type: ' + self.type)
-
-        return rv
+def new_db_agent(db_info):
+    return DB_Agent(db_name=db_info['db_name'],
+                    db_port=db_info['port'],
+                    db_user=db_info['db_user'],
+                    db_user_pwd=db_info['db_user_pwd'],
+                    host=db_info['host'],
+                    host_user=db_info['host_user'],
+                    host_user_pwd=db_info['host_user_pwd'])
 
 
-class DB_Agent(object):
+class DB_Agent:
     def __init__(self, host, host_user, host_user_pwd,
                  db_user, db_user_pwd, db_name, db_port, ssh_port=22):
-        # set database authorization information:
+        """
+        This class is used to abstract the database instance and interact with the database.
+        All operations such as obtaining database information and setting knobs
+        need to be implemented through this class.
+
+        :param host: String type, meaning the same as variable name.
+        :param host_user: Same as above.
+        :param host_user_pwd: Same as above.
+        :param db_user: Same as above.
+        :param db_user_pwd: Same as above.
+        :param db_name: Same as above.
+        :param db_port: Int type, meaning the same as variable name.
+        :param ssh_port: Same as above.
+        """
+        # Set database authorization information:
         self.ssh = ExecutorFactory() \
             .set_host(host) \
             .set_user(host_user) \
@@ -82,62 +78,113 @@ class DB_Agent(object):
             .set_port(ssh_port) \
             .get_executor()
 
+        self.host_user = host_user
         self.db_user = host_user if not db_user else db_user
         self.db_user_pwd = db_user_pwd
         self.db_name = db_name
         self.db_port = db_port
-
-        # store database instance pid and data_path:
-        _, self.data_path = self.exec_statement(
-            'SELECT datapath FROM pg_node_env;'
-        )
-
-        # initialize knobs, firstly we initialize some variables:
+        self.data_path = None
         self.knobs = None
-        self.orderly_knob_list = None
+        self.ordered_knob_list = None
 
-        # set connection session timeout
+        self.check_connection_params()
+
+        # Set a connection session as unlimited.
         self.set_knob_value("statement_timeout", 0)
 
-    def set_tuning_knobs(self, knob_dict):
-        if len(knob_dict) <= 0 or not isinstance(knob_dict, dict):
-            raise AssertionError
+        # Initialize database metrics.
+        self.metric = OpenGaussMetric(self)
 
-        self.knobs = {}
-        for k, v in knob_dict.items():
-            self.knobs[k] = Knob(k, v)
-        self.orderly_knob_list = sorted(self.knobs.keys())
-        self._init_knobs()
+    def check_connection_params(self):
+        # Check whether the binary files of the database can be located through environment variables.
+        try:
+            self.exec_command_on_host("which gsql")
+            self.exec_command_on_host("which gaussdb")
+            self.exec_command_on_host("which gs_guc")
+            self.exec_command_on_host("which gs_ctl")
+        except ExecutionError as e:
+            logging.exception("An exception occurred while checking connection parameters: %s", e)
+            raise OptionError("The parameters about SSH login user are incorrect. Please check.\n"
+                              "Hint: The binary file path of the database cannot be obtained after the login."
+                              "Please ensure that the paths of tools such as gsql and gs_ctl are added to environment "
+                              "variables ($PATH).") from None
 
-    @staticmethod
-    def generate_chosen_clause(knobs):
-        seq = ['(']
-        for i, knob in enumerate(knobs):
-            check_validity(knob)
-            if i > 0:
-                seq.append(',')
-            seq.append('\'')
-            seq.append(knob)
-            seq.append('\'')
-        seq.append(')')
-        return ''.join(seq)
+        # Check whether the third-party libraries can be properly loaded.
+        try:
+            self.exec_command_on_host("gaussdb --version")
+            self.exec_command_on_host("gsql --version")
+        except ExecutionError as e:
+            logging.exception("An exception occurred while checking connection parameters: %s", e)
+            raise DBStatusError("The database environment is incorrectly configured. "
+                                "login to the database host as the user and check whether "
+                                "the database environment can be used properly. "
+                                "For example, check environment variables $LD_LIBRARY_PATH.") from None
 
-    def _init_knobs(self):
-        sql = 'SELECT name, boot_val, min_val, max_val FROM pg_settings WHERE name IN {}'.format(
-            self.generate_chosen_clause(self.orderly_knob_list)
+        # Check whether the database is started.
+        # And check whether the user name and password are correct.
+        try:
+            if not self.is_alive():
+                raise DBStatusError("Failed to login to the database. "
+                                    "Check whether the database is started. ")
+
+            # Get database instance pid and data_path.
+            _, self.data_path = self.exec_statement(
+                "SELECT datapath FROM pg_node_env;"
+            )
+        except ExecutionError as e:
+            logging.exception("An exception occurred while checking connection parameters: %s", e)
+            raise DBStatusError("Failed to login to the database. "
+                                "Check whether the user name or password is correct, "
+                                "and whether the database information passed to the X-Tuner is correct.") from None
+
+        # Check whether the current user has sufficient permission to perform tuning.
+        try:
+            self.exec_statement("select * from pg_user;")
+        except ExecutionError as e:
+            logging.exception("An exception occurred while checking connection parameters: %s", e)
+            raise DBStatusError("The current database user may not have the permission to tune best_knobs. "
+                                "Please assign the administrator permission temporarily so that you can "
+                                "obtain more information from the database.") from None
+
+    def set_tuning_knobs(self, knobs):
+        if not isinstance(knobs, RecommendedKnobs):
+            raise TypeError
+
+        self.knobs = knobs
+        self.ordered_knob_list = self.knobs.names()
+
+        # Check whether the knob value exceeds the upper limit and lower limit.
+        wherein_list = list()
+        for knob in self.ordered_knob_list:
+            check_special_character(knob)
+            wherein_list.append("'%s'" % knob)
+
+        sql = "SELECT name, boot_val, min_val, max_val FROM pg_settings WHERE name IN ({})".format(
+            ','.join(wherein_list)
         )
 
-        stdout = self.exec_statement(sql)
-        stdout = stdout[4:]
+        stdout = self.exec_statement(sql)[4:]
         result = [[stdout[4 * i], stdout[4 * i + 1], stdout[4 * i + 2], stdout[4 * i + 3]] for i in
                   range(len(stdout) // 4)]
+
         for name, boot_val, min_val, max_val in result:
             knob = self.knobs[name]
-            knob.min = min_val if not knob.min else knob.min
-            knob.max = max_val if not knob.max else knob.max
-            knob.default = boot_val if not knob.default else knob.default
+            knob.min = min_val if not knob.min else max(knob.min, min_val, key=lambda x: float(x))
+            knob.max = max_val if not knob.max else min(knob.max, max_val, key=lambda x: float(x))
+            knob.default = boot_val if not knob.default else clip(knob.default, knob.min, knob.max)
 
-    def exec_statement(self, sql):
+    def exec_statement(self, sql, timeout=None):
+        """
+        Connect to the remote database host through SSH,
+        run the `gsql` command to execute SQL statements, and parse the execution result.
+
+        p.s This is why we want users who log in to the Linux host
+        to have environment variables that can find `gsql` commands.
+
+        :param sql: SQL statement
+        :param timeout: Int type. Unit second.
+        :return: The parsed result from SQL statement execution.
+        """
         command = "gsql -p {db_port} -U {db_user} -d {db_name} -W {db_user_pwd} -c \"{sql}\";".format(
             db_port=self.db_port,
             db_user=self.db_user,
@@ -145,114 +192,138 @@ class DB_Agent(object):
             db_user_pwd=self.db_user_pwd,
             sql=sql
         )
-        stdout = self.exec_shell(command)
+
+        stdout, stderr = self.ssh.exec_command_sync(command, timeout)
+        if len(stderr) > 0 or self.ssh.exit_status != 0:
+            logging.error("Cannot execute SQL statement: %s. Error message: %s.", sql, stderr)
+            raise ExecutionError("Cannot execute SQL statement: %s." % sql)
+
+        # Parse the result.
         result = re.sub(r'[-+]{2,}', r'', stdout)  # remove '----+----'
         result = re.sub(r'\|', r'', result)  # remove '|'
-        result = re.sub(r'\(\d*[\s,]*row[s]*?\)', r'', result)  # remove '(1 row)'
+        result = re.sub(r'\(\d*[\s,]*row[s]*?\)', r'', result)  # remove '(n rows)'
         result = re.sub(r'\n', r' ', result)
         result = result.strip()
         result = re.split(r'\s+', result)
         return result
 
-    def check_alive(self, timeout=1):
-        cmd = "gsql -p {db_port} -U {db_user} -d {db_name} -W {db_user_pwd} -c \"{sql}\";".format(
-            db_port=self.db_port,
-            db_user=self.db_user,
-            db_name=self.db_name,
-            db_user_pwd=self.db_user_pwd,
-            sql='select now();'
-        )
-        stdout, stderr = self.ssh.exec_command_sync(cmd, blocking_fd=1, timeout=timeout)
-        return len(stderr) == 0 and len(stdout) > 0
+    def is_alive(self):
+        """
+        Check whether the database is running.
 
-    def exec_shell(self, cmd, timeout=None):
-        stdout, stderr = self.ssh.exec_command_sync(cmd, blocking_fd=1, timeout=timeout)
-        if len(stderr) > 0:
-            raise ExecutionError(stderr)
+        :return: True means running and vice versa.
+        """
+        try:
+            stdout = self.exec_command_on_host("ps -ux | grep gaussdb | wc -l")
+            at_least_count = 1  # Includes one 'grep gaussdb' command.
+            if int(stdout.strip()) <= at_least_count:
+                return False
+        except ExecutionError:
+            return False
+
+        sql = "SELECT now();"
+        try:
+            self.exec_statement(sql, timeout=1)
+            return True
+        except ExecutionError:
+            return False
+
+    def exec_command_on_host(self, cmd, timeout=None, ignore_status_code=False):
+        """
+        The SSH connection is reused to execute shell commands on the Linux host.
+        This method can be used to restart the database, collect database running environment information,
+        and set database knobs.
+
+        :param cmd: Shell command.
+        :param timeout: Int type. Unit second.
+        :param ignore_status_code: If the exit status code returned after the command is executed is unequal to 0,
+                                    determine whether to ignore it. By default, it is not ignored, which may throw an
+                                    exception, and some operations are insignificant or even have to be ignored.
+        :return: Returns the standard output stream result after the command is executed.
+        :raise: Raise ExecutionError if found error.
+        """
+        stdout, stderr = self.ssh.exec_command_sync(cmd, timeout=timeout)
+
+        if len(stderr) > 0 or self.ssh.exit_status != 0:
+            error_msg = "An error occurred when executing the command '%s'. " \
+                        "The error information is: %s, the output information is %s." % (cmd, stderr, stdout)
+            if ignore_status_code and not (len(stderr) > 0 and self.ssh.exit_status != 0):
+                logging.warning(error_msg)
+            else:
+                raise ExecutionError(error_msg)
         return stdout
 
     def get_knob_normalized_vector(self):
-        nv = []
-        for name in self.orderly_knob_list:
+        nv = list()
+        for name in self.ordered_knob_list:
             val = self.get_knob_value(name)
             nv.append(self.knobs[name].to_numeric(val))
         return nv
 
     def set_knob_normalized_vector(self, nv):
-        reboot = False
+        restart = False
         for i, val in enumerate(nv):
-            name = self.orderly_knob_list[i]
+            name = self.ordered_knob_list[i]
             knob = self.knobs[name]
             self.set_knob_value(name, knob.to_string(val))
-            reboot = True if knob.reboot else reboot
+            restart = True if knob.restart else restart
 
-        if reboot:
-            self.reboot()
+        if restart:
+            self.restart()
 
     def get_knob_value(self, name):
-        check_validity(name)
+        check_special_character(name)
         sql = "SELECT setting FROM pg_settings WHERE name = '{}';".format(name)
         _, value = self.exec_statement(sql)
         return value
 
     def set_knob_value(self, name, value):
-
-        print("change knob: [%s=%s]" % (name, value))
-        self.exec_shell("gs_guc reload -c \"%s=%s\" -D %s" %
-                        (name, value, self.data_path))
+        logging.info("change knob: [%s=%s]", name, value)
+        try:
+            self.exec_command_on_host("gs_guc reload -c \"%s=%s\" -D %s" % (name, value, self.data_path))
+        except ExecutionError as e:
+            if str(e).find('Success to perform gs_guc!') < 0:
+                logging.warning(e)
 
     def reset_state(self):
-        self.exec_shell(
-            'gsql {database} -p {port} -c "select pg_stat_reset();"'
-                .format(database=self.db_name,
-                        port=self.db_port)
-        )
-
-    def get_used_mem(self):
-        # we make total used memory as regular.
-        # main mem: max_connections * (work_mem + temp_buffers) + shared_buffers + wal_buffers
-        sql = "select " \
-              "setting " \
-              "from pg_settings " \
-              "where name in ('max_connections', 'work_mem', 'temp_buffers', 'shared_buffers', 'wal_buffers') order by name;"
-        res = self.exec_statement(sql)
-        res.pop(0)
-        res = map(int, res)
-        max_conn, s_buff, t_buff, w_buff, work_mem = res
-        total_mem = max_conn * (work_mem / 64 + t_buff / 128) + s_buff / 64 + w_buff / 4096  # unit: MB
-        return total_mem
-
-    def get_internal_state(self):
-        # you could define used internal state here.
-        # this is a demo, cache_hit_rate, we will use it while tuning shared_buffer.
-        cache_hit_rate_sql = "select blks_hit / (blks_read + blks_hit + 0.001) " \
-                             "from pg_stat_database " \
-                             "where datname = '{}';".format(self.db_name)
-        _, cache_hit_rate = self.exec_statement(cache_hit_rate_sql)
-        cache_hit_rate = float(cache_hit_rate)
-
-        self.reset_state()  # reset
-        return [cache_hit_rate]
+        self.metric.reset()
 
     def set_default_knob(self):
-        reboot = False
+        restart = False
 
         for knob in self.knobs:
             self.set_knob_value(knob.name, knob.default)
-            reboot = True if knob.reboot else reboot
+            restart = True if knob.restart else restart
 
-        self.reboot()
+        self.restart()
 
-    def reboot(self):
-        print("*" * 50)
-        print("reboot database..")
+    def restart(self):
+        logging.info(construct_header("Restarting database.", padding="*"))
+        self.exec_statement("checkpoint;")  # Prevent the database from being shut down for a long time.
+        self.exec_command_on_host("gs_ctl stop -D {data_path}".format(data_path=self.data_path),
+                                  ignore_status_code=True)
+        self.exec_command_on_host("gs_ctl start -D {data_path}".format(data_path=self.data_path),
+                                  ignore_status_code=True)
 
-        self.exec_shell('gs_ctl restart -D {data_path}'.format(data_path=self.data_path))
-
-        if not self.check_alive(1):
-            print('database reboot fail, exit..')
-            exit(-1)
+        if self.is_alive():
+            logging.info("The database restarted successfully.")
         else:
-            print('database reboot successfully')
+            logging.fatal("The database restarted failed.")
+            raise DBStatusError("The database restarted failed.")
 
-        print("*" * 50)
+        logging.info(construct_header())
+
+    def drop_cache(self):
+        try:
+            # Check whether frequent input password is required.
+            if self.exec_command_on_host('sudo -n -l -U %s' % self.host_user).find('NOPASSWD') < 0:
+                logging.warning("Hint: You must add this line '%s ALL=(ALL) NOPASSWD: ALL' to the file '/etc/sudoers' "
+                                "with administrator permission.", self.host_user)
+                return False
+
+            self.exec_command_on_host('sync')
+            self.exec_command_on_host('sudo bash -c "echo 1 > /proc/sys/vm/drop_caches"')
+            return True
+        except Exception as e:
+            logging.warning("Cannot drop cache. %s.", e)
+            return False

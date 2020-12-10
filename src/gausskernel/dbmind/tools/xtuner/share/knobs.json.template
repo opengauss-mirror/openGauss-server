@@ -1,0 +1,28 @@
+{
+  "work_mem": {
+    "default": 65536,
+    "min": 65536,
+    "max": 655360,
+    "type": "int",
+    "restart": false
+  },
+  "shared_buffers": {
+    "default": 32000,
+    "min": 16000,
+    "max": 64000,
+    "type": "int",
+    "restart": true
+  },
+  "random_page_cost": {
+    "default": 4.0,
+    "min": 1.0,
+    "max": 4.0,
+    "type": "float",
+    "restart": false
+  },
+  "enable_nestloop": {
+    "default": true,
+    "type": "bool",
+    "restart": false
+  }
+}
