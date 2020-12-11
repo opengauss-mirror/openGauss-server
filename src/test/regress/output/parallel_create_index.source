@@ -12,6 +12,8 @@ set min_parallel_table_scan_size=0;
 LOG:  statement: set min_parallel_table_scan_size=0;
 set maintenance_work_mem=262144;
 LOG:  statement: set maintenance_work_mem=262144;
+--test rm tmp dir first
+\! rm -rf '@abs_srcdir@/tmp_check/datanode1/base/pgsql_tmp';
 CREATE INDEX parallel_index ON parallel_sort_test (randint);
 LOG:  statement: CREATE INDEX parallel_index ON parallel_sort_test (randint);
 --?LOG:  begin index sort: unique = f, workMem = .*, randomAccess = f, maxMem = .*

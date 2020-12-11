@@ -711,14 +711,14 @@ CREATE TABLE onepage2 as select * from onepage1;
 explain select * from onepage2 natural join onepage1 where onepage2.val > 2 and onepage1.val < 4;
                                           QUERY PLAN                                           
 -----------------------------------------------------------------------------------------------
- Gather  (cost=15.04..32.69 rows=1 width=8)
+ Gather  (cost=8.90..26.54 rows=1 width=8)
    Number of Workers: 2
-   ->  Parallel Hash Join  (cost=15.04..32.69 rows=1 width=8)
+   ->  Parallel Hash Join  (cost=8.90..26.54 rows=1 width=8)
          Hash Cond: ((onepage2.val = onepage1.val) AND (onepage2.val2 = onepage1.val2))
          ->  Parallel Seq Scan on onepage2  (cost=0.00..17.60 rows=5 width=8)
                Filter: ((val > 2) AND (val < 4))
-         ->  Parallel Hash  (cost=14.97..14.97 rows=5 width=8)
-               ->  Parallel Bitmap Heap Scan on onepage1  (cost=4.36..14.97 rows=5 width=8)
+         ->  Parallel Hash  (cost=8.82..8.82 rows=5 width=8)
+               ->  Parallel Bitmap Heap Scan on onepage1  (cost=4.36..8.82 rows=5 width=8)
                      Recheck Cond: ((val < 4) AND (val > 2))
                      ->  Bitmap Index Scan on onepage1_pkey  (cost=0.00..4.36 rows=11 width=0)
                            Index Cond: ((val < 4) AND (val > 2))
@@ -1127,6 +1127,7 @@ reset min_parallel_index_scan_size;
 -- nestloop
 set enable_hashjoin=off;
 set enable_mergejoin=off;
+set enable_bitmapscan=off;
 explain (costs off, analyse on) select schemaname, tablename from pg_tables where tablename like 'sql%' order by tablename;
 --?.*
 --?.*
@@ -1209,5 +1210,6 @@ reset parallel_tuple_cost;
 reset max_parallel_workers_per_gather;
 reset min_parallel_table_scan_size;
 reset parallel_leader_participation;
+reset enable_bitmapscan;
 reset enable_hashjoin;
 reset enable_mergejoin;

@@ -48,7 +48,7 @@ typedef struct {
 /* function prototypes in nodes/tidbitmap.c */
 extern TIDBitmap* tbm_create(long maxbytes, MemoryContext dsa);
 extern void tbm_free(TIDBitmap* tbm);
-extern void tbm_free_shared_area(TBMSharedIteratorState *istate);
+extern void tbm_free_shared_area(TIDBitmap* tbm, TBMSharedIteratorState *istate);
 
 extern void tbm_add_tuples(
     TIDBitmap* tbm, const ItemPointer tids, int ntids, bool recheck, Oid partitionOid = InvalidOid);
