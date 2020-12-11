@@ -17,6 +17,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
   endif
 endif
 
-OBJS = index_advisor.o
+OBJS = index_advisor.o \
+	   hypopg_index.o
 
 include $(top_srcdir)/src/gausskernel/common.mk

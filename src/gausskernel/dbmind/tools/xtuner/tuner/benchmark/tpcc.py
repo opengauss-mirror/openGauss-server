@@ -13,7 +13,14 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details.
 """
 
-from exceptions import ExecutionError
+from tuner.exceptions import ExecutionError
+
+# WARN: You need to download the benchmark-sql test tool to the system,
+# replace the PostgreSQL JDBC driver with the openGauss driver,
+# and configure the benchmark-sql configuration file.
+# The program starts the test by running the following command:
+path = '/home/opengauss/project/benchmarksql-long/run'  # replace
+cmd = "./runBenchmark.sh opengauss.properties"
 
 
 def run(remote_server, local_host):
@@ -25,26 +32,25 @@ def run(remote_server, local_host):
         remote_server.exec_command_sync('mv ~/backup ~/gaussdb_data')
     ```
 
-    The passed two parameters are both Executor instance, you can see it at ssh.py.
+    The passed two parameters are both Executor instance, you can see it at client.py.
     :param remote_server: SSH object for remote database server.
     :param local_host: LocalExec object for local client host where run our tuning tool.
     :return: benchmark score, higher one must be better, be sure to keep in mind.
     """
 
-    path = '/home/opengauss/project/benchmarksql-long/run'  # your path
-    cmd = "./runBenchmark.sh opengauss.properties"
-    stdout, stderr = remote_server.exec_command_sync("cd {path};{cmd}".format(path=path, cmd=cmd))
+    stdout, stderr = remote_server.exec_command_sync(['cd %s' % path, cmd])
     if len(stderr) > 0:
         raise ExecutionError(stderr)
 
+    # Find the tpmC result.
     tpmC = None
     split_string = stdout.split()
     for i, st in enumerate(split_string):
         if "(NewOrders)" in st:
             tpmC = split_string[i + 2]
             break
-    stdout = remote_server.exec_command_sync(
+    stdout, stderr = remote_server.exec_command_sync(
         "cat %s/benchmarksql-error.log" % path)
-    nb_err = stdout.count("ERROR:")
+    nb_err = stdout.count("ERROR:")  # Penalty term.
 
-    return float(tpmC) - 10 * nb_err
+    return float(tpmC) - 10 * nb_err  # You can modify the penalty factor.

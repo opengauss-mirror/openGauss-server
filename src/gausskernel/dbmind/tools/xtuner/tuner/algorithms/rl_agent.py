@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Copyright (c) 2020 Huawei Technologies Co.,Ltd.
 
@@ -14,27 +13,26 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details.
 """
 
+from keras import Model
+from keras import Sequential
+from keras.layers import Flatten, Dense, Activation, Input, Concatenate
+from keras.optimizers import Adam
 from rl.agents import DDPGAgent
 from rl.agents import DQNAgent
 from rl.memory import SequentialMemory
-from rl.random import OrnsteinUhlenbeckProcess
 from rl.policy import BoltzmannQPolicy
-
-from keras import Sequential
-from keras.layers import Flatten, Dense, Activation, Input, Concatenate
-from keras import Model
-from keras.optimizers import Adam
+from rl.random import OrnsteinUhlenbeckProcess
 
 
-class RLAgent(object):
-    def __init__(self, env, agent='ddpg'):
+class RLAgent:
+    def __init__(self, env, alg='ddpg'):
         self.env = env
         nb_actions = env.action_space.shape[0]
         nb_states = env.observation_space.shape[0]
 
-        if agent == 'ddpg':
+        if alg == 'ddpg':
             self.agent = self._build_ddpg(nb_actions, nb_states)
-        elif agent == 'dpn':
+        elif alg == 'dpn':
             self.agent = self._build_dqn(nb_actions, nb_states)
         else:
             raise ValueError('Can not support this reinforcement learning algorithm.')
@@ -53,7 +51,7 @@ class RLAgent(object):
         model.add(Activation('relu'))
         model.add(Dense(nb_actions, activation='linear'))
 
-        # build agent
+        # build alg
         memory = SequentialMemory(limit=10240, window_length=1)
         policy = BoltzmannQPolicy()
         dqn = DQNAgent(model=model, nb_actions=nb_actions, memory=memory,
@@ -96,7 +94,7 @@ class RLAgent(object):
         memory = SequentialMemory(limit=10240, window_length=1)
         oup = OrnsteinUhlenbeckProcess(size=nb_actions, theta=.15, mu=0., sigma=.3)
 
-        # build ddpg agent
+        # build ddpg alg
         ddpg = DDPGAgent(nb_actions=nb_actions, actor=actor, critic=critic, critic_action_input=action_input,
                          memory=memory, nb_steps_warmup_actor=100, nb_steps_warmup_critic=100,
                          random_process=oup, gamma=.99, target_model_update=1e-3)
@@ -114,4 +112,3 @@ class RLAgent(object):
 
     def test(self, episodes, nb_max_episode_steps=10, verbose=0):
         self.agent.test(self.env, nb_episodes=episodes, nb_max_episode_steps=nb_max_episode_steps, verbose=verbose)
-

@@ -4980,7 +4980,7 @@ static void run_single_test(const char* test, test_function tfunc, diag_function
     REGR_PRINT_ELAPSED_TIME;
 }
 
-#define BASE_GLOBAL_VARIABLE_NUM 235
+#define BASE_GLOBAL_VARIABLE_NUM 237
 static void check_global_variables()
 {
     char* cmd =

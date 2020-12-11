@@ -86,6 +86,7 @@
 #include "access/xact.h"
 #include "bootstrap/bootstrap.h"
 #include "catalog/pg_control.h"
+#include "dbmind/hypopg_index.h"
 #include "instruments/instr_unique_sql.h"
 #include "instruments/instr_user.h"
 #include "instruments/percentile.h"
@@ -2173,6 +2174,8 @@ int PostmasterMain(int argc, char* argv[])
         SHARED_CONTEXT);
     /* init unique sql */
     InitUniqueSQL();
+    /* init hypo index */
+    InitHypopg();
     /* init instr user */
     InitInstrUser();
     /* init Opfusion function id */
@@ -10333,6 +10336,9 @@ int GaussDbThreadMain(knl_thread_arg* arg)
 
             /* unique sql hooks */
             instr_unique_sql_register_hook();
+
+            /* hypopg index hooks */                                            
+            hypopg_register_hook();
 
             /*
              * Perform additional initialization and collect startup packet.

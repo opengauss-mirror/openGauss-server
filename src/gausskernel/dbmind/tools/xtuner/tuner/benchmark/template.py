@@ -13,22 +13,12 @@ MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details.
 """
 
-
-class ExecutionError(Exception):
-    pass
-
-
-class OptionError(Exception):
-    pass
+# WARN: You need to import data into the database.
+# The program automatically collects the execution performance of workload you defined in the following function and
+# return the performance value to the X-Tuner.
+path = ''
+cmd = ''
 
 
-class ConfigureError(Exception):
-    pass
-
-
-class SecurityError(Exception):
-    pass
-
-
-class DBStatusError(Exception):
-    pass
+def run(remote_server, local_host):
+    return 0

@@ -360,6 +360,7 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
     "enable_adio_function",
     "fast_extend_file_size",
     "enable_global_stats",
+    "enable_hypo_index",
     "td_compatible_truncation",
 #ifdef ENABLE_MULTIPLE_NODES
     "gds_debug_mod",
@@ -1230,6 +1231,20 @@ static void init_configure_names_bool()
             NULL,
             NULL
         },
+        {                                                                       
+            {                                                                   
+                "enable_hypo_index",                                          
+                PGC_USERSET,                                                      
+                QUERY_TUNING_METHOD,                                            
+                gettext_noop("Enable hypothetical index for explain."),               
+                NULL                                                            
+            },                                                                  
+            &u_sess->attr.attr_sql.enable_hypo_index,                         
+            false,                                                               
+            NULL,                                                               
+            NULL,                                                               
+            NULL                                                                
+        }, 
 #ifdef ENABLE_MULTIPLE_NODES
         {
             {

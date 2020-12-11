@@ -60,12 +60,15 @@
 #define DEFAULT_PAGES_NUM (u_sess->attr.attr_sql.enable_global_stats ? 10 * u_sess->pgxc_cxt.NumDataNodes : 10)
 #define DEFAULT_TUPLES_NUM DEFAULT_PAGES_NUM
 
+/* Hook for plugins to get control in get_relation_info() */
+THR_LOCAL get_relation_info_hook_type get_relation_info_hook = NULL;
+
 extern void AcceptInvalidationMessages(void);
 extern bool check_relation_analyzed(Oid relid);
 
 static int32 get_rel_data_width(Relation rel, int32* attr_widths, bool vectorized = false);
 static List* get_relation_constraints(PlannerInfo* root, Oid relationObjectId, RelOptInfo* rel, bool include_notnull);
-static List* build_index_tlist(PlannerInfo* root, IndexOptInfo* index, Relation heapRelation);
+List* build_index_tlist(PlannerInfo* root, IndexOptInfo* index, Relation heapRelation);
 static void setRelStoreInfo(RelOptInfo* relOptInfo, Relation relation);
 
 static void acquireSamplesForPartitionedRelation(
@@ -457,6 +460,14 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
         rel->fdwroutine = NULL;
 
     heap_close(relation, NoLock);
+
+    /*
+    * Allow a plugin to editorialize on the info we obtained from the
+    * catalogs.  Actions might include altering the assumed relation size,
+    * removing an index, or adding a hypothetical index to the indexlist.
+    */
+    if (get_relation_info_hook)
+        (*get_relation_info_hook) (root, relationObjectId, inhparent, rel);
 }
 
 /*
@@ -1161,7 +1172,7 @@ static void mark_index_col(Oid relid, AttrNumber attno, Oid indexoid)
  * There are never any dropped columns in indexes, so unlike
  * build_physical_tlist, we need no failure case.
  */
-static List* build_index_tlist(PlannerInfo* root, IndexOptInfo* index, Relation heapRelation)
+List* build_index_tlist(PlannerInfo* root, IndexOptInfo* index, Relation heapRelation)
 {
     List* tlist = NIL;
     Index varno = index->rel->relid;

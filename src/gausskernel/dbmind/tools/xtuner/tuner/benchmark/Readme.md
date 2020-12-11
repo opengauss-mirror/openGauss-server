@@ -3,43 +3,28 @@ This directory contains benchmark scripts. We implemented some demos here, they 
 
 |Benchmark|Filename|Scenario|Website|
 | ------- | ------ | -------| ----- |
-|TPC-C|bm_tpcc.py|heavy concurrent transactions|http://www.tpc.org/tpcc/|
-|TPC-H|bm_tpch.py|data analytic for complex queries|http://www.tpc.org/tpch/|
-|TPC-DS|bm_tpds.py|simulate a decision support system|http://www.tpc.org/tpcds/|
-|sysbench|bm_sysbench.py|some simple queries for light concurrent.|https://github.com/akopytov/sysbench|
+|TPC-C|tpcc.py|heavy concurrent transactions|http://www.tpc.org/tpcc/|
+|TPC-H|tpch.py|data analytic for complex queries|http://www.tpc.org/tpch/|
+|TPC-DS|tpds.py|simulate a decision support system|http://www.tpc.org/tpcds/|
+|sysbench|sysbench.py|some simple queries for light concurrent.|https://github.com/akopytov/sysbench|
 
-# Interface
-You can see code in ```__init__.py```:
-
-```python
-import importlib
-from ssh import ExecutorFactory
-
-local_ssh = ExecutorFactory() \
-    .set_host('127.0.0.1') \
-    .get_executor()
-
-
-def get_benchmark_instance(name):
-    bm = importlib.import_module('bm_{}'.format(name))  # load benchmark script by filename.
-    
-    # a wrapper for benchmark run() function:
-    def wrapper(server_ssh):
-        res = bm.run(server_ssh, local_ssh)  # implement your own run() function.
-        return res
-    return wrapper
-
-```
-
-So if you want to implement your own benchmark which simulate your 
+# Implementation
+If you want to implement your benchmark which simulate your 
 production scenario, you should do as the following.
-**First of all, we assume that xxx is your benchmark name.**
+**Firstly, we assume that xxx is your benchmark name.**
 
-* Set filename as ```bm_xxx.py```;
-* Implement a function named run() in bm_xxx.py;
-* The signature of run() must be ```def run(remote_server_ssh, local_host_ssh) -> float```, that 
+* Set file name as ```xxx.py``` in the benchmark directory;
+* Implement a function named 'run' in xxx.py and declare two global variables of the string type, one called 'path' and the other called 'cmd'.;
+* The signature of `run()` must be ```def run(remote_server_ssh, local_host_ssh) -> float```, that 
 means you could use two SSH sessions to implement your code logic if they are useful, and you should 
 return a numeric value as feedback;
-* Pass argument '--benchmark xxx' when execute ```main.py```
+* You can set xxx, the name of benchmark you want to run, in the xtuner.conf. The parameter name is `benchmark_script`.
 
-**You could see a detailed demonstration -- bm_tpcc.py.**
+# References
+1. https://opengauss.org/zh/docs/1.0.1/docs/Developerguide/%E6%B5%8B%E8%AF%95TPCC%E6%80%A7%E8%83%BD.html
+2. https://www.modb.pro/db/29135
+3. https://www.modb.pro/db/23243
+4. https://ankane.org/tpc-h
+5. https://ankane.org/tpc-ds
+6. https://severalnines.com/database-blog/how-benchmark-postgresql-performance-using-sysbench
+
