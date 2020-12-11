@@ -57,9 +57,6 @@ extern bool IsMotCodegenPrintEnabled();
 /** @brief Queries for the per-session limit of JIT queries. */
 extern uint32_t GetMotCodegenLimit();
 
-/** @brief Turn off MOT JIT compilation and execution. */
-extern void DisableMotCodegen();
-
 /**
  * @brief Queries whether a SQL query to be executed by MM Engine is jittable.
  * @param query The parsed SQL query to examine.

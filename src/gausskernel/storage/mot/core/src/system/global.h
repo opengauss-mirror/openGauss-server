@@ -290,6 +290,8 @@ inline void Prefetch(const void* ptr)
 #define MAX_KEY_COLUMNS (10U)
 #define MAX_TUPLE_SIZE 16384  // in bytes
 
+#define MAX_VARCHAR_LEN 1024
+
 // Do not change this. Masstree assumes 15 for optimization purposes
 #define BTREE_ORDER 15
 

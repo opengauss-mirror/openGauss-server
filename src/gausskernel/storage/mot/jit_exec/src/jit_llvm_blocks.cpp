@@ -22,13 +22,32 @@
  * -------------------------------------------------------------------------
  */
 
-#include "jit_llvm_funcs.h"
+/*
+ * ATTENTION: Be sure to include jit_llvm_query.h before anything else because of gscodegen.h
+ * (jit_llvm_blocks.h includes jit_llvm_query.h before anything else).
+ * See jit_llvm_query.h for more details.
+ */
 #include "jit_llvm_blocks.h"
+#include "jit_llvm_funcs.h"
+#include "jit_util.h"
+#include "mot_error.h"
+#include "utilities.h"
+
+#include "catalog/pg_aggregate.h"
 
 using namespace dorado;
 
 namespace JitExec {
 DECLARE_LOGGER(JitLlvmBlocks, JitExec)
+
+static bool ProcessJoinOpExpr(
+    JitLlvmCodeGenContext* ctx, const OpExpr* op_expr, int* column_count, int* column_array, int* max_arg);
+static bool ProcessJoinBoolExpr(
+    JitLlvmCodeGenContext* ctx, const BoolExpr* boolexpr, int* column_count, int* column_array, int* max_arg);
+static llvm::Value* ProcessFilterExpr(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitFilter* filter, int* max_arg);
+static llvm::Value* ProcessExpr(
+    JitLlvmCodeGenContext* ctx, Expr* expr, int& result_type, int arg_pos, int depth, int* max_arg);
+static llvm::Value* ProcessExpr(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitExpr* expr, int* max_arg);
 
 /*--------------------------- Helpers to generate compound LLVM code ---------------------------*/
 /** @brief Builds a code segment for checking if soft memory limit has been reached. */
@@ -45,7 +64,7 @@ void buildIsSoftMemoryLimitReached(JitLlvmCodeGenContext* ctx)
 }
 
 /** @brief Builds a code segment for writing datum value to a column. */
-void buildWriteDatumColumn(JitLlvmCodeGenContext* ctx, llvm::Value* row, int colid, llvm::Value* datum_value)
+static void buildWriteDatumColumn(JitLlvmCodeGenContext* ctx, llvm::Value* row, int colid, llvm::Value* datum_value)
 {
     llvm::Value* set_null_bit_res = AddSetExprResultNullBit(ctx, row, colid);
     IssueDebugLog("Set null bit");
@@ -85,7 +104,7 @@ void buildWriteRow(JitLlvmCodeGenContext* ctx, llvm::Value* row, bool isPKey, Ji
 }
 
 /** @brief Process a join expression (WHERE clause) and generate code to build a search key. */
-bool ProcessJoinExpr(JitLlvmCodeGenContext* ctx, Expr* expr, int* column_count, int* column_array, int* max_arg)
+static bool ProcessJoinExpr(JitLlvmCodeGenContext* ctx, Expr* expr, int* column_count, int* column_array, int* max_arg)
 {
     bool result = false;
     if (expr->type == T_OpExpr) {
@@ -99,7 +118,7 @@ bool ProcessJoinExpr(JitLlvmCodeGenContext* ctx, Expr* expr, int* column_count, 
 }
 
 /** @brief Process an operator expression (process only "COLUMN equals EXPR" operators). */
-bool ProcessJoinOpExpr(
+static bool ProcessJoinOpExpr(
     JitLlvmCodeGenContext* ctx, const OpExpr* op_expr, int* column_count, int* column_array, int* max_arg)
 {
     bool result = false;
@@ -171,7 +190,7 @@ bool ProcessJoinOpExpr(
 
 /** @brief Process a boolean operator (process only AND operators, since we handle only point queries, or full-prefix
  * range update). */
-bool ProcessJoinBoolExpr(
+static bool ProcessJoinBoolExpr(
     JitLlvmCodeGenContext* ctx, const BoolExpr* boolexpr, int* column_count, int* column_array, int* max_arg)
 {
     bool result = false;
@@ -289,7 +308,7 @@ llvm::Value* buildSearchRow(JitLlvmCodeGenContext* ctx, MOT::AccessType access_t
     return row;
 }
 
-llvm::Value* buildFilter(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitFilter* filter, int* max_arg)
+static llvm::Value* buildFilter(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitFilter* filter, int* max_arg)
 {
     llvm::Value* result = nullptr;
     llvm::Value* lhs_expr = ProcessExpr(ctx, row, filter->_lhs_operand, max_arg);
@@ -365,8 +384,8 @@ void buildDeleteRow(JitLlvmCodeGenContext* ctx)
 }
 
 /** @brief Adds code to search for an iterator. */
-llvm::Value* buildSearchIterator(JitLlvmCodeGenContext* ctx, JitIndexScanDirection index_scan_direction,
-    JitRangeBoundMode range_bound_mode, JitRangeScanType range_scan_type, int subQueryIndex /* = -1 */)
+static llvm::Value* buildSearchIterator(JitLlvmCodeGenContext* ctx, JitIndexScanDirection index_scan_direction,
+    JitRangeBoundMode range_bound_mode, JitRangeScanType range_scan_type, int subQueryIndex = -1)
 {
     // search the row
     IssueDebugLog("Searching range start");
@@ -383,8 +402,8 @@ llvm::Value* buildSearchIterator(JitLlvmCodeGenContext* ctx, JitIndexScanDirecti
 }
 
 /** @brief Adds code to search for an iterator. */
-llvm::Value* buildBeginIterator(
-    JitLlvmCodeGenContext* ctx, JitRangeScanType rangeScanType, int subQueryIndex /* = -1 */)
+static llvm::Value* buildBeginIterator(
+    JitLlvmCodeGenContext* ctx, JitRangeScanType rangeScanType, int subQueryIndex = -1)
 {
     // search the row
     IssueDebugLog("Getting begin iterator for full-scan");
@@ -421,7 +440,7 @@ llvm::Value* buildGetRowFromIterator(JitLlvmCodeGenContext* ctx, llvm::BasicBloc
 }
 
 /** @brief Process constant expression. */
-llvm::Value* ProcessConstExpr(
+static llvm::Value* ProcessConstExpr(
     JitLlvmCodeGenContext* ctx, const Const* const_value, int& result_type, int arg_pos, int depth, int* max_arg)
 {
     llvm::Value* result = nullptr;
@@ -446,7 +465,7 @@ llvm::Value* ProcessConstExpr(
 }
 
 /** @brief Process Param expression. */
-llvm::Value* ProcessParamExpr(
+static llvm::Value* ProcessParamExpr(
     JitLlvmCodeGenContext* ctx, const Param* param, int& result_type, int arg_pos, int depth, int* max_arg)
 {
     llvm::Value* result = nullptr;
@@ -470,7 +489,7 @@ llvm::Value* ProcessParamExpr(
 }
 
 /** @brief Process Relabel expression as Param expression. */
-llvm::Value* ProcessRelabelExpr(
+static llvm::Value* ProcessRelabelExpr(
     JitLlvmCodeGenContext* ctx, RelabelType* relabel_type, int& result_type, int arg_pos, int depth, int* max_arg)
 {
     llvm::Value* result = nullptr;
@@ -486,7 +505,7 @@ llvm::Value* ProcessRelabelExpr(
 }
 
 /** @brief Proess Var expression. */
-llvm::Value* ProcessVarExpr(
+static llvm::Value* ProcessVarExpr(
     JitLlvmCodeGenContext* ctx, const Var* var, int& result_type, int arg_pos, int depth, int* max_arg)
 {
     llvm::Value* result = nullptr;
@@ -511,7 +530,7 @@ llvm::Value* ProcessVarExpr(
 }
 
 /** @brief Adds call to PG unary operator. */
-llvm::Value* AddExecUnaryOperator(
+static llvm::Value* AddExecUnaryOperator(
     JitLlvmCodeGenContext* ctx, llvm::Value* param, llvm::Constant* unary_operator, int arg_pos)
 {
     llvm::Constant* arg_pos_value = llvm::ConstantInt::get(ctx->INT32_T, arg_pos, true);
@@ -519,7 +538,7 @@ llvm::Value* AddExecUnaryOperator(
 }
 
 /** @brief Adds call to PG binary operator. */
-llvm::Value* AddExecBinaryOperator(JitLlvmCodeGenContext* ctx, llvm::Value* lhs_param, llvm::Value* rhs_param,
+static llvm::Value* AddExecBinaryOperator(JitLlvmCodeGenContext* ctx, llvm::Value* lhs_param, llvm::Value* rhs_param,
     llvm::Constant* binary_operator, int arg_pos)
 {
     llvm::Constant* arg_pos_value = llvm::ConstantInt::get(ctx->INT32_T, arg_pos, true);
@@ -527,7 +546,7 @@ llvm::Value* AddExecBinaryOperator(JitLlvmCodeGenContext* ctx, llvm::Value* lhs_
 }
 
 /** @brief Adds call to PG ternary operator. */
-llvm::Value* AddExecTernaryOperator(JitLlvmCodeGenContext* ctx, llvm::Value* param1, llvm::Value* param2,
+static llvm::Value* AddExecTernaryOperator(JitLlvmCodeGenContext* ctx, llvm::Value* param1, llvm::Value* param2,
     llvm::Value* param3, llvm::Constant* ternary_operator, int arg_pos)
 {
     llvm::Constant* arg_pos_value = llvm::ConstantInt::get(ctx->INT32_T, arg_pos, true);
@@ -557,7 +576,7 @@ llvm::Value* AddExecTernaryOperator(JitLlvmCodeGenContext* ctx, llvm::Value* par
 #define APPLY_TERNARY_CAST_OPERATOR(funcid, name) APPLY_TERNARY_OPERATOR(funcid, name)
 
 /** @brief Process operator expression. */
-llvm::Value* ProcessOpExpr(
+static llvm::Value* ProcessOpExpr(
     JitLlvmCodeGenContext* ctx, const OpExpr* op_expr, int& result_type, int arg_pos, int depth, int* max_arg)
 {
     llvm::Value* result = nullptr;
@@ -568,7 +587,7 @@ llvm::Value* ProcessOpExpr(
     }
 
     if (list_length(op_expr->args) > 3) {
-        MOT_LOG_TRACE("Unsupported operator %d: too many arguments", op_expr->opno);
+        MOT_LOG_TRACE("Unsupported operator %u: too many arguments", op_expr->opno);
         return nullptr;
     }
 
@@ -605,7 +624,7 @@ llvm::Value* ProcessOpExpr(
 }
 
 /** @brief Process function expression. */
-llvm::Value* ProcessFuncExpr(
+static llvm::Value* ProcessFuncExpr(
     JitLlvmCodeGenContext* ctx, const FuncExpr* func_expr, int& result_type, int arg_pos, int depth, int* max_arg)
 {
     llvm::Value* result = nullptr;
@@ -678,7 +697,7 @@ llvm::Value* ProcessFuncExpr(
         MOT_LOG_TRACE("Unexpected call in filter expression to ternary cast builtin: " #name); \
         break;
 
-llvm::Value* ProcessFilterExpr(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitFilter* filter, int* max_arg)
+static llvm::Value* ProcessFilterExpr(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitFilter* filter, int* max_arg)
 {
     llvm::Value* result = nullptr;
 
@@ -716,7 +735,8 @@ llvm::Value* ProcessFilterExpr(JitLlvmCodeGenContext* ctx, llvm::Value* row, Jit
 #undef APPLY_TERNARY_CAST_OPERATOR
 
 /** @brief Process an expression. Generates code to evaluate the expression. */
-llvm::Value* ProcessExpr(JitLlvmCodeGenContext* ctx, Expr* expr, int& result_type, int arg_pos, int depth, int* max_arg)
+static llvm::Value* ProcessExpr(
+    JitLlvmCodeGenContext* ctx, Expr* expr, int& result_type, int arg_pos, int depth, int* max_arg)
 {
     llvm::Value* result = nullptr;
     MOT_LOG_DEBUG("%*s --> Processing expression %d", depth, "", (int)expr->type);
@@ -747,7 +767,7 @@ llvm::Value* ProcessExpr(JitLlvmCodeGenContext* ctx, Expr* expr, int& result_typ
     return result;
 }
 
-llvm::Value* ProcessConstExpr(JitLlvmCodeGenContext* ctx, const JitConstExpr* expr, int* max_arg)
+static llvm::Value* ProcessConstExpr(JitLlvmCodeGenContext* ctx, const JitConstExpr* expr, int* max_arg)
 {
     AddSetExprArgIsNull(ctx, expr->_arg_pos, expr->_is_null);  // mark expression null status
     llvm::Value* result = llvm::ConstantInt::get(ctx->INT64_T, expr->_value, true);
@@ -757,7 +777,7 @@ llvm::Value* ProcessConstExpr(JitLlvmCodeGenContext* ctx, const JitConstExpr* ex
     return result;
 }
 
-llvm::Value* ProcessParamExpr(JitLlvmCodeGenContext* ctx, const JitParamExpr* expr, int* max_arg)
+static llvm::Value* ProcessParamExpr(JitLlvmCodeGenContext* ctx, const JitParamExpr* expr, int* max_arg)
 {
     llvm::Value* result = AddGetDatumParam(ctx, expr->_param_id, expr->_arg_pos);
     if (max_arg && (expr->_arg_pos > *max_arg)) {
@@ -766,7 +786,7 @@ llvm::Value* ProcessParamExpr(JitLlvmCodeGenContext* ctx, const JitParamExpr* ex
     return result;
 }
 
-llvm::Value* ProcessVarExpr(JitLlvmCodeGenContext* ctx, llvm::Value* row, const JitVarExpr* expr, int* max_arg)
+static llvm::Value* ProcessVarExpr(JitLlvmCodeGenContext* ctx, llvm::Value* row, const JitVarExpr* expr, int* max_arg)
 {
     llvm::Value* result = nullptr;
     if (row == nullptr) {
@@ -804,7 +824,7 @@ llvm::Value* ProcessVarExpr(JitLlvmCodeGenContext* ctx, llvm::Value* row, const 
 #define APPLY_BINARY_CAST_OPERATOR(funcid, name) APPLY_BINARY_OPERATOR(funcid, name)
 #define APPLY_TERNARY_CAST_OPERATOR(funcid, name) APPLY_TERNARY_OPERATOR(funcid, name)
 
-llvm::Value* ProcessOpExpr(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitOpExpr* expr, int* max_arg)
+static llvm::Value* ProcessOpExpr(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitOpExpr* expr, int* max_arg)
 {
     llvm::Value* result = nullptr;
 
@@ -830,7 +850,7 @@ llvm::Value* ProcessOpExpr(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitOpEx
     return result;
 }
 
-llvm::Value* ProcessFuncExpr(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitFuncExpr* expr, int* max_arg)
+static llvm::Value* ProcessFuncExpr(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitFuncExpr* expr, int* max_arg)
 {
     llvm::Value* result = nullptr;
 
@@ -863,12 +883,12 @@ llvm::Value* ProcessFuncExpr(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitFu
 #undef APPLY_BINARY_CAST_OPERATOR
 #undef APPLY_TERNARY_CAST_OPERATOR
 
-llvm::Value* ProcessSubLinkExpr(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitSubLinkExpr* expr, int* max_arg)
+static llvm::Value* ProcessSubLinkExpr(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitSubLinkExpr* expr, int* max_arg)
 {
     return AddSelectSubQueryResult(ctx, expr->_sub_query_index);
 }
 
-llvm::Value* ProcessBoolExpr(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitBoolExpr* expr, int* maxArg)
+static llvm::Value* ProcessBoolExpr(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitBoolExpr* expr, int* maxArg)
 {
     llvm::Value* result = nullptr;
 
@@ -909,7 +929,7 @@ llvm::Value* ProcessBoolExpr(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitBo
     return result;
 }
 
-llvm::Value* ProcessExpr(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitExpr* expr, int* max_arg)
+static llvm::Value* ProcessExpr(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitExpr* expr, int* max_arg)
 {
     llvm::Value* result = nullptr;
 
@@ -1064,7 +1084,7 @@ bool selectRowColumns(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitSelectExp
     return result;
 }
 
-bool buildClosedRangeScan(JitLlvmCodeGenContext* ctx, JitIndexScan* index_scan, int* max_arg,
+static bool buildClosedRangeScan(JitLlvmCodeGenContext* ctx, JitIndexScan* index_scan, int* max_arg,
     JitRangeScanType range_scan_type, llvm::Value* outer_row, int subQueryIndex)
 {
     // a closed range scan starts just like a point scan (without enough search expressions) and then adds key patterns
@@ -1699,7 +1719,7 @@ bool prepareAggregateCount(JitLlvmCodeGenContext* ctx, JitAggregate* aggregate)
     return true;
 }
 
-bool prepareDistinctSet(JitLlvmCodeGenContext* ctx, const JitAggregate* aggregate)
+static bool prepareDistinctSet(JitLlvmCodeGenContext* ctx, const JitAggregate* aggregate)
 {
     // we need a hash-set according to the aggregated type (preferably but not necessarily linear-probing hash)
     // we use an opaque datum type, with a tailor-made hash-function and equals function
@@ -1746,7 +1766,7 @@ bool prepareAggregate(JitLlvmCodeGenContext* ctx, JitAggregate* aggregate)
     return result;
 }
 
-llvm::Value* buildAggregateAvg(
+static llvm::Value* buildAggregateAvg(
     JitLlvmCodeGenContext* ctx, const JitAggregate* aggregate, llvm::Value* current_aggregate, llvm::Value* var_expr)
 {
     llvm::Value* aggregate_expr = nullptr;
@@ -1802,7 +1822,7 @@ llvm::Value* buildAggregateAvg(
     return aggregate_expr;
 }
 
-llvm::Value* buildAggregateSum(
+static llvm::Value* buildAggregateSum(
     JitLlvmCodeGenContext* ctx, const JitAggregate* aggregate, llvm::Value* current_aggregate, llvm::Value* var_expr)
 {
     llvm::Value* aggregate_expr = nullptr;
@@ -1845,7 +1865,7 @@ llvm::Value* buildAggregateSum(
     return aggregate_expr;
 }
 
-llvm::Value* buildAggregateMax(
+static llvm::Value* buildAggregateMax(
     JitLlvmCodeGenContext* ctx, const JitAggregate* aggregate, llvm::Value* current_aggregate, llvm::Value* var_expr)
 {
     llvm::Value* aggregate_expr = nullptr;
@@ -1913,7 +1933,7 @@ llvm::Value* buildAggregateMax(
     return aggregate_expr;
 }
 
-llvm::Value* buildAggregateMin(
+static llvm::Value* buildAggregateMin(
     JitLlvmCodeGenContext* ctx, const JitAggregate* aggregate, llvm::Value* current_aggregate, llvm::Value* var_expr)
 {
     llvm::Value* aggregate_expr = nullptr;
@@ -1977,7 +1997,7 @@ llvm::Value* buildAggregateMin(
     return aggregate_expr;
 }
 
-llvm::Value* buildAggregateCount(
+static llvm::Value* buildAggregateCount(
     JitLlvmCodeGenContext* ctx, const JitAggregate* aggregate, llvm::Value* count_aggregate)
 {
     llvm::Value* aggregate_expr = nullptr;
@@ -2000,7 +2020,7 @@ llvm::Value* buildAggregateCount(
     return aggregate_expr;
 }
 
-bool buildAggregateMaxMin(JitLlvmCodeGenContext* ctx, JitAggregate* aggregate, llvm::Value* var_expr)
+static bool buildAggregateMaxMin(JitLlvmCodeGenContext* ctx, JitAggregate* aggregate, llvm::Value* var_expr)
 {
     bool result = true;
 
@@ -2033,7 +2053,7 @@ bool buildAggregateMaxMin(JitLlvmCodeGenContext* ctx, JitAggregate* aggregate, l
     return result;
 }
 
-bool buildAggregateTuple(JitLlvmCodeGenContext* ctx, JitAggregate* aggregate, llvm::Value* var_expr)
+static bool buildAggregateTuple(JitLlvmCodeGenContext* ctx, JitAggregate* aggregate, llvm::Value* var_expr)
 {
     bool result = false;
 

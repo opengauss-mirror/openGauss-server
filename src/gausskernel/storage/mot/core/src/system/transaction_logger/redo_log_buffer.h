@@ -51,7 +51,7 @@ public:
     {}
 
     inline RedoLogBuffer(uint32_t size)
-        : m_bufferSize(size), m_nextFree(sizeof(uint32_t)), m_allocated(false), m_next(nullptr)
+        : m_bufferSize(size), m_nextFree(sizeof(uint32_t)), m_buffer(nullptr), m_allocated(false), m_next(nullptr)
     {
         if (size == 0) {
             size = REDO_DEFAULT_BUFFER_SIZE;

@@ -945,9 +945,8 @@ uint64_t MOTEngine::GetHardMemoryLimitBytes()
     return g_memGlobalCfg.m_maxGlobalMemoryMb * MEGA_BYTE;
 }
 
-bool MOTEngine::CheckPolicies()
+void MOTEngine::CheckPolicies()
 {
-    bool result = false;
     std::ifstream inFile;
     inFile.open("/proc/sys/kernel/numa_balancing");
 
@@ -955,8 +954,6 @@ bool MOTEngine::CheckPolicies()
     if ((inFile >> flagValue) && (flagValue != 0)) {
         MOT_LOG_WARN(
             "NUMA policy in the system is set to automatic. (/proc/sys/kernel/numa_balancing is %u)", flagValue);
-        result = true;
     }
-    return result;
 }
 }  // namespace MOT

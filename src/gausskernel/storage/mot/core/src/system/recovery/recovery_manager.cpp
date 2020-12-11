@@ -71,13 +71,24 @@ bool RecoveryManager::RecoverDbStart()
     MOT_LOG_INFO("Starting MOT recovery");
 
     if (m_recoverFromCkptDone) {
+        /*
+         * This is switchover case.
+         * In case of CASCADE switchover (CASCADE node switchover with STANDBY node), we need to
+         * set the correct m_lsn to make sure that we skip any redo which are already replayed.
+         * After switchover, envelope will start sync from the previous ckpt position.
+         * In MOT engine, we should skip any redo before m_lastReplayLsn.
+         */
+        if (m_lsn < m_lastReplayLsn) {
+            m_lsn = m_lastReplayLsn;
+        }
         return true;
     }
 
     if (!m_checkpointRecovery.Recover()) {
         return false;
     }
-    SetLsn(m_checkpointRecovery.GetLsn());
+
+    m_lsn = m_checkpointRecovery.GetLsn();
     m_recoverFromCkptDone = true;
     return true;
 }
@@ -302,7 +313,7 @@ bool RecoveryManager::LogStats::FindIdx(uint64_t tableId, uint64_t& id)
 {
     id = m_numEntries;
     std::map<uint64_t, int>::iterator it;
-    m_slock.lock();
+    std::lock_guard<spin_lock> lock(m_slock);
     it = m_idToIdx.find(tableId);
     if (it == m_idToIdx.end()) {
         Entry* newEntry = new (std::nothrow) Entry(tableId);
@@ -315,7 +326,6 @@ bool RecoveryManager::LogStats::FindIdx(uint64_t tableId, uint64_t& id)
     } else {
         id = it->second;
     }
-    m_slock.unlock();
     return true;
 }
 
@@ -481,7 +491,7 @@ bool RecoveryManager::IsTransactionIdCommitted(uint64_t xid)
 
 bool RecoveryManager::IsRecoveryMemoryLimitReached(uint32_t numThreads)
 {
-    uint64_t memoryRequiredBytes = numThreads * MEM_CHUNK_SIZE_MB * MEGA_BYTE;
+    uint64_t memoryRequiredBytes = (uint64_t)numThreads * MEM_CHUNK_SIZE_MB * MEGA_BYTE;
     if (MOTEngine::GetInstance()->GetCurrentMemoryConsumptionBytes() + memoryRequiredBytes >=
         MOTEngine::GetInstance()->GetHardMemoryLimitBytes()) {
         MOT_LOG_WARN("IsRecoveryMemoryLimitReached: recovery memory limit reached "

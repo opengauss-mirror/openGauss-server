@@ -1405,7 +1405,6 @@ static void knl_t_mot_init(knl_t_mot_context* mot_cxt)
     mot_cxt->log_line_overflow = false;
     mot_cxt->log_line_buf = NULL;
     mot_cxt->log_level = 3; // the equivalent of MOT::LogLevel::LL_INFO
-    mot_cxt->init_codegen_once = false;
 
     mot_cxt->currentThreadId = (uint16_t)-1;
     mot_cxt->currentNumaNodeId = (-2);

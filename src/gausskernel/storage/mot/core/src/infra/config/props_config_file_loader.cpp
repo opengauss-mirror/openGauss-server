@@ -87,7 +87,8 @@ ConfigTree* PropsConfigFileLoader::LoadConfigFile(const char* configFilePath)
     mot_string key;
     mot_string value;
     bool parseError = false;
-    int arrayIndex = 0;
+    uint64_t arrayIndex = 0;
+    bool hasArrayIndex = false;
 
     // unsupported yet
     FileLineReader reader(configFilePath);
@@ -131,7 +132,8 @@ ConfigTree* PropsConfigFileLoader::LoadConfigFile(const char* configFilePath)
                 currentSection = itr->second;
 
                 // parse the key-value part
-                if (!ConfigFileParser::ParseKeyValue(keyValuePart, sectionFullName, key, value, arrayIndex)) {
+                if (!ConfigFileParser::ParseKeyValue(
+                    keyValuePart, sectionFullName, key, value, arrayIndex, hasArrayIndex)) {
                     // key-value line malformed
                     REPORT_PARSE_ERROR(MOT_ERROR_INVALID_CFG,
                         "Failed to parse configuration file %s at line %d: %s (key/value malformed)",
@@ -140,7 +142,7 @@ ConfigTree* PropsConfigFileLoader::LoadConfigFile(const char* configFilePath)
                         line.c_str());
                 } else {
                     // check for array item
-                    if (arrayIndex == -1) {
+                    if (!hasArrayIndex) {
                         ConfigItem* configItem = ConfigFileParser::MakeConfigValue(sectionFullName, key, value);
                         if (configItem == nullptr) {
                             REPORT_PARSE_ERROR(MOT_ERROR_INTERNAL,
@@ -162,17 +164,17 @@ ConfigTree* PropsConfigFileLoader::LoadConfigFile(const char* configFilePath)
                                     MOT_ERROR_OOM, "Failed to add configuration array to parent section");
                             }
                         }
-                        if ((uint32_t)arrayIndex != configArray->GetConfigItemCount()) {
+                        if (arrayIndex != configArray->GetConfigItemCount()) {
                             // array items must be ordered
                             REPORT_PARSE_ERROR(MOT_ERROR_INVALID_CFG,
                                 "Failed to parse configuration file %s at line %d: %s (array %s items not "
-                                "well-ordered, expecting %u, got %u)",
+                                "well-ordered, expecting %u, got %" PRIu64 ")",
                                 configFilePath,
                                 reader.GetLineNumber(),
                                 line.c_str(),
                                 configArray->GetName(),
                                 configArray->GetConfigItemCount(),
-                                (uint32_t)arrayIndex);
+                                arrayIndex);
                         } else {
                             ConfigItem* configItem =
                                 ConfigFileParser::MakeArrayConfigValue(sectionFullName, arrayIndex, value);
@@ -180,7 +182,7 @@ ConfigTree* PropsConfigFileLoader::LoadConfigFile(const char* configFilePath)
                                 REPORT_PARSE_ERROR(MOT_ERROR_INTERNAL, "Failed to create configuration array value");
                             } else if (!configArray->AddConfigItem(configItem)) {
                                 REPORT_PARSE_ERROR(MOT_ERROR_OOM,
-                                    "Failed to add %dth item to configuration array %s",
+                                    "Failed to add %" PRIu64 "th item to configuration array %s",
                                     arrayIndex,
                                     configArray->GetName());
                             }

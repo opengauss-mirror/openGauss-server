@@ -22,18 +22,20 @@
  * -------------------------------------------------------------------------
  */
 
-#ifndef MOT_INT_H
-#define MOT_INT_H
+#ifndef MOT_INTERNAL_H
+#define MOT_INTERNAL_H
 
 #include <map>
 #include <string>
 #include "catalog_column_types.h"
 #include "foreign/fdwapi.h"
 #include "nodes/nodes.h"
+#include "nodes/makefuncs.h"
 #include "utils/numeric.h"
 #include "utils/numeric_gs.h"
 #include "pgstat.h"
 #include "global.h"
+#include "mot_fdw_error.h"
 #include "mot_fdw_xlog.h"
 #include "system/mot_engine.h"
 #include "bitmapset.h"
@@ -92,18 +94,8 @@ class MOTEngine;
 typedef struct MOTFdwState_St MOTFdwStateSt;
 #endif
 
-typedef struct MotErrToPGErr_St {
-    int m_pgErr;
-    const char* m_msg;
-    const char* m_detail;
-} MotErrToPGErrSt;
-
-void report_pg_error(MOT::RC rc, MOT::TxnManager* txn, void* arg1 = nullptr, void* arg2 = nullptr, void* arg3 = nullptr,
-    void* arg4 = nullptr, void* arg5 = nullptr);
-
-#define MAX_VARCHAR_LEN 1024
-
 typedef enum : uint8_t { SORTDIR_NONE = 0, SORTDIR_ASC = 1, SORTDIR_DESC = 2 } SORTDIR_ENUM;
+typedef enum : uint8_t { FDW_LIST_STATE = 1, FDW_LIST_BITMAP = 2 } FDW_LIST_TYPE;
 
 typedef struct Order_St {
     SORTDIR_ENUM m_order;
@@ -311,6 +303,15 @@ public:
     static MOT::MOTEngine* m_engine;
     static bool m_initialized;
     static bool m_callbacks_initialized;
+
+private:
+    static void VarcharToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, Oid type, uint8_t* data, size_t len,
+        KEY_OPER oper, uint8_t fill);
+    static void FloatToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, uint8_t* data);
+    static void NumericToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, uint8_t* data);
+    static void TimestampToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, uint8_t* data);
+    static void TimestampTzToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, uint8_t* data);
+    static void DateToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, uint8_t* data);
 };
 
 inline MOT::TxnManager* GetSafeTxn(const char* callerSrc, ::TransactionId txn_id = 0)
@@ -322,7 +323,7 @@ inline MOT::TxnManager* GetSafeTxn(const char* callerSrc, ::TransactionId txn_id
                 u_sess->mot_cxt.txn_manager->SetTransactionId(txn_id);
             }
         } else {
-            report_pg_error(MOT_GET_ROOT_ERROR_RC(), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+            report_pg_error(MOT_GET_ROOT_ERROR_RC());
         }
     }
     return u_sess->mot_cxt.txn_manager;
@@ -330,4 +331,56 @@ inline MOT::TxnManager* GetSafeTxn(const char* callerSrc, ::TransactionId txn_id
 
 extern void EnsureSafeThreadAccess();
 
-#endif  // MOT_INT_H
+inline List* BitmapSerialize(List* result, uint8_t* bitmap, int16_t len)
+{
+    // set list type to FDW_LIST_BITMAP
+    result = lappend(result, makeConst(INT4OID, -1, InvalidOid, 4, FDW_LIST_BITMAP, false, true));
+    for (int i = 0; i < len; i++)
+        result = lappend(result, makeConst(INT1OID, -1, InvalidOid, 1, Int8GetDatum(bitmap[i]), false, true));
+
+    return result;
+}
+
+inline void BitmapDeSerialize(uint8_t* bitmap, int16_t len, ListCell** cell)
+{
+    if (cell != nullptr && *cell != nullptr) {
+        int type = ((Const*)lfirst(*cell))->constvalue;
+        if (type == FDW_LIST_BITMAP) {
+            *cell = lnext(*cell);
+            for (int i = 0; i < len; i++) {
+                bitmap[i] = (uint8_t)((Const*)lfirst(*cell))->constvalue;
+                *cell = lnext(*cell);
+            }
+        }
+    }
+}
+
+inline void CleanCursors(MOTFdwStateSt* state)
+{
+    for (int i = 0; i < 2; i++) {
+        if (state->m_cursor[i]) {
+            state->m_cursor[i]->Invalidate();
+            state->m_cursor[i]->Destroy();
+            delete state->m_cursor[i];
+            state->m_cursor[i] = NULL;
+        }
+    }
+}
+
+inline void CleanQueryStatesOnError(MOT::TxnManager* txn)
+{
+    if (txn != nullptr) {
+        for (auto& itr : txn->m_queryState) {
+            MOTFdwStateSt* state = (MOTFdwStateSt*)itr.second;
+            if (state != nullptr) {
+                CleanCursors(state);
+            }
+        }
+    }
+}
+
+MOTFdwStateSt* InitializeFdwState(void* fdwState, List** fdwExpr, uint64_t exTableID);
+void* SerializeFdwState(MOTFdwStateSt* state);
+void ReleaseFdwState(MOTFdwStateSt* state);
+
+#endif  // MOT_INTERNAL_H

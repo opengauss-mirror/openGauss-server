@@ -53,7 +53,7 @@
 #include "access/redo_statistic_msg.h"
 #include "portability/instr_time.h"
 #include "replication/rto_statistic.h"
-
+#include "storage/mot/jit_def.h"
 
 const int NUM_PERCENTILE_COUNT = 2;
 const int INIT_NUMA_ALLOC_COUNT = 32;
@@ -544,6 +544,10 @@ typedef struct knl_g_bgworker_context {
     volatile bool have_crashed_worker;
 } knl_g_bgworker_context;
 
+typedef struct knl_g_mot_context {
+    JitExec::JitExecMode jitExecMode;
+} knl_g_mot_context;
+
 typedef struct knl_instance_context {
     knl_virtual_role role;
     volatile int status;
@@ -616,6 +620,7 @@ typedef struct knl_instance_context {
     knl_g_rto_context rto_cxt;
     knl_g_xlog_context xlog_cxt;
     knl_g_numa_context numa_cxt;
+    knl_g_mot_context mot_cxt;
     knl_g_bgworker_context bgworker_cxt;
 } knl_instance_context;
 

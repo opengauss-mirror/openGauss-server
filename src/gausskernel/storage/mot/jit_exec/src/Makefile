@@ -44,9 +44,7 @@ include $(top_srcdir)/src/gausskernel/common.mk
 override CXXFLAGS += -DMOT_SECURE -I$(top_builddir)/src/gausskernel/storage/mot/jit_exec/src -I$(top_builddir)/src/gausskernel/storage/mot/fdw_adapter/src -I$(ENGINE_INC) -I$(ENGINE_INC)/storage -I$(ENGINE_INC)/system -I$(ENGINE_INC)/memory -I$(ENGINE_INC)/memory/garbage_collector
 override CXXFLAGS +=  -I$(ENGINE_INC)/infra -I$(ENGINE_INC)/infra/config -I$(ENGINE_INC)/infra/containers  -I$(ENGINE_INC)/infra/stats -I$(ENGINE_INC)/infra/synchronization -I$(ENGINE_INC)/concurrency_control -I$(ENGINE_INC)/storage/index -I$(ENGINE_INC)/system/transaction -I$(ENGINE_INC)/system/common -I$(ENGINE_INC)/system/statistics -I$(ENGINE_INC)/system/transaction_logger -I$(ENGINE_INC)/system/transaction_logger/asynchronous_redo_log -I$(ENGINE_INC)/system/transaction_logger/synchronous_redo_log -I$(ENGINE_INC)/system/transaction_logger/group_synchronous_redo_log -I$(ENGINE_INC)/system/checkpoint -I$(ENGINE_INC)/system/recovery -I$(ENGINE_INC)/utils
 
-ifeq ($(CC_VERSION), 8.2.0)
-        override CXXFLAGS += -faligned-new -fno-rtti
-endif
+override CXXFLAGS += -faligned-new -fno-rtti
 
 override CXXFLAGS += -D__STDC_FORMAT_MACROS
 
@@ -74,7 +72,7 @@ buildrepo:
 	@$(call make-repo)
 
 $(OBJ_DIR)/%.o: %.cpp
-	$(COMPILE.cpp) -std=c++11 -MMD -MP -MF"$(patsubst %.o,%.d,$@)" -MT"$@" -o $@ $<
+	$(COMPILE.cpp) -MMD -MP -MF"$(patsubst %.o,%.d,$@)" -MT"$@" -o $@ $<
 
 ifneq ($(MAKECMDGOALS),clean)
 -include $(DEPS)

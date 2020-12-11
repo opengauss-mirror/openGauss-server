@@ -48,6 +48,18 @@ namespace JitExec {
 // To use advanced WHERE clause operators, #define MOT_JIT_ADVANCED_WHERE_OP
 // To enable features required for JIT testing, #define MOT_JIT_TEST
 
+/** @enum JIT execution mode constants. */
+enum JitExecMode : uint32_t {
+    /** @var Invalid execution mode. */
+    JIT_EXEC_MODE_INVALID,
+
+    /** @var LLVM execution mode. */
+    JIT_EXEC_MODE_LLVM,
+
+    /** @var TVM execution mode. */
+    JIT_EXEC_MODE_TVM
+};
+
 /** @enum JitCommandType Command types supported by jitted queries. */
 enum JitCommandType : uint8_t {
     /** @var Invalid command type. */

@@ -128,9 +128,8 @@ mot_string ThreadStatistics::MakeName(const char* baseName, uint64_t threadId)
     return result;
 }
 
-bool ThreadStatistics::RegisterStatistics(StatisticVariable* statVar)
+void ThreadStatistics::RegisterStatistics(StatisticVariable* statVar)
 {
-    bool result = false;
     if (!m_statVars.push_back(statVar)) {
         MOT_REPORT_ERROR(
             MOT_ERROR_OOM, "Register Statistics", "Failed to add statistic variable %s", statVar->GetName());
@@ -139,9 +138,6 @@ bool ThreadStatistics::RegisterStatistics(StatisticVariable* statVar)
             "Register Statistics",
             "Failed to add valid thread slot for statistic variable %s",
             statVar->GetName());
-    } else {
-        result = true;
     }
-    return result;
 }
 }  // namespace MOT

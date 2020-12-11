@@ -341,11 +341,6 @@ private:
      */
     void ApplySurrogate();
 
-    void SetLsn(uint64_t lsn)
-    {
-        m_lsn = lsn;
-    }
-
     bool m_initialized;
 
     bool m_recoverFromCkptDone;

@@ -22,15 +22,34 @@
  * -------------------------------------------------------------------------
  */
 
-// Be sure to include jit_tvm_query.h before anything else because of global.h.
-// See jit_tvm_query.h for more details.
-#include "jit_tvm_funcs.h"
+/*
+ * ATTENTION: Be sure to include jit_tvm_query.h before anything else because of libintl.h
+ * (jit_tvm_blocks.h includes jit_tvm_query.h before anything else).
+ * See jit_tvm_query.h for more details.
+ */
 #include "jit_tvm_blocks.h"
+#include "jit_tvm_funcs.h"
+#include "jit_tvm_util.h"
+#include "jit_util.h"
+#include "mot_error.h"
+#include "utilities.h"
+
+#include "catalog/pg_aggregate.h"
 
 using namespace tvm;
 
 namespace JitExec {
 DECLARE_LOGGER(JitTvmBlocks, JitExec)
+
+static bool ProcessJoinOpExpr(
+    JitTvmCodeGenContext* ctx, const OpExpr* op_expr, int* column_count, int* column_array, int* max_arg);
+static bool ProcessJoinBoolExpr(
+    JitTvmCodeGenContext* ctx, const BoolExpr* boolexpr, int* column_count, int* column_array, int* max_arg);
+static Instruction* buildExpression(JitTvmCodeGenContext* ctx, Expression* expr);
+static Expression* ProcessExpr(
+    JitTvmCodeGenContext* ctx, Expr* expr, int& result_type, int arg_pos, int depth, int* max_arg);
+static Expression* ProcessFilterExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitFilter* filter, int* max_arg);
+static Expression* ProcessExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitExpr* expr, int* max_arg);
 
 void CreateJittedFunction(JitTvmCodeGenContext* ctx, const char* function_name, const char* query_string)
 {
@@ -38,7 +57,7 @@ void CreateJittedFunction(JitTvmCodeGenContext* ctx, const char* function_name, 
     IssueDebugLog("Starting execution of jitted function");
 }
 
-bool ProcessJoinExpr(JitTvmCodeGenContext* ctx, Expr* expr, int* column_count, int* column_array, int* max_arg)
+static bool ProcessJoinExpr(JitTvmCodeGenContext* ctx, Expr* expr, int* column_count, int* column_array, int* max_arg)
 {
     bool result = false;
     if (expr->type == T_OpExpr) {
@@ -51,7 +70,7 @@ bool ProcessJoinExpr(JitTvmCodeGenContext* ctx, Expr* expr, int* column_count, i
     return result;
 }
 
-bool ProcessJoinOpExpr(
+static bool ProcessJoinOpExpr(
     JitTvmCodeGenContext* ctx, const OpExpr* op_expr, int* column_count, int* column_array, int* max_arg)
 {
     bool result = false;
@@ -123,7 +142,7 @@ bool ProcessJoinOpExpr(
     return result;
 }
 
-bool ProcessJoinBoolExpr(
+static bool ProcessJoinBoolExpr(
     JitTvmCodeGenContext* ctx, const BoolExpr* boolexpr, int* column_count, int* column_array, int* max_arg)
 {
     bool result = false;
@@ -161,7 +180,7 @@ void buildIsSoftMemoryLimitReached(JitTvmCodeGenContext* ctx)
     JIT_IF_END()
 }
 
-Instruction* buildExpression(JitTvmCodeGenContext* ctx, Expression* expr)
+static Instruction* buildExpression(JitTvmCodeGenContext* ctx, Expression* expr)
 {
     Instruction* expr_value = ctx->_builder->addExpression(expr);
 
@@ -181,7 +200,7 @@ Instruction* buildExpression(JitTvmCodeGenContext* ctx, Expression* expr)
     return expr_value;
 }
 
-void buildWriteDatumColumn(JitTvmCodeGenContext* ctx, Instruction* row, int colid, Instruction* datum_value)
+static void buildWriteDatumColumn(JitTvmCodeGenContext* ctx, Instruction* row, int colid, Instruction* datum_value)
 {
     //   ATTENTION: The datum_value expression-instruction MUST be already evaluated before this code is executed
     //              That is the reason why the expression-instruction was added to the current block and now we
@@ -261,7 +280,7 @@ Instruction* buildSearchRow(JitTvmCodeGenContext* ctx, MOT::AccessType access_ty
     return row;
 }
 
-Expression* buildFilter(JitTvmCodeGenContext* ctx, Instruction* row, JitFilter* filter, int* max_arg)
+static Expression* buildFilter(JitTvmCodeGenContext* ctx, Instruction* row, JitFilter* filter, int* max_arg)
 {
     Expression* result = nullptr;
     Expression* lhs_expr = ProcessExpr(ctx, row, filter->_lhs_operand, max_arg);
@@ -339,8 +358,8 @@ void buildDeleteRow(JitTvmCodeGenContext* ctx)
     IssueDebugLog("Row deleted");
 }
 
-Instruction* buildSearchIterator(JitTvmCodeGenContext* ctx, JitIndexScanDirection index_scan_direction,
-    JitRangeBoundMode range_bound_mode, JitRangeScanType range_scan_type, int subQueryIndex /* = -1 */)
+static Instruction* buildSearchIterator(JitTvmCodeGenContext* ctx, JitIndexScanDirection index_scan_direction,
+    JitRangeBoundMode range_bound_mode, JitRangeScanType range_scan_type, int subQueryIndex = -1)
 {
     // search the row
     IssueDebugLog("Searching range start");
@@ -357,7 +376,8 @@ Instruction* buildSearchIterator(JitTvmCodeGenContext* ctx, JitIndexScanDirectio
 }
 
 /** @brief Adds code to search for an iterator. */
-Instruction* buildBeginIterator(JitTvmCodeGenContext* ctx, JitRangeScanType rangeScanType, int subQueryIndex /* = -1 */)
+static Instruction* buildBeginIterator(
+    JitTvmCodeGenContext* ctx, JitRangeScanType rangeScanType, int subQueryIndex = -1)
 {
     // search the row
     IssueDebugLog("Getting begin iterator for full-scan");
@@ -392,7 +412,7 @@ Instruction* buildGetRowFromIterator(JitTvmCodeGenContext* ctx, BasicBlock* endL
     return row;
 }
 
-Expression* ProcessConstExpr(
+static Expression* ProcessConstExpr(
     JitTvmCodeGenContext* ctx, const Const* const_value, int& result_type, int arg_pos, int depth, int* max_arg)
 {
     Expression* result = nullptr;
@@ -416,7 +436,7 @@ Expression* ProcessConstExpr(
     return result;
 }
 
-Expression* ProcessParamExpr(
+static Expression* ProcessParamExpr(
     JitTvmCodeGenContext* ctx, const Param* param, int& result_type, int arg_pos, int depth, int* max_arg)
 {
     Expression* result = nullptr;
@@ -440,7 +460,7 @@ Expression* ProcessParamExpr(
     return result;
 }
 
-Expression* ProcessRelabelExpr(
+static Expression* ProcessRelabelExpr(
     JitTvmCodeGenContext* ctx, RelabelType* relabel_type, int& result_type, int arg_pos, int depth, int* max_arg)
 {
     MOT_LOG_DEBUG("Processing RELABEL expression");
@@ -448,7 +468,7 @@ Expression* ProcessRelabelExpr(
     return ProcessParamExpr(ctx, param, result_type, arg_pos, depth, max_arg);
 }
 
-Expression* ProcessVarExpr(
+static Expression* ProcessVarExpr(
     JitTvmCodeGenContext* ctx, const Var* var, int& result_type, int arg_pos, int depth, int* max_arg)
 {
     Expression* result = nullptr;
@@ -509,7 +529,7 @@ Expression* ProcessVarExpr(
         result = new (std::nothrow) name##Operator(args[0], args[1], args[2], arg_pos); \
         break;
 
-Expression* ProcessOpExpr(
+static Expression* ProcessOpExpr(
     JitTvmCodeGenContext* ctx, const OpExpr* op_expr, int& result_type, int arg_pos, int depth, int* max_arg)
 {
     Expression* result = nullptr;
@@ -555,7 +575,7 @@ Expression* ProcessOpExpr(
     return result;
 }
 
-Expression* ProcessFuncExpr(
+static Expression* ProcessFuncExpr(
     JitTvmCodeGenContext* ctx, const FuncExpr* func_expr, int& result_type, int arg_pos, int depth, int* max_arg)
 {
     Expression* result = nullptr;
@@ -608,7 +628,8 @@ Expression* ProcessFuncExpr(
 #undef APPLY_BINARY_CAST_OPERATOR
 #undef APPLY_TERNARY_CAST_OPERATOR
 
-Expression* ProcessExpr(JitTvmCodeGenContext* ctx, Expr* expr, int& result_type, int arg_pos, int depth, int* max_arg)
+static Expression* ProcessExpr(
+    JitTvmCodeGenContext* ctx, Expr* expr, int& result_type, int arg_pos, int depth, int* max_arg)
 {
     Expression* result = nullptr;
     MOT_LOG_DEBUG("%*s --> Processing expression %d", depth, "", (int)expr->type);
@@ -639,7 +660,7 @@ Expression* ProcessExpr(JitTvmCodeGenContext* ctx, Expr* expr, int& result_type,
     return result;
 }
 
-Expression* ProcessConstExpr(JitTvmCodeGenContext* ctx, const JitConstExpr* expr, int* max_arg)
+static Expression* ProcessConstExpr(JitTvmCodeGenContext* ctx, const JitConstExpr* expr, int* max_arg)
 {
     AddSetExprArgIsNull(ctx, expr->_arg_pos, (expr->_is_null ? 1 : 0));  // mark expression null status
     Expression* result = new (std::nothrow) ConstExpression(expr->_value, expr->_arg_pos, (int)(expr->_is_null));
@@ -649,7 +670,7 @@ Expression* ProcessConstExpr(JitTvmCodeGenContext* ctx, const JitConstExpr* expr
     return result;
 }
 
-Expression* ProcessParamExpr(JitTvmCodeGenContext* ctx, const JitParamExpr* expr, int* max_arg)
+static Expression* ProcessParamExpr(JitTvmCodeGenContext* ctx, const JitParamExpr* expr, int* max_arg)
 {
     Expression* result = AddGetDatumParam(ctx, expr->_param_id, expr->_arg_pos);
     if (max_arg && (expr->_arg_pos > *max_arg)) {
@@ -658,7 +679,7 @@ Expression* ProcessParamExpr(JitTvmCodeGenContext* ctx, const JitParamExpr* expr
     return result;
 }
 
-Expression* ProcessVarExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitVarExpr* expr, int* max_arg)
+static Expression* ProcessVarExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitVarExpr* expr, int* max_arg)
 {
     Expression* result = nullptr;
     if (row == nullptr) {
@@ -708,7 +729,7 @@ Expression* ProcessVarExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitVarEx
         result = new (std::nothrow) name##Operator(args[0], args[1], args[2], arg_pos); \
         break;
 
-Expression* ProcessOpExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitOpExpr* expr, int* max_arg)
+static Expression* ProcessOpExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitOpExpr* expr, int* max_arg)
 {
     Expression* result = nullptr;
 
@@ -737,7 +758,7 @@ Expression* ProcessOpExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitOpExpr
     return result;
 }
 
-Expression* ProcessFuncExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitFuncExpr* expr, int* max_arg)
+static Expression* ProcessFuncExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitFuncExpr* expr, int* max_arg)
 {
     Expression* result = nullptr;
 
@@ -792,7 +813,7 @@ Expression* ProcessFuncExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitFunc
         MOT_LOG_TRACE("Unexpected call in filter expression to ternary cast builtin: " #name); \
         break;
 
-Expression* ProcessFilterExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitFilter* filter, int* max_arg)
+static Expression* ProcessFilterExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitFilter* filter, int* max_arg)
 {
     Expression* result = nullptr;
 
@@ -830,12 +851,12 @@ Expression* ProcessFilterExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitFi
 #undef APPLY_BINARY_CAST_OPERATOR
 #undef APPLY_TERNARY_CAST_OPERATOR
 
-Expression* ProcessSubLinkExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitSubLinkExpr* expr, int* max_arg)
+static Expression* ProcessSubLinkExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitSubLinkExpr* expr, int* max_arg)
 {
     return AddSelectSubQueryResult(ctx, expr->_sub_query_index);
 }
 
-Expression* ProcessBoolExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitBoolExpr* expr, int* maxArg)
+static Expression* ProcessBoolExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitBoolExpr* expr, int* maxArg)
 {
     Expression* result = nullptr;
 
@@ -871,7 +892,7 @@ Expression* ProcessBoolExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitBool
     return result;
 }
 
-Expression* ProcessExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitExpr* expr, int* max_arg)
+static Expression* ProcessExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitExpr* expr, int* max_arg)
 {
     Expression* result = nullptr;
 
@@ -897,7 +918,7 @@ Expression* ProcessExpr(JitTvmCodeGenContext* ctx, Instruction* row, JitExpr* ex
     return result;
 }
 
-bool buildScanExpression(JitTvmCodeGenContext* ctx, JitColumnExpr* expr, int* max_arg,
+static bool buildScanExpression(JitTvmCodeGenContext* ctx, JitColumnExpr* expr, int* max_arg,
     JitRangeIteratorType range_itr_type, JitRangeScanType range_scan_type, Instruction* outer_row, int subQueryIndex)
 {
     Expression* value_expr = ProcessExpr(ctx, outer_row, expr->_expr, max_arg);
@@ -1025,7 +1046,7 @@ bool selectRowColumns(JitTvmCodeGenContext* ctx, Instruction* row, JitSelectExpr
     return true;
 }
 
-bool buildClosedRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* indexScan, int* maxArg,
+static bool buildClosedRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* indexScan, int* maxArg,
     JitRangeScanType rangeScanType, Instruction* outerRow, int subQueryIndex)
 {
     // a closed range scan starts just like a point scan (with not enough search expressions) and then adds key patterns
@@ -1079,7 +1100,7 @@ bool buildClosedRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* indexScan, in
     return result;
 }
 
-bool buildSemiOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* index_scan, int* max_arg,
+static bool buildSemiOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* index_scan, int* max_arg,
     JitRangeScanType range_scan_type, JitRangeBoundMode* begin_range_bound, JitRangeBoundMode* end_range_bound,
     Instruction* outer_row, int subQueryIndex)
 {
@@ -1205,7 +1226,7 @@ bool buildSemiOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* index_scan,
     return result;
 }
 
-bool buildOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* index_scan, int* max_arg,
+static bool buildOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* index_scan, int* max_arg,
     JitRangeScanType range_scan_type, JitRangeBoundMode* begin_range_bound, JitRangeBoundMode* end_range_bound,
     Instruction* outer_row, int subQueryIndex)
 {
@@ -1368,9 +1389,9 @@ bool buildOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* index_scan, int
     return result;
 }
 
-bool buildRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* indexScan, int* maxArg, JitRangeScanType rangeScanType,
-    JitRangeBoundMode* beginRangeBound, JitRangeBoundMode* endRangeBound, Instruction* outerRow,
-    int subQueryIndex /* = -1 */)
+static bool buildRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* indexScan, int* maxArg,
+    JitRangeScanType rangeScanType, JitRangeBoundMode* beginRangeBound, JitRangeBoundMode* endRangeBound,
+    Instruction* outerRow, int subQueryIndex = -1)
 {
     bool result = false;
 
@@ -1402,7 +1423,7 @@ bool buildRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* indexScan, int* max
     return result;
 }
 
-bool buildPrepareStateScan(JitTvmCodeGenContext* ctx, JitIndexScan* index_scan, int* max_arg,
+static bool buildPrepareStateScan(JitTvmCodeGenContext* ctx, JitIndexScan* index_scan, int* max_arg,
     JitRangeScanType range_scan_type, Instruction* outer_row)
 {
     JitRangeBoundMode begin_range_bound = JIT_RANGE_BOUND_NONE;
@@ -1445,7 +1466,7 @@ bool buildPrepareStateScan(JitTvmCodeGenContext* ctx, JitIndexScan* index_scan, 
     return true;
 }
 
-bool buildPrepareStateRow(JitTvmCodeGenContext* ctx, MOT::AccessType access_mode, JitIndexScan* index_scan,
+static bool buildPrepareStateRow(JitTvmCodeGenContext* ctx, MOT::AccessType access_mode, JitIndexScan* index_scan,
     int* max_arg, JitRangeScanType range_scan_type, BasicBlock* next_block)
 {
     MOT_LOG_DEBUG("Generating select code for stateful range select");
@@ -1570,7 +1591,7 @@ JitTvmRuntimeCursor buildRangeCursor(JitTvmCodeGenContext* ctx, JitIndexScan* in
     return result;
 }
 
-bool prepareAggregateAvg(JitTvmCodeGenContext* ctx, const JitAggregate* aggregate)
+static bool prepareAggregateAvg(JitTvmCodeGenContext* ctx, const JitAggregate* aggregate)
 {
     // although we already have this information in the aggregate descriptor, we still check again
     switch (aggregate->_func_id) {
@@ -1601,7 +1622,7 @@ bool prepareAggregateAvg(JitTvmCodeGenContext* ctx, const JitAggregate* aggregat
     return true;
 }
 
-bool prepareAggregateSum(JitTvmCodeGenContext* ctx, const JitAggregate* aggregate)
+static bool prepareAggregateSum(JitTvmCodeGenContext* ctx, const JitAggregate* aggregate)
 {
     switch (aggregate->_func_id) {
         case INT8SUMFUNCOID:
@@ -1637,13 +1658,13 @@ bool prepareAggregateSum(JitTvmCodeGenContext* ctx, const JitAggregate* aggregat
     return true;
 }
 
-bool prepareAggregateMaxMin(JitTvmCodeGenContext* ctx, JitAggregate* aggregate)
+static bool prepareAggregateMaxMin(JitTvmCodeGenContext* ctx, JitAggregate* aggregate)
 {
     AddResetAggMaxMinNull(ctx);
     return true;
 }
 
-bool prepareAggregateCount(JitTvmCodeGenContext* ctx, const JitAggregate* aggregate)
+static bool prepareAggregateCount(JitTvmCodeGenContext* ctx, const JitAggregate* aggregate)
 {
     switch (aggregate->_func_id) {
         case 2147:  // int8inc_any
@@ -1659,7 +1680,7 @@ bool prepareAggregateCount(JitTvmCodeGenContext* ctx, const JitAggregate* aggreg
     return true;
 }
 
-bool prepareDistinctSet(JitTvmCodeGenContext* ctx, const JitAggregate* aggregate)
+static bool prepareDistinctSet(JitTvmCodeGenContext* ctx, const JitAggregate* aggregate)
 {
     // we need a hash-set according to the aggregated type (preferably but not necessarily linear-probing hash)
     // we use an opaque datum type, with a tailor-made hash-function and equals function
@@ -1706,7 +1727,7 @@ bool prepareAggregate(JitTvmCodeGenContext* ctx, JitAggregate* aggregate)
     return result;
 }
 
-Expression* buildAggregateAvg(
+static Expression* buildAggregateAvg(
     JitTvmCodeGenContext* ctx, const JitAggregate* aggregate, Expression* current_aggregate, Expression* var_expr)
 {
     Expression* aggregate_expr = nullptr;
@@ -1761,7 +1782,7 @@ Expression* buildAggregateAvg(
     return aggregate_expr;
 }
 
-Expression* buildAggregateSum(
+static Expression* buildAggregateSum(
     JitTvmCodeGenContext* ctx, const JitAggregate* aggregate, Expression* current_aggregate, Expression* var_expr)
 {
     Expression* aggregate_expr = nullptr;
@@ -1804,7 +1825,7 @@ Expression* buildAggregateSum(
     return aggregate_expr;
 }
 
-Expression* buildAggregateMax(
+static Expression* buildAggregateMax(
     JitTvmCodeGenContext* ctx, const JitAggregate* aggregate, Expression* current_aggregate, Expression* var_expr)
 {
     Expression* aggregate_expr = nullptr;
@@ -1872,7 +1893,7 @@ Expression* buildAggregateMax(
     return aggregate_expr;
 }
 
-Expression* buildAggregateMin(
+static Expression* buildAggregateMin(
     JitTvmCodeGenContext* ctx, const JitAggregate* aggregate, Expression* current_aggregate, Expression* var_expr)
 {
     Expression* aggregate_expr = nullptr;
@@ -1935,7 +1956,8 @@ Expression* buildAggregateMin(
     return aggregate_expr;
 }
 
-Expression* buildAggregateCount(JitTvmCodeGenContext* ctx, const JitAggregate* aggregate, Expression* count_aggregate)
+static Expression* buildAggregateCount(
+    JitTvmCodeGenContext* ctx, const JitAggregate* aggregate, Expression* count_aggregate)
 {
     Expression* aggregate_expr = nullptr;
     switch (aggregate->_func_id) {
@@ -1957,7 +1979,7 @@ Expression* buildAggregateCount(JitTvmCodeGenContext* ctx, const JitAggregate* a
     return aggregate_expr;
 }
 
-bool buildAggregateMaxMin(JitTvmCodeGenContext* ctx, JitAggregate* aggregate, Expression* var_expr)
+static bool buildAggregateMaxMin(JitTvmCodeGenContext* ctx, JitAggregate* aggregate, Expression* var_expr)
 {
     bool result = true;
 
@@ -1990,7 +2012,7 @@ bool buildAggregateMaxMin(JitTvmCodeGenContext* ctx, JitAggregate* aggregate, Ex
     return result;
 }
 
-bool buildAggregateTuple(JitTvmCodeGenContext* ctx, JitAggregate* aggregate, Expression* var_expr)
+static bool buildAggregateTuple(JitTvmCodeGenContext* ctx, JitAggregate* aggregate, Expression* var_expr)
 {
     bool result = false;
 

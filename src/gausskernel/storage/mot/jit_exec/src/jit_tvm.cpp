@@ -29,6 +29,8 @@
 #include "utilities.h"
 #include "mot_error.h"
 
+#include <algorithm>
+
 DECLARE_LOGGER(TVM, JitExec)
 
 namespace tvm {
@@ -996,6 +998,9 @@ Instruction* Builder::addInstruction(Instruction* instruction)
     if (instruction->GetType() == Instruction::Regular) {
         instruction->SetRegisterRef(_next_register_ref);
         result = new (std::nothrow) RegisterRefInstruction(_next_register_ref);
+        if (result == nullptr) {
+            return nullptr;
+        }
         _current_block->recordRegisterReferenceDefinition(_next_register_ref);  // for later validation
         _current_function->addInstruction(result);                              // for cleanup only
         ++_next_register_ref;

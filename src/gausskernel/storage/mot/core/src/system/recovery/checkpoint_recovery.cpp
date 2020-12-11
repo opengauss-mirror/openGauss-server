@@ -79,9 +79,10 @@ bool CheckpointRecovery::Recover()
 
     int taskFillStat = FillTasksFromMapFile();
     if (taskFillStat < 0) {
-        MOT_LOG_INFO("CheckpointRecovery:: failed to read map file");
-        return false;                // error was already set
-    } else if (taskFillStat == 0) {  // fresh install
+        MOT_LOG_ERROR("CheckpointRecovery:: failed to read map file");
+        return false;
+    } else if (taskFillStat == 0) {
+        // fresh install
         return true;
     }
 
@@ -125,13 +126,16 @@ bool CheckpointRecovery::Recover()
             return false;
         }
     }
+
     if (!RecoverInProcessTxns()) {
         MOT_LOG_ERROR("Failed to recover the in-process transactions from the checkpoint");
         return false;
     }
 
-    // set the current valid id in the checkpoint manager in case
-    // we will need to retrieve it before a new checkpoint is created
+    /*
+     * Set the current valid id in the checkpoint manager in case
+     * we will need to retrieve it before a new checkpoint is created.
+     */
     engine->GetCheckpointManager()->SetId(m_checkpointId);
 
     MOT_LOG_INFO("Checkpoint Recovery: finished recovering %lu tables from checkpoint id: %lu",

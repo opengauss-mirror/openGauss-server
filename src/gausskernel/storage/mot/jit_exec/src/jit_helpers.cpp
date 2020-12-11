@@ -22,8 +22,12 @@
  * -------------------------------------------------------------------------
  */
 
-// be careful to include gscodegen.h before anything else to avoid clash with PM definition in datetime.h
-#include "global.h"
+/*
+ * ATTENTION:
+ * 1. Be sure to include gscodegen.h before anything else to avoid clash with PM definition in datetime.h.
+ * 2. Be sure to include libintl.h before gscodegen.h to avoid problem with gettext.
+ */
+#include "libintl.h"
 #include "codegen/gscodegen.h"
 #include "access/xact.h"
 #include "utils/array.h"

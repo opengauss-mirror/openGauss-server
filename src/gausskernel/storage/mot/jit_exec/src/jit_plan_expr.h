@@ -32,6 +32,8 @@
 #include "jit_common.h"
 #include "utilities.h"
 
+#include <algorithm>
+
 namespace JitExec {
 /** @enum Index scan direction constants. */
 enum JitIndexScanDirection {

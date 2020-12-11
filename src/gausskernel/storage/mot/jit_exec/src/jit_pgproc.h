@@ -25,9 +25,6 @@
 #ifndef JIT_PGPROC_H
 #define JIT_PGPROC_H
 
-// make sure to include these headers when using APPLY_OPERATORS macro.
-// due to collision with LLVM definitions, make sure to include the following files in this order:
-#include "codegen/gscodegen.h"
 #include "utils/builtins.h"
 #include "utils/date.h"
 #include "utils/int8.h"

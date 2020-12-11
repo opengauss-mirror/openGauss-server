@@ -35,10 +35,10 @@ static void FormatTime(uint64_t timeVal, char* buf, uint32_t len)
     struct tm t;
 
     if (localtime_r(&(ts.tv_sec), &t) != NULL) {
-        int ret = strftime(buf, len, "%F %T", &t);
+        size_t ret = strftime(buf, len, "%F %T", &t);
         if (ret != 0) {
-            len -= ret - 1;
-            errno_t erc = snprintf_s(&buf[strlen(buf)], len, len - 1, ".%09ld", ts.tv_nsec);
+            len -= ret;
+            errno_t erc = snprintf_s(buf + ret, len, len - 1, ".%09ld", ts.tv_nsec);
             securec_check_ss(erc, "\0", "\0");
         }
     }
