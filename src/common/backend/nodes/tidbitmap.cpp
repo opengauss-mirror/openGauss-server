@@ -45,6 +45,7 @@
 #include "nodes/bitmapset.h"
 #include "nodes/tidbitmap.h"
 #include "utils/hsearch.h"
+#include "utils/memutils.h"
 #include "storage/lwlock.h"
 
 /*
@@ -161,6 +162,9 @@ struct TIDBitmap {
     bool isGlobalPart;     /* represent global partition index tbm */
     bool isShared;         /* is shared pagetable? */
     PagetableEntry entry1; /* used when status == TBM_ONE_PAGE */
+    pg_atomic_uint32 pagetableRefcount; /* ref count for pagetable */
+    pg_atomic_uint32 pagesRefcount;     /* ref count for spages */
+    pg_atomic_uint32 chunksRefcount;    /* ref count for schunks */
     /* these are valid when iterating is true: */
     PagetableEntry** spages;  /* sorted exact-page list, or NULL */
     PagetableEntry** schunks; /* sorted lossy-chunk list, or NULL */
@@ -194,9 +198,6 @@ struct TBMSharedIteratorState {
     HTAB* pagetable;       /* hash table of PagetableEntry's */
     PagetableEntry** spages;    /* sorted exact-page list, or NULL */
     PagetableEntry** schunks;   /* sorted lossy-chunk list, or NULL */
-    pg_atomic_uint32 pagetableRefcount; /* ref count for pagetable */
-    pg_atomic_uint32 pagesRefcount;     /* ref count for spages */
-    pg_atomic_uint32 chunksRefcount;    /* ref count for schunks */
     LWLock lock;           /* lock to protect below members */
     int spageptr;          /* next spages index */
     int schunkptr;         /* next schunks index */
@@ -244,7 +245,12 @@ TIDBitmap* tbm_create(long maxbytes, MemoryContext dsa)
         tbm->mcxt = CurrentMemoryContext;
         tbm->isShared = false;
     } else {
-        tbm->mcxt = dsa;
+        /*
+         * Create a new memctx, cause when destory the hash table, it will delete the memctx, so we
+         * need to use a new memctx. Check tbm_free_shared_area -> hash_destroy
+         */
+        tbm->mcxt = AllocSetContextCreate(dsa, "shared tbm hash table",  ALLOCSET_DEFAULT_MINSIZE,
+            ALLOCSET_DEFAULT_INITSIZE, ALLOCSET_DEFAULT_MAXSIZE, SHARED_CONTEXT);
         tbm->isShared = true;
     }
     tbm->status = TBM_EMPTY;
@@ -327,15 +333,15 @@ void tbm_free(TIDBitmap* tbm)
  * memory if they are not referred by any of the shared iterator i.e recount
  * is becomes 0.
  */
-void tbm_free_shared_area(TBMSharedIteratorState *istate)
+void tbm_free_shared_area(TIDBitmap* tbm, TBMSharedIteratorState *istate)
 {
-    if (pg_atomic_sub_fetch_u32(&istate->pagetableRefcount, 1) == 0) {
+    if (pg_atomic_sub_fetch_u32(&tbm->pagetableRefcount, 1) == 0) {
         hash_destroy(istate->pagetable);
     }
-    if (pg_atomic_sub_fetch_u32(&istate->pagesRefcount, 1) == 0) {
+    if (pg_atomic_sub_fetch_u32(&tbm->pagesRefcount, 1) == 0) {
         pfree_ext(istate->spages);
     }
-    if (pg_atomic_sub_fetch_u32(&istate->chunksRefcount, 1) == 0) {
+    if (pg_atomic_sub_fetch_u32(&tbm->chunksRefcount, 1) == 0) {
         pfree_ext(istate->schunks);
     }
     pfree_ext(istate);
@@ -717,9 +723,9 @@ TBMSharedIteratorState* tbm_prepare_shared_iterate(TIDBitmap *tbm)
         if (tbm->status == TBM_HASH) {
             tbm_sort_pages(tbm);
         }
-        pg_atomic_init_u32(&istate->pagetableRefcount, 0);
-        pg_atomic_init_u32(&istate->pagesRefcount, 0);
-        pg_atomic_init_u32(&istate->chunksRefcount, 0);
+        pg_atomic_init_u32(&tbm->pagetableRefcount, 0);
+        pg_atomic_init_u32(&tbm->pagesRefcount, 0);
+        pg_atomic_init_u32(&tbm->chunksRefcount, 0);
     }
 
     /*
@@ -741,9 +747,9 @@ TBMSharedIteratorState* tbm_prepare_shared_iterate(TIDBitmap *tbm)
      * increase the refcount by 1 so that while freeing the shared iterator we
      * don't free pagetable and iterator array until its refcount becomes 0.
      */
-    (void)pg_atomic_add_fetch_u32(&istate->pagetableRefcount, 1);
-    (void)pg_atomic_add_fetch_u32(&istate->pagesRefcount, 1);
-    (void)pg_atomic_add_fetch_u32(&istate->chunksRefcount, 1);
+    (void)pg_atomic_add_fetch_u32(&tbm->pagetableRefcount, 1);
+    (void)pg_atomic_add_fetch_u32(&tbm->pagesRefcount, 1);
+    (void)pg_atomic_add_fetch_u32(&tbm->chunksRefcount, 1);
     /* Initialize the iterator lock */
     LWLockInitialize(&istate->lock, LWTRANCHE_TBM);
 
