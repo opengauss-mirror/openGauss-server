@@ -71,18 +71,6 @@
         oid == FLOAT8OID || oid == INT1OID || oid == DATEOID || oid == TIMEOID || oid == TIMESTAMPOID ||           \
         oid == TIMESTAMPTZOID)
 
-#define FILL_KEY_NULL(toid, buf, len)                \
-    {                                                \
-        errno_t erc = memset_s(buf, len, 0x00, len); \
-        securec_check(erc, "\0", "\0");              \
-    }
-
-#define FILL_KEY_MAX(toid, buf, len)                 \
-    {                                                \
-        errno_t erc = memset_s(buf, len, 0xff, len); \
-        securec_check(erc, "\0", "\0");              \
-    }
-
 MOT::MOTEngine* MOTAdaptor::m_engine = nullptr;
 static XLOGLogger xlogger;
 
@@ -838,7 +826,8 @@ void MOTAdaptor::OpenCursor(Relation rel, MOTFdwStateSt* festate)
 
             festate->m_stateKey[bIx].InitKey(keyLength);
             buf = festate->m_stateKey[bIx].GetKeyBuf();
-            FILL_KEY_MAX(INT8OID, buf, keyLength);
+            errno_t erc = memset_s(buf, keyLength, 0xff, keyLength);
+            securec_check(erc, "\0", "\0");
             festate->m_cursor[bIx] =
                 ix->Search(&festate->m_stateKey[bIx], false, false, festate->m_currTxn->GetThdId(), found);
             break;
@@ -853,7 +842,8 @@ void MOTAdaptor::OpenCursor(Relation rel, MOTFdwStateSt* festate)
 
                     festate->m_stateKey[1].InitKey(keyLength);
                     buf = festate->m_stateKey[1].GetKeyBuf();
-                    FILL_KEY_MAX(INT8OID, buf, keyLength);
+                    errno_t erc = memset_s(buf, keyLength, 0xff, keyLength);
+                    securec_check(erc, "\0", "\0");
                     festate->m_cursor[1] =
                         ix->Search(&festate->m_stateKey[1], false, false, festate->m_currTxn->GetThdId(), found);
                 } else {
@@ -1257,8 +1247,7 @@ MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* table, ::TransactionId t
             break;
         }
 
-        ListCell* cell;
-
+        ListCell* cell = nullptr;
         foreach (cell, table->base.tableElts) {
             int16 typeLen = 0;
             bool isBlob = false;
@@ -1692,7 +1681,8 @@ void MOTAdaptor::CreateKeyBuffer(Relation rel, MOTFdwStateSt* festate, int start
             Datum val = ExecEvalExpr((ExprState*)(expr), festate->m_econtext, &is_null, nullptr);
             if (is_null) {
                 MOT_ASSERT((offset + fieldLengths[i]) <= keyLength);
-                FILL_KEY_NULL(desc->attrs[orgCols[i] - 1]->atttypid, buf + offset, fieldLengths[i]);
+                errno_t erc = memset_s(buf + offset, fieldLengths[i], 0x00, fieldLengths[i]);
+                securec_check(erc, "\0", "\0");
             } else {
                 MOT::Column* col = festate->m_table->GetField(orgCols[i]);
                 uint8_t fill = 0x00;

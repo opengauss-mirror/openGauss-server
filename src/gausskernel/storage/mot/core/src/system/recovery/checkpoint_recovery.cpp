@@ -717,7 +717,6 @@ bool CheckpointRecovery::DeserializeInProcessTxns(int fd, uint64_t numEntries)
 
 bool CheckpointRecovery::IsCheckpointValid(uint64_t id)
 {
-    int fd = -1;
     std::string fileName;
     std::string workingDir;
     bool ret = false;
@@ -728,7 +727,7 @@ bool CheckpointRecovery::IsCheckpointValid(uint64_t id)
         }
 
         CheckpointUtils::MakeEndFilename(fileName, workingDir, id);
-        if (!CheckpointUtils::FileExists(fileName)) {
+        if (!CheckpointUtils::IsFileExists(fileName)) {
             MOT_LOG_ERROR("IsCheckpointValid: checkpoint id %lu is invalid", id);
             break;
         }

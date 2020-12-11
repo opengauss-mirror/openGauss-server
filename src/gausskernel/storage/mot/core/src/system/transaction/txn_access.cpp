@@ -151,7 +151,6 @@ bool TxnAccess::Init(TxnManager* manager)
     }
     m_initPhase = CreateRowSet;
 
-    m_initPhase = CreateInsertSet;
     m_insertManager = new (std::nothrow) TxnInsertAction();
     if (m_insertManager == nullptr) {
         MOT_REPORT_ERROR(MOT_ERROR_OOM,

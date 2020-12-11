@@ -35,14 +35,12 @@ namespace MOT {
 class CheckpointControlFile {
 public:
     CheckpointControlFile() : m_valid(false)
-    {
-        Init();
-    }
+    {}
 
     ~CheckpointControlFile()
     {}
 
-    void Init();
+    bool Init();
 
     struct CtrlFileElem {
         CtrlFileElem(uint64_t id = invalidId, uint64_t lsn = invalidId, uint64_t replay = invalidId)
@@ -65,17 +63,17 @@ public:
 
     uint64_t GetId() const
     {
-        return m_controlFile.entry[0].checkpointId;
+        return m_ctrlFileData.entry[0].checkpointId;
     }
 
     uint64_t GetLsn() const
     {
-        return m_controlFile.entry[0].lsn;
+        return m_ctrlFileData.entry[0].lsn;
     }
 
     uint64_t GetLastReplayLsn() const
     {
-        return m_controlFile.entry[0].lastReplayLsn;
+        return m_ctrlFileData.entry[0].lastReplayLsn;
     }
 
     /**
@@ -118,7 +116,7 @@ private:
 
     std::string m_fullPath;
 
-    struct CtrlFileData m_controlFile;
+    struct CtrlFileData m_ctrlFileData;
 
     bool m_valid;
 };

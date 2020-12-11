@@ -312,7 +312,7 @@ RC RecoveryManager::RedoSegment(
 bool RecoveryManager::LogStats::FindIdx(uint64_t tableId, uint64_t& id)
 {
     id = m_numEntries;
-    std::map<uint64_t, int>::iterator it;
+    std::map<uint64_t, uint64_t>::iterator it;
     std::lock_guard<spin_lock> lock(m_slock);
     it = m_idToIdx.find(tableId);
     if (it == m_idToIdx.end()) {
@@ -321,7 +321,7 @@ bool RecoveryManager::LogStats::FindIdx(uint64_t tableId, uint64_t& id)
             return false;
         }
         m_tableStats.push_back(newEntry);
-        m_idToIdx.insert(std::pair<int, int>(tableId, m_numEntries));
+        m_idToIdx.insert(std::pair<uint64_t, uint64_t>(tableId, m_numEntries));
         m_numEntries++;
     } else {
         id = it->second;
@@ -332,7 +332,7 @@ bool RecoveryManager::LogStats::FindIdx(uint64_t tableId, uint64_t& id)
 void RecoveryManager::LogStats::Print()
 {
     MOT_LOG_ERROR(">> log recovery stats >>");
-    for (int i = 0; i < m_numEntries; i++) {
+    for (uint64_t i = 0; i < m_numEntries; i++) {
         MOT_LOG_ERROR("TableId %lu, Inserts: %lu, Updates: %lu, Deletes: %lu",
             m_tableStats[i]->m_id,
             m_tableStats[i]->m_inserts.load(),
