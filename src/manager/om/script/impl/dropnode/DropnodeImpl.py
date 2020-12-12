@@ -393,7 +393,6 @@ class DropnodeImpl():
         start dropnode
         """
         self.change_user()
-        self.checkUserAndGroupExists()
         self.logger.log("[gs_dropnode]Start to drop nodes of the cluster.")
         self.checkAllStandbyState()
         self.dropNodeOnAllHosts()
@@ -425,7 +424,9 @@ class OperCommon:
             return
         else:
             res = re.findall(r'db_state\s*:\s*(\w+)', output)
-            if not len(res):
+            if not len(res) and isForDel:
+                return
+            elif not len(res):
                 GaussLog.exitWithError(ErrorCode.GAUSS_516["GAUSS_51651"] % host)
             dbState = res[0]
             if dbState in ['Promoting', 'Wait', 'Demoting']:
@@ -604,7 +605,7 @@ class OperCommon:
             sqlvalue += "ALTER SYSTEM SET synchronous_standby_names = '%s';" \
                         % syncStandbyValue
         if singleLeft:
-            sqlvalue += "ALTER SYSTEM SET synchronous_standby_names = '*';"
+            sqlvalue += "ALTER SYSTEM SET synchronous_standby_names = '';"
         if sqlvalue != '':
             cmd = "touch %s && chmod %s %s" % \
                   (sqlExecFile, DefaultValue.MAX_DIRECTORY_MODE, sqlExecFile)
@@ -749,8 +750,13 @@ class OperCommon:
         command = "source %s ; gs_ctl stop -D %s -M immediate" % (env, dirDn)
         resultMap, outputCollect = sshTool.getSshStatusOutput(command, [host],
                                                               env)
-        self.logger.debug(host)
-        self.logger.debug(outputCollect)
+        if resultMap[host] != 'Success':
+            self.logger.debug(outputCollect)
+            self.logger.log(
+                "[gs_dropnode]Cannot connect the target node %s." % host)
+            self.logger.log(
+                "[gs_dropnode]It may be still running.")
+            return
         self.logger.log("[gs_dropnode]End of stop the target node %s." % host)
 
     def startInstance(self, dirDn, env):
