@@ -277,9 +277,8 @@ static bool checkFlinfo(Node *node)
     return true;
 }
 
-static bool checkExpr(Node *node, bool is_first, int resno)
+static bool checkExpr(Node *node, bool is_first)
 {
-    const int noVarInSubtree = -1;
     NodeTag tag = nodeTag(node);
     switch (tag) {
         case T_Const:
@@ -287,10 +286,6 @@ static bool checkExpr(Node *node, bool is_first, int resno)
             return true;
         }
         case T_Var: {
-            /* bypass currently does not support updating with var */
-            if ((resno != ((Var*)node)->varattno) || (resno == noVarInSubtree)) {
-                return false;
-            }
             return true;
         }
 
@@ -316,7 +311,7 @@ static bool checkExpr(Node *node, bool is_first, int resno)
             bool result = true;
             ListCell *lc = NULL;
             foreach (lc, args) {
-                result = result && checkExpr((Node *)lfirst(lc), is_first, noVarInSubtree);
+                result = result && checkExpr((Node *)lfirst(lc), is_first);
                 is_first = false;
             }
             return result;
@@ -339,14 +334,14 @@ static bool checkExpr(Node *node, bool is_first, int resno)
             bool result = true;
             ListCell *lc = NULL;
             foreach (lc, args) {
-                result = result && checkExpr((Node *)lfirst(lc), is_first, noVarInSubtree);
+                result = result && checkExpr((Node *)lfirst(lc), is_first);
                 is_first = false;
             }
             return result;
         }
 
         case T_RelabelType: {
-            return checkExpr((Node *)((RelabelType *)node)->arg, is_first, noVarInSubtree);
+            return checkExpr((Node *)((RelabelType *)node)->arg, is_first);
         }
 
         default: {
@@ -731,7 +726,7 @@ FusionType checkTargetlist(List *targetList, FusionType ftype)
         if (target->resjunk && nodeTag((Node *)target->expr) == T_Var) {
             continue;
         }
-        if (!checkExpr((Node *)target->expr, true, target->resno)) {
+        if (!checkExpr((Node *)target->expr, true)) {
             return NOBYPASS_EXP_NOT_SUPPORT;
         }
     }
