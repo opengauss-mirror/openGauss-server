@@ -245,7 +245,7 @@ public:
          */
         bool FindIdx(uint64_t tableId, uint64_t& id);
 
-        std::map<uint64_t, int> m_idToIdx;
+        std::map<uint64_t, uint64_t> m_idToIdx;
 
         std::vector<Entry*> m_tableStats;
 
@@ -253,7 +253,7 @@ public:
 
         spin_lock m_slock;
 
-        int m_numEntries;
+        uint64_t m_numEntries;
     };
 
     LogStats* m_logStats;

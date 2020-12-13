@@ -519,7 +519,7 @@ static bool IsOrderingApplicable(PathKey* pathKey, RelOptInfo* rel, MOT::Index* 
     do {
         const int16_t* cols = ix->GetColumnKeyFields();
         int16_t numKeyCols = ix->GetNumFields();
-        ListCell* lcEm;
+        ListCell* lcEm = nullptr;
 
         foreach (lcEm, pathKey->pk_eclass->ec_members) {
             EquivalenceMember* em = (EquivalenceMember*)lfirst(lcEm);
@@ -975,7 +975,7 @@ static TupleTableSlot* MOTIterateForeignScan(ForeignScanState* node)
         return nullptr;
     }
 
-    MOT::Row* currRow;
+    MOT::Row* currRow = nullptr;
     MOTFdwStateSt* festate = (MOTFdwStateSt*)node->fdw_state;
     TupleTableSlot* slot = node->ss.ss_ScanTupleSlot;
     bool found = false;
@@ -1430,7 +1430,7 @@ static TupleTableSlot* MOTExecForeignUpdate(
 {
     MOTFdwStateSt* fdwState = (MOTFdwStateSt*)resultRelInfo->ri_FdwState;
     MOT::RC rc = MOT::RC_OK;
-    MOT::Row* currRow;
+    MOT::Row* currRow = nullptr;
     AttrNumber num = fdwState->m_ctidNum - 1;
     MOTRecConvertSt cv;
 
@@ -1488,7 +1488,7 @@ static TupleTableSlot* MOTExecForeignDelete(
 {
     MOTFdwStateSt* fdwState = (MOTFdwStateSt*)resultRelInfo->ri_FdwState;
     MOT::RC rc = MOT::RC_OK;
-    MOT::Row* currRow;
+    MOT::Row* currRow = nullptr;
     AttrNumber num = fdwState->m_ctidNum - 1;
     MOTRecConvertSt cv;
 

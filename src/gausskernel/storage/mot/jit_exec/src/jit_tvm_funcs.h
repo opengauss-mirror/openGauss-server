@@ -2362,7 +2362,9 @@ public:
 
     ~SaveAvgArrayInstruction() final
     {
-        _avg_array = nullptr;
+        if (_avg_array != nullptr) {
+            delete _avg_array;
+        }
     }
 
     uint64_t Exec(tvm::ExecContext* exec_context) final
@@ -2460,7 +2462,9 @@ public:
 
     ~SetAggValueInstruction() final
     {
-        _value = nullptr;
+        if (_value != nullptr) {
+            delete _value;
+        }
     }
 
     Datum Exec(tvm::ExecContext* exec_context) final

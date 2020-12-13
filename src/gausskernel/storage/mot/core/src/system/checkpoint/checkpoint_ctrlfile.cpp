@@ -38,48 +38,72 @@ static spin_lock g_ctrlfileLock;
 
 CheckpointControlFile* CheckpointControlFile::GetCtrlFile()
 {
-    if (initialized)
+    if (initialized) {
         return ctrlfileInst;
+    }
 
     g_ctrlfileLock.lock();
     ctrlfileInst = new (std::nothrow) CheckpointControlFile();
     if (ctrlfileInst == nullptr) {
         MOT_REPORT_ERROR(MOT_ERROR_OOM, "Checkpoint", "Failed to allocate memory for checkpoint control file object");
+    } else {
+        if (!ctrlfileInst->Init()) {
+            MOT_REPORT_ERROR(
+                MOT_ERROR_INVALID_CFG, "Checkpoint", "Failed to initialize checkpoint control file object");
+            delete ctrlfileInst;
+            ctrlfileInst = nullptr;
+        }
     }
     g_ctrlfileLock.unlock();
     return ctrlfileInst;
 }
 
-void CheckpointControlFile::Init()
+bool CheckpointControlFile::Init()
 {
-    int fd = -1;
-    if (initialized)
-        return;
+    if (initialized) {
+        return true;
+    }
 
     do {
+        if (GetGlobalConfiguration().m_checkpointDir.length() >= CheckpointUtils::maxPath) {
+            MOT_REPORT_ERROR(MOT_ERROR_INVALID_CFG,
+                "Checkpoint",
+                "Invalid checkpoint_dir configuration, length exceeds max path length");
+            break;
+        }
+
         if (!CheckpointUtils::GetWorkingDir(m_fullPath)) {
             MOT_LOG_ERROR("Could not obtain working directory");
             break;
         }
-        m_fullPath.append("/");
+
+        if (!CheckpointUtils::IsDirExists(m_fullPath)) {
+            MOT_REPORT_ERROR(
+                MOT_ERROR_INVALID_CFG, "Checkpoint", "Invalid checkpoint_dir configuration, directory doesn't exist");
+            break;
+        }
+
+        // "/" is already appended in CheckpointUtils::GetWorkingDir.
         m_fullPath.append(CTRL_FILE_NAME);
         MOT_LOG_TRACE("CheckpointControlFile: Fullpath - '%s'", m_fullPath.c_str());
+
         // try to open an old file
-        if (!CheckpointUtils::FileExists(m_fullPath)) {
+        if (!CheckpointUtils::IsFileExists(m_fullPath)) {
             MOT_LOG_INFO("CheckpointControlFile: init - a previous checkpoint was not found");
-            m_controlFile.Init();
+            m_ctrlFileData.Init();
         } else {
+            int fd = -1;
             if (!CheckpointUtils::OpenFileRead(m_fullPath, fd)) {
                 MOT_LOG_ERROR("CheckpointControlFile: init - could not open control file");
                 break;
             }
-            if (CheckpointUtils::ReadFile(fd, (char*)&m_controlFile, sizeof(CtrlFileData)) != sizeof(CtrlFileData)) {
+            if (CheckpointUtils::ReadFile(fd, (char*)&m_ctrlFileData, sizeof(CtrlFileData)) != sizeof(CtrlFileData)) {
                 MOT_LOG_ERROR("CheckpointControlFile: init - failed to read data from file");
                 CheckpointUtils::CloseFile(fd);
                 break;
             } else {
-                MOT_LOG_INFO(
-                    "CheckpointControlFile: init - loaded file: checkpointId %lu", m_controlFile.entry[0].checkpointId);
+                MOT_LOG_INFO("CheckpointControlFile: init - loaded file: checkpointId %lu",
+                    m_ctrlFileData.entry[0].checkpointId);
             }
             if (CheckpointUtils::CloseFile(fd)) {
                 MOT_LOG_ERROR("CheckpointControlFile: init - failed to close file");
@@ -87,10 +111,11 @@ void CheckpointControlFile::Init()
             }
         }
         m_valid = true;
+        initialized = true;
+        Print();
     } while (0);
 
-    initialized = true;
-    Print();
+    return initialized;
 }
 
 bool CheckpointControlFile::Update(uint64_t id, uint64_t lsn, uint64_t lastReplayLsn)
@@ -104,11 +129,11 @@ bool CheckpointControlFile::Update(uint64_t id, uint64_t lsn, uint64_t lastRepla
             break;
         }
 
-        m_controlFile.entry[0].checkpointId = id;
-        m_controlFile.entry[0].lsn = lsn;
-        m_controlFile.entry[0].lastReplayLsn = lastReplayLsn;
+        m_ctrlFileData.entry[0].checkpointId = id;
+        m_ctrlFileData.entry[0].lsn = lsn;
+        m_ctrlFileData.entry[0].lastReplayLsn = lastReplayLsn;
 
-        if (CheckpointUtils::WriteFile(fd, (char*)&m_controlFile, sizeof(CtrlFileData)) != sizeof(CtrlFileData)) {
+        if (CheckpointUtils::WriteFile(fd, (char*)&m_ctrlFileData, sizeof(CtrlFileData)) != sizeof(CtrlFileData)) {
             MOT_LOG_ERROR("CheckpointControlFile::update - failed to write control file");
             CheckpointUtils::CloseFile(fd);
             break;

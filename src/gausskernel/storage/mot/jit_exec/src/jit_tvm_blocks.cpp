@@ -1981,7 +1981,8 @@ static Expression* buildAggregateCount(
 
 static bool buildAggregateMaxMin(JitTvmCodeGenContext* ctx, JitAggregate* aggregate, Expression* var_expr)
 {
-    bool result = true;
+    bool result = false;
+    Expression* aggregateExpr = nullptr;
 
     // we first check if the min/max value is null and if so just store the column value
     JIT_IF_BEGIN(test_max_min_value_null)
@@ -1994,20 +1995,24 @@ static bool buildAggregateMaxMin(JitTvmCodeGenContext* ctx, JitAggregate* aggreg
     Expression* current_aggregate = AddGetAggValue(ctx);
     switch (aggregate->_aggreaget_op) {
         case JIT_AGGREGATE_MAX:
-            result = buildAggregateMax(ctx, aggregate, current_aggregate, var_expr);
+            aggregateExpr = buildAggregateMax(ctx, aggregate, current_aggregate, var_expr);
             break;
 
         case JIT_AGGREGATE_MIN:
-            result = buildAggregateMin(ctx, aggregate, current_aggregate, var_expr);
+            aggregateExpr = buildAggregateMin(ctx, aggregate, current_aggregate, var_expr);
             break;
 
         default:
             MOT_REPORT_ERROR(
                 MOT_ERROR_INTERNAL, "JIT Compile", "Invalid aggregate operator %d", (int)aggregate->_aggreaget_op);
-            result = false;
             break;
     }
     JIT_IF_END()
+
+    if (aggregateExpr != nullptr) {
+        AddSetAggValue(ctx, aggregateExpr);
+        result = true;
+    }
 
     return result;
 }

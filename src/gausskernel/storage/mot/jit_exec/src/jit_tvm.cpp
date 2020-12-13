@@ -1054,7 +1054,9 @@ void Builder::CreateRet(Instruction* instruction)
 
 Instruction* Builder::CreateConst(uint64_t value)
 {
-    return new (std::nothrow) ConstInstruction(value);
+    Instruction* result = new (std::nothrow) ConstInstruction(value);
+    _current_function->addInstruction(result);
+    return result;
 }
 
 BasicBlock* Builder::GetInsertBlock()
