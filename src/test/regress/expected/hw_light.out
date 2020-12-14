@@ -36,9 +36,10 @@ explain select * from hw_light_cn_t1 where id1 = 3 for update;
 explain insert into hw_light_cn_t1 values (6,6,6);
                          QUERY PLAN                         
 ------------------------------------------------------------
+ [Bypass]
 --? Insert on hw_light_cn_t1  (cost=.* rows=.* width=.*)
 --?   ->  Result  (cost=.* rows=.* width=.*)
-(2 rows)
+(3 rows)
 
 explain update hw_light_cn_t1 set num = 0 where id1 = 1;
                               QUERY PLAN                               
@@ -349,9 +350,10 @@ c_varchar2 varchar2(10)
 explain insert into testtd values('a','a','a','a');
                      QUERY PLAN                     
 ----------------------------------------------------
+ [Bypass]
 --? Insert on testtd  (cost=.* rows=.* width=.*)
 --?   ->  Result  (cost=.* rows=.* width=.*)
-(2 rows)
+(3 rows)
 
 insert into testtd values('a','a','a','a');
 drop table testtd;
@@ -521,10 +523,11 @@ create table tnull (id int, num int);
 explain verbose insert into tnull values (null,1);
                         QUERY PLAN                        
 ----------------------------------------------------------
+ [Bypass]
 --? Insert on public.tnull  (cost=.* rows=.* width=.*)
 --?   ->  Result  (cost=.* rows=.* width=.*)
          Output: NULL::integer, 1
-(3 rows)
+(4 rows)
 
 insert into tnull values (null,1);
 explain verbose select * from tnull where id is null;
@@ -561,26 +564,29 @@ create table tnull2 (id1 int, id2 int, num int);
 explain verbose insert into tnull2 values (null,null,1);
                         QUERY PLAN                         
 -----------------------------------------------------------
+ [Bypass]
 --? Insert on public.tnull2  (cost=.* rows=.* width=.*)
 --?   ->  Result  (cost=.* rows=.* width=.*)
          Output: NULL::integer, NULL::integer, 1
-(3 rows)
+(4 rows)
 
 explain verbose insert into tnull2 values (null,1,1);
                         QUERY PLAN                         
 -----------------------------------------------------------
+ [Bypass]
 --? Insert on public.tnull2  (cost=.* rows=.* width=.*)
 --?   ->  Result  (cost=.* rows=.* width=.*)
          Output: NULL::integer, 1, 1
-(3 rows)
+(4 rows)
 
 explain verbose insert into tnull2 values (null,20,1);
                         QUERY PLAN                         
 -----------------------------------------------------------
+ [Bypass]
 --? Insert on public.tnull2  (cost=.* rows=.* width=.*)
 --?   ->  Result  (cost=.* rows=.* width=.*)
          Output: NULL::integer, 20, 1
-(3 rows)
+(4 rows)
 
 insert into tnull2 values (null,null,1);
 insert into tnull2 values (null,1,1);
