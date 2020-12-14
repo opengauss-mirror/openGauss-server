@@ -571,6 +571,8 @@ static void ckpt_pagewriter_main_thread_flush_dirty_page()
     XLogRecPtr CurrBytePos;
     uint64 dirty_queue_head;
 
+    knl_thread_set_name("PgWriter:flush");
+
     WritebackContextInit(&wb_context, &t_thrd.pagewriter_cxt.page_writer_after);
     ResourceOwnerEnlargeBuffers(t_thrd.utils_cxt.CurrentResourceOwner);
 
@@ -741,7 +743,7 @@ static void ckpt_pagewriter_main_thread_loop(void)
         t_thrd.pagewriter_cxt.got_SIGHUP = false;
         ProcessConfigFile(PGC_SIGHUP);
     }
-
+    knl_thread_set_name("PageWriterMain");
     /* main thread should finally exit. */
     while (t_thrd.pagewriter_cxt.shutdown_requested && g_instance.ckpt_cxt_ctl->page_writer_can_exit) {
         int i;
@@ -810,7 +812,7 @@ static void ckpt_pagewriter_sub_thread_loop()
         t_thrd.pagewriter_cxt.got_SIGHUP = false;
         ProcessConfigFile(PGC_SIGHUP);
     }
-
+    knl_thread_set_name("PageWriterSub");
     if (t_thrd.pagewriter_cxt.shutdown_requested && g_instance.ckpt_cxt_ctl->page_writer_can_exit) {
         ereport(LOG,
             (errmodule(MOD_INCRE_CKPT),

@@ -2889,6 +2889,6 @@ typedef struct knl_thrd_context {
 extern void knl_thread_mot_init();
 extern void knl_thread_init(knl_thread_role role);
 extern THR_LOCAL knl_thrd_context t_thrd;
-extern void knl_thread_set_name(const char* name);
+extern void knl_thread_set_name(const char* name, bool isCommandTag = false);
 
 #endif /* SRC_INCLUDE_KNL_KNL_THRD_H_ */
