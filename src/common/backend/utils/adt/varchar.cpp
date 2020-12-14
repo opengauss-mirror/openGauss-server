@@ -647,7 +647,11 @@ Datum bpcharlen(PG_FUNCTION_ARGS)
     int len;
 
     /* get number of bytes, ignoring trailing spaces */
-    len = VARSIZE_ANY_EXHDR(arg);
+    if (DB_IS_CMPT(DB_CMPT_PG)) {
+        len = bcTruelen(arg);
+    } else {
+        len = VARSIZE_ANY_EXHDR(arg);
+    }
 
     /* in multibyte encoding, convert to number of characters */
     if (pg_database_encoding_max_length() != 1) {
