@@ -22,13 +22,21 @@
  * -------------------------------------------------------------------------
  */
 
-// Be sure to include jit_llvm_query.h before anything else because of global.h.
-// See jit_llvm_query.h for more details.
+/*
+ * ATTENTION: Be sure to include jit_llvm_query.h before anything else because of gscodegen.h
+ * See jit_llvm_query.h for more details.
+ */
 #include "jit_llvm_query.h"
 #include "jit_llvm_query_codegen.h"
 #include "jit_llvm.h"
 #include "jit_llvm_funcs.h"
 #include "jit_llvm_blocks.h"
+#include "jit_util.h"
+#include "mot_error.h"
+#include "utilities.h"
+
+// for checking if LLVM_ENABLE_DUMP is defined and for using LLVM_VERSION_STRING
+#include "llvm/Config/llvm-config.h"
 
 namespace JitExec {
 DECLARE_LOGGER(JitLlvmQueryCodegen, JitExec)
@@ -274,7 +282,7 @@ static bool InitCompoundCodeGenContext(JitLlvmCodeGenContext* ctx, GsCodeGen* co
             "Failed to allocate %u bytes for %u sub-query table information objects in code-generation context",
             allocSize,
             (unsigned)ctx->m_subQueryCount);
-        DestroyTableInfo(&ctx->_table_info);
+        DestroyCodeGenContext(ctx);
         return false;
     }
 
@@ -302,12 +310,7 @@ static bool InitCompoundCodeGenContext(JitLlvmCodeGenContext* ctx, GsCodeGen* co
             result = false;
         }
         if (!result) {
-            for (uint32_t j = 0; j < i; ++j) {
-                DestroyTableInfo(&ctx->m_subQueryTableInfo[j]);
-            }
-            MOT::MemSessionFree(ctx->m_subQueryTableInfo);
-            ctx->m_subQueryTableInfo = nullptr;
-            DestroyTableInfo(&ctx->_table_info);
+            DestroyCodeGenContext(ctx);
             return false;
         }
     }
@@ -322,6 +325,7 @@ static bool InitCompoundCodeGenContext(JitLlvmCodeGenContext* ctx, GsCodeGen* co
             allocSize,
             (unsigned)ctx->m_subQueryCount);
         DestroyCodeGenContext(ctx);
+        return false;
     }
     errno_t erc = memset_s(ctx->m_subQueryData, allocSize, 0, allocSize);
     securec_check(erc, "\0", "\0");
@@ -340,6 +344,10 @@ static void DestroyCodeGenContext(JitLlvmCodeGenContext* ctx)
     if (ctx->m_subQueryData != nullptr) {
         MOT::MemSessionFree(ctx->m_subQueryData);
         ctx->m_subQueryData = nullptr;
+    }
+    if (ctx->m_subQueryTableInfo != nullptr) {
+        MOT::MemSessionFree(ctx->m_subQueryTableInfo);
+        ctx->m_subQueryTableInfo = nullptr;
     }
     if (ctx->_code_gen != nullptr) {
         ctx->_code_gen->releaseResource();
@@ -381,29 +389,11 @@ static JitContext* FinalizeCodegen(JitLlvmCodeGenContext* ctx, int max_arg, JitC
     MOT_LOG_DEBUG("Adding function to MCJit");
     ctx->_code_gen->addFunctionToMCJit(ctx->m_jittedQuery, (void**)&jit_context->m_llvmFunction);
 
-    // on ARM platform we must ensure compilation is synchronized
-#ifdef __aarch64__
-    if (!AcquireArmCompileLock()) {
-        MOT_LOG_TRACE("Failed to acquire compilation lock on ARM platform");
-        FreeJitContext(jit_context);
-        return nullptr;
-    }
-#endif
-
     MOT_LOG_DEBUG("Generating code...");
     ctx->_code_gen->enableOptimizations(true);
     ctx->_code_gen->compileCurrentModule(false);
     MOT_LOG_DEBUG(
         "MOT jitted query: code generated at %p --> %p", &jit_context->m_llvmFunction, jit_context->m_llvmFunction);
-
-    // on ARM platform we must ensure compilation is synchronized
-#ifdef __aarch64__
-    if (!ReleaseArmCompileLock()) {
-        MOT_LOG_TRACE("Failed to release compilation lock on ARM platform");
-        FreeJitContext(jit_context);
-        return nullptr;
-    }
-#endif
 
     // setup execution details
     jit_context->m_table = ctx->_table_info.m_table;

@@ -472,9 +472,9 @@ void CheckpointManager::TaskDone(Table* table, uint32_t numSegs, bool success)
         }
         MapFileEntry* entry = new (std::nothrow) MapFileEntry();
         if (entry != nullptr) {
-            entry->m_id = table->GetTableId();
-            entry->m_numSegs = numSegs;
-            MOT_LOG_DEBUG("TaskDone %lu: %u %u segs", m_inProgressId, entry->m_id, numSegs);
+            entry->m_tableId = table->GetTableId();
+            entry->m_maxSegId = numSegs;
+            MOT_LOG_DEBUG("TaskDone %lu: %u %u segs", m_inProgressId, entry->m_tableId, numSegs);
             std::lock_guard<std::mutex> guard(m_tasksMutex);
             m_mapfileInfo.push_back(entry);
             m_finishedTasks.push_back(table);
@@ -620,14 +620,10 @@ void CheckpointManager::RemoveOldCheckpoints(uint64_t curCheckcpointId)
 void CheckpointManager::RemoveCheckpointDir(uint64_t checkpointId)
 {
     errno_t erc;
+    char buf[CheckpointUtils::maxPath];
     std::string oldCheckpointDir;
     if (!CheckpointUtils::SetWorkingDir(oldCheckpointDir, checkpointId)) {
         MOT_LOG_ERROR("removeCheckpointDir: failed to set working directory");
-        return;
-    }
-    char* buf = (char*)malloc(CheckpointUtils::maxPath);
-    if (buf == nullptr) {
-        MOT_LOG_ERROR("removeCheckpointDir: failed to allocate buffer");
         return;
     }
 
@@ -663,8 +659,6 @@ void CheckpointManager::RemoveCheckpointDir(uint64_t checkpointId)
             errno,
             gs_strerror(errno));
     }
-
-    free(buf);
 }
 
 bool CheckpointManager::CreateCheckpointMap()
@@ -841,7 +835,7 @@ bool CheckpointManager::CreateTpcRecoveryFile()
             break;
         }
 
-        if (tpcFileHeader.m_numEntries > 0 && SerializeInProcessTxns(fd) == false) {
+        if (tpcFileHeader.m_numEntries > 0 && SerializeInProcessTxns(fd) != RC_OK) {
             MOT_LOG_ERROR("create2PCRecoveryFile: failed to serialize transactions [%d %s]", errno, gs_strerror(errno));
             break;
         }
@@ -861,11 +855,11 @@ bool CheckpointManager::CreateTpcRecoveryFile()
     return ret;
 }
 
-bool CheckpointManager::SerializeInProcessTxns(int fd)
+RC CheckpointManager::SerializeInProcessTxns(int fd)
 {
     if (fd == -1) {
         MOT_LOG_ERROR("SerializeInProcessTxns: bad fd");
-        return false;
+        return RC_ERROR;
     }
 
     auto serializeLambda = [this, fd](RedoLogTransactionSegments* segments, uint64_t) -> RC {
@@ -927,9 +921,9 @@ bool CheckpointManager::SerializeInProcessTxns(int fd)
                 return RC_ERROR;
             }
             MOT_LOG_DEBUG("SerializeInProcessTxns: wrote seg %p %lu bytes", segment, bufSize);
-            if (buf != nullptr) {
-                free(buf);
-            }
+        }
+        if (buf != nullptr) {
+            free(buf);
         }
         return RC_OK;
     };

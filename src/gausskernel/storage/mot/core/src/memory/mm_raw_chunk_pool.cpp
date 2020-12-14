@@ -940,6 +940,7 @@ static inline uint32_t PushSuperChunk(MemRawChunkPool* chunkPool, MemRawChunkHea
                 chunkPool->m_poolName,
                 chunksPushed,
                 count);
+            FreeChunk(chunkPool, chunk);
             break;
         }
     }

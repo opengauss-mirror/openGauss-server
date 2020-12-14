@@ -1,7 +1,7 @@
 /*
  * the PLyPlan class
  *
- * src/pl/plpython/plpy_planobject.c
+ * src/common/pl/plpython/plpy_planobject.c
  */
 
 #include "postgres.h"
@@ -56,16 +56,18 @@ static PyTypeObject PLy_PlanType = {
 
 void PLy_plan_init_type(void)
 {
-    if (PyType_Ready(&PLy_PlanType) < 0)
+    if (PyType_Ready(&PLy_PlanType) < 0) {
         elog(ERROR, "could not initialize PLy_PlanType");
+    }
 }
 
 PyObject* PLy_plan_new(void)
 {
     PLyPlanObject* ob = NULL;
 
-    if ((ob = PyObject_New(PLyPlanObject, &PLy_PlanType)) == NULL)
+    if ((ob = PyObject_New(PLyPlanObject, &PLy_PlanType)) == NULL) {
         return NULL;
+    }
 
     ob->plan = NULL;
     ob->nargs = 0;
@@ -85,17 +87,21 @@ static void PLy_plan_dealloc(PyObject* arg)
 {
     PLyPlanObject* ob = (PLyPlanObject*)arg;
 
-    if (ob->plan != NULL)
+    if (ob->plan != NULL) {
         SPI_freeplan(ob->plan);
-    if (ob->types != NULL)
+    }
+    if (ob->types != NULL) {
         PLy_free(ob->types);
-    if (ob->values != NULL)
+    }
+    if (ob->values != NULL) {
         PLy_free(ob->values);
+    }
     if (ob->args != NULL) {
         int i;
 
-        for (i = 0; i < ob->nargs; i++)
+        for (i = 0; i < ob->nargs; i++) {
             PLy_typeinfo_dealloc(&ob->args[i]);
+        }
         PLy_free(ob->args);
     }
 
@@ -108,6 +114,6 @@ static PyObject* PLy_plan_status(PyObject* self, PyObject* args)
         Py_INCREF(Py_True);
         return Py_True;
     }
-    PLy_exception_set(plpy_t_context.PLy_exc_error, "plan.status takes no arguments");
+    PLy_exception_set(g_plpy_t_context.PLy_exc_error, "plan.status takes no arguments");
     return NULL;
 }

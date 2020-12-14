@@ -25,44 +25,19 @@
 #ifndef JIT_LLVM_QUERY_H
 #define JIT_LLVM_QUERY_H
 
-// Be sure to include global.h before postgres.h to avoid conflict between libintl.h (included in global.h)
-// and c.h (included in postgres.h).
-#include "global.h"
-
-// be careful to include gscodegen.h before anything else to avoid clash with PM definition in datetime.h
+/*
+ * ATTENTION:
+ * 1. Be sure to include gscodegen.h before anything else to avoid clash with PM definition in datetime.h.
+ * 2. Be sure to include libintl.h before gscodegen.h to avoid problem with gettext.
+ */
+#include "libintl.h"
 #include "codegen/gscodegen.h"
 #include "codegen/builtinscodegen.h"
-#include "catalog/pg_operator.h"
 #include "codegen/datecodegen.h"
 #include "codegen/timestampcodegen.h"
-#include "utils/fmgroids.h"
-#include "nodes/parsenodes.h"
-#include "storage/ipc.h"
-#include "nodes/pg_list.h"
-#include "tcop/dest.h"
-#include "utils/numeric.h"
-#include "utils/numeric_gs.h"
-#include "catalog/pg_aggregate.h"
 
-#include "mot_internal.h"
 #include "storage/mot/jit_exec.h"
 #include "jit_common.h"
-#include "jit_plan.h"
-#include "jit_llvm_util.h"
-#include "jit_util.h"
-
-#include "mot_engine.h"
-#include "utilities.h"
-#include "mot_internal.h"
-#include "catalog_column_types.h"
-#include "mot_error.h"
-#include "utilities.h"
-
-#include <vector>
-#include <cassert>
-
-// for checking if LLVM_ENABLE_DUMP is defined and for using LLVM_VERSION_STRING
-#include "llvm/Config/llvm-config.h"
 
 namespace JitExec {
 /** @struct Holds instructions that evaluate in runtime to begin and end iterators of a cursor. */

@@ -51,7 +51,7 @@
 #define LOCAL_RECEIVE_KDATA_COST 1.3 /* The receive cost for local stream */
 #define DEFAULT_SMP_THREAD_COST 1000 /* The cost for add a new thread */
 #define DEFAULT_STREAM_MULTIPLE 1.0
-#define DEFAULT_PARALLEL_TUPLE_COST 0.1
+#define DEFAULT_PARALLEL_TUPLE_COST 0.05
 #define DEFAULT_PARALLEL_SETUP_COST 1000.0
 
 #define DEFAULT_EFFECTIVE_CACHE_SIZE 16384 /* measured in pages */
@@ -127,7 +127,8 @@ extern void initial_cost_mergejoin(PlannerInfo* root, JoinCostWorkspace* workspa
 extern void final_cost_mergejoin(
     PlannerInfo* root, MergePath* path, JoinCostWorkspace* workspace, SpecialJoinInfo* sjinfo, bool hasalternative);
 extern void initial_cost_hashjoin(PlannerInfo* root, JoinCostWorkspace* workspace, JoinType jointype, List* hashclauses,
-    Path* outer_path, Path* inner_path, SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, int dop);
+    Path* outer_path, Path* inner_path, SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, int dop,
+    bool parallel_hash);
 extern void final_cost_hashjoin(PlannerInfo* root, HashPath* path, JoinCostWorkspace* workspace,
     SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, bool hasalternative, int dop);
 extern void cost_rescan(PlannerInfo* root, Path* path, Cost* rescan_startup_cost, /* output parameters */
@@ -178,6 +179,8 @@ extern double estimate_hash_num_distinct(PlannerInfo* root, List* hashkey, Path*
     double local_ndistinct, double global_ndistinct, bool* usesinglestats);
 extern RelOptInfo* find_join_input_rel(PlannerInfo* root, Relids relids);
 extern double compute_sort_disk_cost(double input_bytes, double sort_mem_bytes);
+extern double compute_bitmap_pages(PlannerInfo *root, RelOptInfo *baserel,
+    Path *bitmapqual, double loop_count, Cost *cost, double *tuple, bool ispartitionedindex);
 
 extern double approx_tuple_count(PlannerInfo* root, JoinPath* path, List* quals);
 extern void set_rel_path_rows(Path* path, RelOptInfo* rel, ParamPathInfo* param_info);

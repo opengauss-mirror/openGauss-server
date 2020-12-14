@@ -1,5 +1,5 @@
 /*
- * src/pl/plpython/plpy_procedure.h
+ * src/common/pl/plpython/plpy_procedure.h
  */
 
 #ifndef PLPY_PROCEDURE_H

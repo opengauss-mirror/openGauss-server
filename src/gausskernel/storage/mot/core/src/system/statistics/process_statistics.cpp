@@ -73,7 +73,7 @@ ProcessStatisticsProvider::ProcessStatisticsProvider()
                 ++m_processorCount;
             }
         }
-        fclose(file);
+        (void)fclose(file);
     }
     MOT_LOG_DEBUG("Detected %u processors", m_processorCount);
 }

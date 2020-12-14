@@ -105,7 +105,7 @@ const char* Column::ColumnErrorMsg(RC err)
         case RC_COL_NAME_EXCEEDS_MAX_SIZE:
             return "Column name is longer that allowed";
 
-        case RC_COL_SIZE_INVLALID:
+        case RC_COL_SIZE_INVALID:
             return "Column size is invalid";
 
         case RC_TABLE_EXCEEDS_MAX_DECLARED_COLS:

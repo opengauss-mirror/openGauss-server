@@ -31,6 +31,7 @@
 #include "executor/execdebug.h"
 #include "executor/executor.h"
 #include "nodes/execnodes.h"
+#include "instruments/instr_unique_sql.h"
 #include "utils/batchsort.h"
 #include "vecexecutor/vecnodes.h"
 #include "vecexecutor/vecnodesort.h"
@@ -64,6 +65,8 @@ VectorBatch* ExecVecSort(VecSortState* node)
     Batchsortstate* batch_sort_stat = NULL;
     VectorBatch* batch = NULL;
     long total_size = 0;
+    uint64 spill_count = 0;
+    TimestampTz start_time = 0;
 
     /*
      * get state info from node
@@ -86,6 +89,9 @@ VectorBatch* ExecVecSort(VecSortState* node)
         int64 local_work_mem = SET_NODEMEM(plan_node->plan.operatorMemKB[0], plan_node->plan.dop);
         int64 max_mem =
             (plan_node->plan.operatorMaxMem > 0) ? SET_NODEMEM(plan_node->plan.operatorMaxMem, plan_node->plan.dop) : 0;
+
+        /* init the unique sql vec sort state at the first time */
+        UpdateUniqueSQLVecSortStats(NULL, 0, &start_time);
 
         SO1_printf("ExecVecSort: %s\n", "sorting subplan");
         WaitState old_status = pgstat_report_waitstatus(STATE_EXEC_SORT);
@@ -166,6 +172,7 @@ VectorBatch* ExecVecSort(VecSortState* node)
                 long currentFileBlocks = LogicalTapeSetBlocks(batch_sort_stat->m_tapeset);
                 int64 spill_size = (int64)(currentFileBlocks - batch_sort_stat->m_lastFileBlocks);
                 total_size += spill_size * (BLCKSZ);
+                spill_count += 1;
                 pgstat_increase_session_spill_size(spill_size * (BLCKSZ));
                 batch_sort_stat->m_lastFileBlocks = currentFileBlocks;
                 if (node->ss.ps.instrument) {
@@ -203,6 +210,7 @@ VectorBatch* ExecVecSort(VecSortState* node)
             long curr_file_blocks = LogicalTapeSetBlocks(batch_sort_stat->m_tapeset);
             int64 spill_size = (int64)(curr_file_blocks - batch_sort_stat->m_lastFileBlocks);
             total_size += spill_size * (BLCKSZ);
+            spill_count += 1;
             pgstat_increase_session_spill_size(spill_size * (BLCKSZ));
             batch_sort_stat->m_lastFileBlocks = curr_file_blocks;
             if (node->ss.ps.instrument) {
@@ -222,6 +230,9 @@ VectorBatch* ExecVecSort(VecSortState* node)
         node->bounded_Done = node->bounded;
         node->bound_Done = node->bound;
         plan_stat = &node->ss.ps;
+
+        /* analyze the batch_sort_stat information to update unique sql */
+        UpdateUniqueSQLVecSortStats(batch_sort_stat, spill_count, &start_time);
 
         /* Cache sort info into SortState for display of explain analyze */
         if (node->ss.ps.instrument != NULL) {

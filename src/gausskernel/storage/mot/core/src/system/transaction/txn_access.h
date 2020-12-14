@@ -338,7 +338,6 @@ private:
         InitDummyInd,
         CreateRowZero,
         CreateRowSet,
-        CreateInsertSet,
         Done
     } m_initPhase;
 

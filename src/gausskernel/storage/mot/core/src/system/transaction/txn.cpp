@@ -26,7 +26,7 @@
 #include <algorithm>
 #include <unordered_map>
 
-#include "../storage/table.h"  // explicit path in order to solve collision with B header file with the same name
+#include "table.h"
 #include "mot_engine.h"
 #include "redo_log_writer.h"
 #include "sentinel.h"

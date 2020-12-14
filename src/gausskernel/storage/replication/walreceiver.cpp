@@ -2551,6 +2551,8 @@ static bool ProcessConfigFileMessage(char* buf, Size len)
  */
 static void firstSynchStandbyFile(void)
 {
+    if (g_instance.attr.attr_common.config_sync_interval <= 0)
+	 return;
     char bufTime[sizeof(ConfigModifyTimeMessage) + 1];
     errno_t errorno = EOK;
 

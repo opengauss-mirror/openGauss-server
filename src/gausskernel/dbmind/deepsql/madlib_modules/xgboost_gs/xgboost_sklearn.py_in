@@ -1,0 +1,488 @@
+# -*- coding:utf-8 -*-
+# Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms
+# and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS,
+# WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+# ----------------------------------------------------------------------------
+
+# ----------------------------------------------------------------------
+# Xgboost regression and Classification use sklearn API.
+# ----------------------------------------------------------------------
+import ast
+import collections
+import itertools
+import plpy
+
+import cPickle as pickle
+import pandas as pd
+
+from utilities.validate_args import is_var_valid
+from utilities.validate_args import table_exists
+from utilities.validate_args import table_is_empty
+from utilities.validate_args import columns_exist_in_table
+from utilities.validate_args import get_cols
+from utilities.validate_args import unquote_ident
+from utilities.validate_args import quote_ident
+from utilities.utilities import _assert
+from utilities.control import MinWarning
+
+from xgboost_utilities import get_features_to_use
+
+
+def xgboost_sk_classifier(schema_madlib, input_table, model_table, id_column, dependent_varname,
+                            str_of_features, str_of_features_to_exclude, params_str, evaluation, verbose, **kwargs):
+    """
+        Args:
+        @param input_table,                 -- name of input table
+        @param model_table,                 -- name of output table
+        @param id_column
+        @param dependent_varname,           -- name of dependent variable  Y
+        @param str_of_features,             -- name of independent variables X, Comma separated column names to be
+                                                used as the predictors, can be '*'
+                                                to include all columns except the dependent_variable
+        @param str_of_features_to_exclude   -- Comma separated column names to be excluded if str_of_features is '*',
+                                               Ignore 'str_of_features_to_exclude' if 'str_of_features' is not '*'
+        @param params_str,                  -- names of paraters for xgboost
+        @param verbose                      -- verbose or not
+    """
+    with MinWarning('warning'):
+        _validate_args(schema_madlib, input_table, model_table, id_column,
+                       dependent_varname, str_of_features, str_of_features_to_exclude, params_str)
+
+    _, features_list = get_features_to_use(schema_madlib, input_table, id_column, dependent_varname,
+                                        str_of_features, str_of_features_to_exclude, verbose)
+
+    sql = '''SELECT {schema_madlib}.xgboost_grid_search('{input_table}', '{grid_search_results_tbl}', '{id_column}',
+        '{dependent_varname}', ARRAY{features_list}, '{xgb_type}', $${params_str}$$, {evaluation}, {verbose});
+        '''.format(
+        schema_madlib=schema_madlib,
+        input_table=input_table,
+        grid_search_results_tbl=model_table,
+        id_column=id_column,
+        dependent_varname=dependent_varname,
+        features_list=features_list,
+        xgb_type='C',
+        params_str=params_str,
+        evaluation=evaluation,
+        verbose=verbose
+    )
+    if verbose:
+        plpy.info(sql)
+
+    ret = plpy.execute(sql)
+    return ret[0]['xgboost_grid_search']
+
+
+def xgboost_sk_regressor(schema_madlib, input_table, model_table, id_column,
+                            dependent_varname, str_of_features, str_of_features_to_exclude, params_str, evaluation, verbose, **kwargs):
+    """
+        Args:
+        @param input_table,                 -- name of input table
+        @param model_table,                 -- name of output table
+        @param id_column                    -- id column of the table
+        @param dependent_varname,           -- name of dependent variable  Y
+        @param str_of_features,             -- name of independent variables  X
+        @param params_str,                  -- {key: [value1, valule2]}
+        @param verbose
+    """
+    with MinWarning('warning'):
+        _validate_args(schema_madlib, input_table, model_table, id_column,
+                       dependent_varname, str_of_features, str_of_features_to_exclude, params_str)
+
+    _, features_list = get_features_to_use(schema_madlib, input_table, id_column, dependent_varname,
+                                        str_of_features, str_of_features_to_exclude, verbose)
+
+    sql = '''SELECT {schema_madlib}.xgboost_grid_search('{input_table}', '{grid_search_results_tbl}', '{id_column}',
+        '{dependent_varname}', ARRAY{features_list}, '{xgb_type}', $${params_str}$$, {evaluation}, {verbose});
+        '''.format(
+        schema_madlib=schema_madlib,
+        input_table=input_table,
+        grid_search_results_tbl=model_table,
+        id_column=id_column,
+        dependent_varname=dependent_varname,
+        features_list=features_list,
+        xgb_type='R',
+        params_str=params_str,
+        evaluation=evaluation,
+        verbose=verbose
+    )
+    if verbose:
+        plpy.info(sql)
+
+    ret = plpy.execute(sql)
+    return ret[0]['xgboost_grid_search']
+
+
+def xgboost_sk_predict(schema_madlib, input_table, model_table, output_table, id_column, verbose, **kwargs):
+    """
+        Args:
+        @param input_table,                 -- Input: name of input table
+        @param model_table,                 -- Input: name of model table
+        @param output_table,                -- Output: save the results.
+        @param id_column
+        @param verbose
+    """
+    with MinWarning('warning'):
+        _validate_predict(schema_madlib, input_table, model_table, output_table, id_column)
+
+    sql = '''SELECT y_type, features, model FROM {model_table}'''.format(
+        model_table=model_table)
+    result = plpy.execute(sql)
+
+    # get the type of label.
+    y_type = result[0]['y_type']
+    features_list = result[0]['features']
+    features_list = [quote_ident(x) for x in features_list]
+
+    # 1) Extract feature names from information_schema
+    all_columns = get_cols(input_table)
+
+    for f in features_list:
+        if f not in all_columns:
+            plpy.error('''xgboost_sk_predict, {f} donot find in training table.'''.format(str(f)))
+
+    # 2) get model
+    model = result[0]['model']
+    model = pickle.loads(model)
+
+    # 3) Fetch dataset for model training
+    sql = """select {col} from {input_table} order by {id_column}""".format(
+        id_column=id_column,
+        col=','.join(features_list),
+        input_table=input_table
+    )
+
+    if verbose:
+        plpy.info("xgboost_sk_predict() " + sql)
+
+    result = plpy.execute(sql)
+    test_df = pd.DataFrame.from_records(result)
+
+    features_list = [unquote_ident(x) for x in features_list]
+    features = filter(lambda x: x in test_df.columns, features_list)
+    if verbose:
+        plpy.info("xgboost_sk_predict() - features: " + str(features))
+    test_df = test_df[features]
+
+    # get id
+    sql = """select {id_column} from {input_table} order by {id_column}""".format(
+        id_column=id_column,
+        input_table=input_table
+    )
+    result = plpy.execute(sql)
+
+    id_df = pd.DataFrame.from_records(result)
+    id_df = id_df.reset_index(drop=True)
+    id_df = id_df[id_df.columns[0]]
+
+    # start to predict
+    predict_res = model.predict(test_df)
+
+    sql = '''CREATE TABLE {output_table} (id bigint, prediction {y_type})'''.format(
+        output_table=output_table, y_type=y_type)
+    if verbose:
+        plpy.info("xgboost_sk_predict() " + sql)
+
+    plpy.execute(sql)
+    _assert(len(predict_res) == len(id_df),
+            "Xgboost predict error: len(id) != len(predict)")
+
+    sql = """INSERT INTO {output_table} VALUES ({id}, {prediction});"""
+    for i in range(len(id_df)):
+        plpy.execute(
+            sql.format(id=id_df[i],
+                       prediction=predict_res[i],
+                       output_table=output_table
+                       )
+        )
+
+# ------------------------------------------------------------------------------
+# -- validate args  ------------------------------------------------------------
+# ------------------------------------------------------------------------------
+def _validate_args(schema_madlib, input_table, model_table, id_column,
+                   dependent_varname, str_of_features, str_of_features_to_exclude, params_str):
+    """
+    @brief validate the arguments
+    """
+    # 1, check input_table: name.
+    _assert(input_table and input_table.strip().lower() not in ('null', ''),
+            "Xgboost error: Invalid data table name!")
+    _assert(table_exists(input_table),
+            "Xgboost error: Data table does not exist!")
+    _assert(not table_is_empty(input_table),
+            "Xgboost error: Data table is empty!")
+
+    # 2, check input table: id, Dependent variable, features.
+    _assert(columns_exist_in_table(input_table, [id_column]),
+            "Xgboost error: id_column doesnot exist in the input_table")
+
+    _assert(dependent_varname is None or dependent_varname.strip().lower() not in ('null', ''),
+            "Xgboost error: Invalid dependent column name!")
+
+    _assert(is_var_valid(input_table, dependent_varname),
+            "Xgboost error: Invalid dependent variable ({0}).".format(dependent_varname))
+
+    _assert(str_of_features and str_of_features.strip(),
+            "Xgboost error: Features to include is empty.")
+
+    if str_of_features.strip() != '*':
+        _assert(is_var_valid(input_table, str_of_features),
+                "Xgboost error: Invalid feature list ({0})".format(str_of_features))
+
+    if str_of_features.strip() != '*':
+        _assert(dependent_varname not in str_of_features,
+            "Xgboost error: Dependent_varname in str_of_features")
+
+    # 3, check output table.
+    _assert(model_table is not None and model_table.strip().lower() not in ('null', ''),
+            "Xgboost error: Invalid output table name!")
+    _assert(not table_exists(model_table, only_first_schema=True),
+            "Output table name already exists. Drop the table before calling the function.")
+
+    # 4, check params_str
+    if params_str != '':
+        # let xgboost to check the parameter
+        pass
+
+
+def _validate_predict(schema_madlib, input_table, model_table, output_table, id_column):
+    # TODO, check all tables.
+    _assert(input_table is not None and input_table.strip().lower()
+            not in ('null', ''), "Xgboost error: Invalid data table name!")
+    _assert(table_exists(input_table),
+            "Xgboost error: Data table does not exist!")
+    _assert(not table_is_empty(input_table),
+            "Xgboost error: Data table is empty!")
+
+    _assert(model_table is not None and model_table.strip().lower()
+            not in ('null', ''), "Xgboost error: Invalid Model table name!")
+    _assert(table_exists(model_table),
+            "Xgboost error: Model table does not exist!")
+    _assert(not table_is_empty(model_table),
+            "Xgboost error: Model table is empty!")
+    _assert(output_table is not None and output_table.strip().lower()
+            not in ('null', ''), "Xgboost error: Invalid output table name!")
+    _assert(not table_exists(output_table, only_first_schema=True),
+            "Output table name already exists. Drop the table before calling the function.")
+
+# ------------------------------------------------------------------------------
+# -- Online help function ------------------------------------------------------
+# ------------------------------------------------------------------------------
+def xgboost_sk_classifier_help_message(schema_madlib, message, **kwargs):
+    """ Help message for Xgboost XGBClassifier sklearn API
+
+    @brief
+    Args:
+        @param schema_madlib string, Name of the schema madlib
+        @param message string, Help message indicator
+
+    Returns:
+        String. Contain the help message string
+    """
+    if not message:
+        help_string="""
+        -----------------------------------------------------------------------
+                                    SUMMARY
+        -----------------------------------------------------------------------
+        XGBoost sklearn API Training Library.
+
+        For more details on function usage:
+            SELECT {schema_madlib}.xgboost_sk_classifier('usage')
+        """
+    elif message in ['usage', 'help', '?']:
+        help_string="""
+        -----------------------------------------------------------------------
+                                        USAGE
+        -----------------------------------------------------------------------
+        SELECT {schema_madlib}.xgboost_sk_classifier(
+            input_table TEXT,   -- in, Data table name
+            model_table TEXT,   -- out, save model and features
+            id_column TEXT,     -- id column of the dataset table
+            dependent_varname TEXT,          -- y, class label
+            str_of_features  TEXT,           -- X, Comma separated column names to be
+                                                    used as the predictors, can be '*'
+                                                    to include all columns except the
+                                                    dependent_variable
+            str_of_features_to_exclude TEXT, -- List of column names (comma-separated string) to
+                                                    exlude from the predictors list,
+                                                    if str_of_features is '*'
+            params_str TEXT,                 -- xgboost parameters
+            evaluation BOOL,                 -- evaluation the model? default FALSE
+            verbose bool                     -- Boolean, whether to print more info, default is False
+         );
+
+        -----------------------------------------------------------------------
+                                   parameters
+        -----------------------------------------------------------------------
+        below is optional parameters:
+
+        evalution:
+            default is FALSE, if you set evaluation=TRUE, it will split the training dataset(0.8 for training, 0.2 for testing),
+            and calculate metrics.
+            For binary classification: ['precision', 'recall', 'fscore', 'support']
+            OR for multi-calssification: ['kappa', 'acc']
+
+        params_str:
+            For example, if the input is:
+                $${{'booster': ['gbtree'], 'eta': 0.1, 'max_depth': [5,6,7], 'objective': ['binary:logistic']}}$$
+            OR
+                $${{'booster': ('gbtree',), 'eta': 0.1, 'max_depth': (5,6,7), 'objective': ('binary:logistic',)}}$$
+            Then, cartesian_product is:
+                [('booster = gbtree', 'eta = 0.1', 'max_depth = 5', 'objective = binary:logistic'),
+                ('booster = gbtree', 'eta = 0.1', 'max_depth = 6', 'objective = binary:logistic'),
+                ('booster = gbtree', 'eta = 0.1', 'max_depth = 7', 'objective = binary:logistic')]
+
+        select {schema_madlib}.xgboost_sk_Classifier('inputTable', 'output_modelTable', 'id', 'Y', 'x1, x2, x3', NULL, 
+            $${{'booster': ['gbtree'], 'eta': 0.1, 'max_depth': 5, 'objective': ('binary:logistic',)}}$$, '', TRUE, TRUE);
+
+        -----------------------------------------------------------------------
+                                        OUTPUT
+        -----------------------------------------------------------------------
+        The output table ('model_table' above) has the following columns:
+            id                -- index
+            train_timestamp   -- training time
+            model_name        -- model name
+            y_type            -- the type of independent variable
+            metrics           -- default is OFF, evaluation, for binary classification: ['precision', 'recall', 'fscore', 'support']
+                                 OR for multi-calssification: ['kappa', 'acc']
+            features          -- feature in binary model
+            model             -- binary model
+            params            -- xgboost prarms, {{key:value}}
+        """
+    else:
+        help_string="No such option. Use {schema_madlib}.xgboost_sk_classifier()"
+
+    return help_string.format(schema_madlib=schema_madlib)
+
+
+def xgboost_sk_regressor_help_message(schema_madlib, message, **kwargs):
+    """ Help message for Xgboost XGBRegressor sklearn API
+
+    @brief
+    Args:
+        @param schema_madlib string, Name of the schema madlib
+        @param message string, Help message indicator
+
+    Returns:
+        String. Contain the help message string
+    """
+    if not message:
+        help_string="""
+        -----------------------------------------------------------------------
+                                    SUMMARY
+        -----------------------------------------------------------------------
+        XGBoost sklearn API Training Library.
+
+        For more details on function usage:
+            SELECT {schema_madlib}.xgboost_sk_regressor('usage')
+        """
+    elif message in ['usage', 'help', '?']:
+        help_string="""
+        -----------------------------------------------------------------------
+                                        USAGE
+        -----------------------------------------------------------------------
+        SELECT {schema_madlib}.xgboost_sk_regressor(
+            input_table TEXT,                 -- in, dataset table
+            model_table TEXT,                 -- out, save model and features
+            id_column TEXT,                   -- id column of the dataset table
+            dependent_varname TEXT,           -- y, class label
+            str_of_features TEXT,             -- X, Comma separated column names to be
+                                                    used as the predictors, can be '*'
+                                                    to include all columns except the
+                                                    dependent_variable
+            str_of_features_to_exclude TEXT,  -- List of column names (comma-separated string) to
+                                                    exlude from the predictors list, if str_of_features is '*'
+            params_str TEXT,                  -- xgboost parameters
+            evaluation BOOL,                  -- evaluation the model? default FALSE
+            verbose BOOL                      -- Boolean, whether to print more info, default is False
+         );
+
+        -----------------------------------------------------------------------
+                                   parameters
+        -----------------------------------------------------------------------
+        below is optional parameters:
+
+        evalution:
+            default is FALSE, if you set evaluation=TRUE, it will split the training dataset(0.8 for training, 0.2 for testing),
+            and calculate metrics: ['mae', 'mse', 'R2squared', 'rmse']
+
+        params_str:
+            For example, if the input is:
+                $${{'booster': ['gbtree'], 'eta': 0.1, 'max_depth': [5,6,7], 'objective':['reg:linear']}}$$
+            OR
+                $${{'booster': ('gbtree',), 'eta': 0.1, 'max_depth': (5,6,7), 'objective':('reg:linear')}}$$
+            Then, cartesian_product is:
+                [('booster = gbtree', 'eta = 0.1', 'max_depth = 5', 'objective = reg:linear'),
+                ('booster = gbtree', 'eta = 0.1', 'max_depth = 6', 'objective = reg:linear'),
+                ('booster = gbtree', 'eta = 0.1', 'max_depth = 7', 'objective = reg:linear')]
+
+        select {schema_madlib}.xgboost_sk_Regressor('input_TABLE', 'output_model_table', 'id', 'Y', 'x1, x2, x3, x4', 'x5, x6',
+            $${{'booster': ['gbtree'], 'eta': (0.1), 'max_depth': (5,6,7), 'objective':['reg:linear']}}$$, TRUE, TRUE);
+
+        -----------------------------------------------------------------------
+                                        OUTPUT
+        -----------------------------------------------------------------------
+        The output table ('model_table' above) has the following columns:
+            train_timestamp   -- training time
+            model_name        -- model name
+            y_type            -- the type of independent variable
+            metrics           -- if evaluation is TRUE, you will get ['mae', 'mse', 'R2squared', 'rmse']
+            features          -- feature in binary model
+            model             -- binary model
+            params            -- xgboost prarms, {{key:value}}
+            params_indx       -- index
+        """
+    else:
+        help_string="No such option. Use {schema_madlib}.xgboost_sk_regressor()"
+
+    return help_string.format(schema_madlib=schema_madlib)
+
+
+def xgboost_sk_predict_help_message(schema_madlib, message, **kwargs):
+    """ Help message for Xgboost predict sklearn API
+
+    @brief
+    Args:
+        @param schema_madlib string, Name of the schema madlib
+        @param message string, Help message indicator
+
+    Returns:
+        String. Contain the help message string
+    """
+    if not message:
+        help_string="""
+        -----------------------------------------------------------------------
+                                    SUMMARY
+        -----------------------------------------------------------------------
+        XGBoost sklearn API Training Library.
+
+        For more details on function usage:
+            SELECT {schema_madlib}.xgboost_sk_predict('usage')
+        """
+    elif message in ['usage', 'help', '?']:
+        help_string="""
+        -----------------------------------------------------------------------
+                                        USAGE
+        -----------------------------------------------------------------------
+        SELECT {schema_madlib}.xgboost_sk_predict(
+            input_table          TEXT,    -- in, test dataset
+            model_table          TEXT,    -- in, model table from training
+            output_table         TEXT,    -- out, prediction of the test
+            id_column            TEXT,    -- id column of the test dataset
+            verbose              BOOL     -- Boolean, whether to print more info, default is False
+        );
+        """
+    else:
+        help_string="No such option. Use {schema_madlib}.xgboost_sk_predict()"
+
+    return help_string.format(schema_madlib=schema_madlib)

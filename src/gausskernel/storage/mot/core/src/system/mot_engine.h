@@ -593,9 +593,8 @@ private:
     /**
      * @brief This function is a checker of OS policies to locate if something is potentially not configured properly.
      * System will proceed but print a message.
-     * @return True if the system is configured properly.
      */
-    bool CheckPolicies();
+    void CheckPolicies();
 
     // logger macro
     DECLARE_CLASS_LOGGER();

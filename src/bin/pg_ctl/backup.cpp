@@ -44,6 +44,8 @@
 #include "bin/elog.h"
 #include "file_ops.h"
 
+#include "fetchmot.h"
+
 /* Maximum number of digit in integer. Used to allocate memory to copy int to string */
 #define MAX_INT_SIZE 20
 /* set build receive timeout during master getting in backup mode */
@@ -127,9 +129,6 @@ static int replace_node_name(char* sSrc, const char* sMatchStr, const char* sRep
 static void show_full_build_process(const char* errmg);
 static void backup_dw_file(const char* target_dir);
 static void get_xlog_location(char (&xlog_location)[MAXPGPATH]);
-extern void FetchMotCheckpoint(const char* basedir, PGconn* fetchConn, const char* progname, bool verbose,
-    const char format = 'p', const int compresslevel = 0);
-extern char* GetOptionValueFromFile(const char* fileName, const char* option);
 
 /*
  * tblspaceDirectory is used for saving the table space directory created by
@@ -1017,9 +1016,6 @@ static void BaseBackup(const char* dirname, uint32 term)
     errno_t rc = EOK;
     int nRet = 0;
     struct stat st;
-    char confPath[1024] = {0};
-    char* motConfPath = NULL;
-    char* motChkptDir = NULL;
 
     pqsignal(SIGCHLD, BuildReaper); /* handle child termination */
     /* concat file and path */
@@ -1316,6 +1312,30 @@ static void BaseBackup(const char* dirname, uint32 term)
         disconnect_and_exit(1);
     }
 
+    /*
+     * End of copy data. Final result is already checked inside the loop.
+     */
+    PQclear(res);
+
+    res = PQgetResult(streamConn);
+    if (res != NULL) {
+        /*
+         * We expect the result to be NULL, otherwise we received some unexpected result.
+         * We just expect a 'Z' message and PQgetResult should set conn->asyncStatus to PGASYNC_IDLE,
+         * otherwise we have problem! Report error and disconnect.
+         */
+        pg_log(PG_WARNING, _("unexpected result received after final result, status: %u\n"), PQresultStatus(res));
+        disconnect_and_exit(1);
+    }
+
+    show_full_build_process("fetching MOT checkpoint");
+
+    char* motChkptDir = GetMotCheckpointDir(dirname);
+    FetchMotCheckpoint(motChkptDir ? (const char*)motChkptDir : dirname, streamConn, progname, (bool)verbose);
+    if (motChkptDir) {
+        free(motChkptDir);
+    }
+
     if (bgchild > 0) {
 #ifndef WIN32
         int status;
@@ -1388,45 +1408,6 @@ static void BaseBackup(const char* dirname, uint32 term)
     }
 
     TABLESPACE_LIST_RELEASE();
-
-    /*
-     * End of copy data. Final result is already checked inside the loop.
-     */
-    PQclear(res);
-
-    res = PQgetResult(streamConn);
-    if (res != NULL) {
-        /*
-         * We expect the result to be NULL, otherwise we received some unexpected result.
-         * We just expect a 'Z' message and PQgetResult should set conn->asyncStatus to PGASYNC_IDLE,
-         * otherwise we have problem! Report error and disconnect.
-         */
-        pg_log(PG_WARNING, _("unexpected result received after final result, status: %u\n"), PQresultStatus(res));
-        disconnect_and_exit(1);
-    }
-
-    show_full_build_process("fetching MOT checkpoint");
-
-    /* see if we have an mot conf file configured */
-    nRet = sprintf_s(confPath, sizeof(confPath), "%s/%s", dirname, "postgresql.conf");
-    securec_check_ss_c(nRet, "\0", "\0");
-    motConfPath = GetOptionValueFromFile(confPath, "mot_config_file");
-    if (motConfPath != NULL) {
-        motChkptDir = GetOptionValueFromFile(motConfPath, "checkpoint_dir");
-    } else {
-        nRet = sprintf_s(confPath, sizeof(confPath), "%s/%s", dirname, "mot.conf");
-        securec_check_ss_c(nRet, "\0", "\0");
-        motChkptDir = GetOptionValueFromFile(confPath, "checkpoint_dir");
-    }
-
-    FetchMotCheckpoint(motChkptDir ? (const char*)motChkptDir : dirname, streamConn, progname, (bool)verbose);
-
-    if (motChkptDir) {
-        free(motChkptDir);
-    }
-    if (motConfPath) {
-        free(motConfPath);
-    }
 
     PQfinish(streamConn);
     streamConn = NULL;

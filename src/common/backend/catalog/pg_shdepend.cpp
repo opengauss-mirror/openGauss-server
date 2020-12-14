@@ -738,6 +738,25 @@ void copyTemplateDependencies(Oid templateDbId, Oid newDbId)
     heap_close(sdepRel, RowExclusiveLock);
 }
 
+static void MotFdwDropDatabaseDependency(HeapTuple tup)
+{
+    Form_pg_shdepend shdepForm = (Form_pg_shdepend)GETSTRUCT(tup);
+    if (shdepForm->deptype == SHARED_DEPENDENCY_MOT_TABLE && shdepForm->objsubid != 0) {
+        FdwRoutine* fdwRoutine = GetFdwRoutineByServerId(shdepForm->objsubid);
+        /* Forward drop stmt to MOT FDW. */
+        if (fdwRoutine != NULL && fdwRoutine->GetFdwType != NULL && fdwRoutine->GetFdwType() == MOT_ORC &&
+            fdwRoutine->ValidateTableDef != NULL) {
+            DropForeignStmt stmt;
+            stmt.type = T_DropForeignStmt;
+            stmt.relkind = RELKIND_RELATION;
+            stmt.reloid = shdepForm->objid;
+            stmt.indexoid = 0;
+            stmt.name = "#FROM DROP DB#";
+            fdwRoutine->ValidateTableDef((Node*)&stmt);
+        }
+    }
+}
+
 /*
  * dropDatabaseDependencies
  *
@@ -762,21 +781,8 @@ void dropDatabaseDependencies(Oid databaseId)
     scan = systable_beginscan(sdepRel, SharedDependDependerIndexId, true, SnapshotNow, 1, key);
 
     while (HeapTupleIsValid(tup = systable_getnext(scan))) {
-        Form_pg_shdepend shdepForm = (Form_pg_shdepend)GETSTRUCT(tup);
-        if (shdepForm->deptype == SHARED_DEPENDENCY_MOT_TABLE && shdepForm->objsubid != 0) {
-            FdwRoutine* fdwRoutine = GetFdwRoutineByServerId(shdepForm->objsubid);
-            /* forward drop stmt to fdw */
-            if (fdwRoutine != NULL && fdwRoutine->GetFdwType != NULL &&
-                fdwRoutine->GetFdwType() == MOT_ORC && fdwRoutine->ValidateTableDef != NULL) {
-                DropForeignStmt stmt;
-                stmt.type = T_DropForeignStmt;
-                stmt.relkind = RELKIND_RELATION;
-                stmt.reloid = shdepForm->objid;
-                stmt.indexoid = 0;
-                stmt.name = "#FROM DROP DB#";
-                fdwRoutine->ValidateTableDef((Node*)&stmt);
-            }
-        }
+        /* Forward drop stmt to MOT FDW. */
+        MotFdwDropDatabaseDependency(tup);
         simple_heap_delete(sdepRel, &tup->t_self);
     }
 

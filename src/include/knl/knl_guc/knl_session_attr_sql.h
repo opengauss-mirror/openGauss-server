@@ -204,11 +204,15 @@ typedef struct knl_session_attr_sql {
     bool enable_beta_opfusion;
     bool enable_beta_nestloop_fusion;
     bool parallel_leader_participation;
+    bool enable_parallel_hash;
     int opfusion_debug_mode;
     int single_shard_stmt;
     int force_parallel_mode;
     int max_parallel_workers_per_gather;
     int max_parallel_maintenance_workers;
+    /* hypo index */
+    bool enable_hypo_index;
+    bool hypopg_is_explain;
 } knl_session_attr_sql;
 
 #endif /* SRC_INCLUDE_KNL_KNL_SESSION_ATTR_SQL */

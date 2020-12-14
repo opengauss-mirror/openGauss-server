@@ -209,7 +209,6 @@ typedef struct IndexScanDescData {
 typedef struct ParallelIndexScanDescData {
     int plan_node_id; /* used to identify speicific plan */
     Oid ps_relid;
-    Oid ps_indexid;
     Size ps_offset; /* Offset in bytes of am specific structure */
     uint32 pscan_len; /* total size of this struct, including phs_snapshot_data */
     char ps_snapshot_data[FLEXIBLE_ARRAY_MEMBER];

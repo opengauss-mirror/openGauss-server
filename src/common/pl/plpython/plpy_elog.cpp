@@ -1,7 +1,7 @@
 /*
  * reporting Python exceptions as PostgreSQL errors
  *
- * src/pl/plpython/plpy_elog.c
+ * src/common/pl/plpython/plpy_elog.c
  */
 
 #include "postgres.h"
@@ -47,11 +47,11 @@ void PLy_elog(int elevel, const char* fmt, ...)
 
     PyErr_Fetch(&exc, &val, &tb);
     if (exc != NULL) {
-        if (PyErr_GivenExceptionMatches(val, plpy_t_context.PLy_exc_spi_error)) {
+        if (PyErr_GivenExceptionMatches(val, g_plpy_t_context.PLy_exc_spi_error)) {
             PLy_get_spi_error_data(val, &sqlerrcode, &detail, &hint, &query, &position);
             hint = pstrdup(hint);
             query = pstrdup(query);
-        } else if (PyErr_GivenExceptionMatches(val, plpy_t_context.PLy_exc_fatal)) {
+        } else if (PyErr_GivenExceptionMatches(val, g_plpy_t_context.PLy_exc_fatal)) {
             elevel = FATAL;
         }
     }
@@ -198,7 +198,7 @@ static void PLy_traceback(char** xmsg, char** tbmsg, int* tb_depth)
             appendStringInfoString(&xstr, "unrecognized exception");
         }
     } else if (strcmp(e_module_s, "builtins") == 0 || strcmp(e_module_s, "__main__") == 0 ||
-               strcmp(e_module_s, "exceptions") == 0) {
+             strcmp(e_module_s, "exceptions") == 0) {
         /* mimics behavior of traceback.format_exception_only */
         appendStringInfo(&xstr, "%s", e_type_s);
     } else {
@@ -345,8 +345,9 @@ static void PLy_get_spi_sqlerrcode(PyObject* exc, int* sqlerrcode)
     char* buffer;
 
     sqlstate = PyObject_GetAttrString(exc, "sqlstate");
-    if (sqlstate == NULL)
+    if (sqlstate == NULL) {
         return;
+    }
 
     buffer = PyString_AsString(sqlstate);
     if (strlen(buffer) == 5 && strspn(buffer, "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ") == 5) {

@@ -121,8 +121,9 @@ PyMODINIT_FUNC PyInit_plpy(void)
     PyObject* m = NULL;
 
     m = PyModule_Create(&PLy_module);
-    if (m == NULL)
+    if (m == NULL) {
         return NULL;
+    }
 
     PLy_add_exceptions(m);
 
@@ -162,11 +163,13 @@ void PLy_init_plpy(void)
     main_mod = PyImport_AddModule("__main__");
     main_dict = PyModule_GetDict(main_mod);
     plpy_mod = PyImport_AddModule("plpy");
-    if (plpy_mod == NULL)
+    if (plpy_mod == NULL) {
         PLy_elog(ERROR, "could not import \"plpy\" module");
+    }
     PyDict_SetItemString(main_dict, "plpy", plpy_mod);
-    if (PyErr_Occurred())
+    if (PyErr_Occurred()) {
         PLy_elog(ERROR, "could not import \"plpy\" module");
+    }
 }
 
 static void PLy_add_exceptions(PyObject* plpy)
@@ -179,8 +182,9 @@ static void PLy_add_exceptions(PyObject* plpy)
 #else
     excmod = PyModule_Create(&PLy_exc_module);
 #endif
-    if (excmod == NULL)
+    if (excmod == NULL) {
         PLy_elog(ERROR, "could not create the spiexceptions module");
+    }
 
     /*
      * XXX it appears that in some circumstances the reference count of the
@@ -197,20 +201,20 @@ static void PLy_add_exceptions(PyObject* plpy)
         PLy_elog(ERROR, "could not add the spiexceptions module");
     }
 
-    plpy_t_context.PLy_exc_error = PyErr_NewException("plpy.Error", NULL, NULL);
-    plpy_t_context.PLy_exc_fatal = PyErr_NewException("plpy.Fatal", NULL, NULL);
-    plpy_t_context.PLy_exc_spi_error = PyErr_NewException("plpy.SPIError", NULL, NULL);
+    g_plpy_t_context.PLy_exc_error = PyErr_NewException("plpy.Error", NULL, NULL);
+    g_plpy_t_context.PLy_exc_fatal = PyErr_NewException("plpy.Fatal", NULL, NULL);
+    g_plpy_t_context.PLy_exc_spi_error = PyErr_NewException("plpy.SPIError", NULL, NULL);
 
-    if (plpy_t_context.PLy_exc_error == NULL || plpy_t_context.PLy_exc_fatal == NULL ||
-        plpy_t_context.PLy_exc_spi_error == NULL)
+    if (g_plpy_t_context.PLy_exc_error == NULL || g_plpy_t_context.PLy_exc_fatal == NULL ||
+        g_plpy_t_context.PLy_exc_spi_error == NULL)
         PLy_elog(ERROR, "could not create the base SPI exceptions");
 
-    Py_INCREF(plpy_t_context.PLy_exc_error);
-    PyModule_AddObject(plpy, "Error", plpy_t_context.PLy_exc_error);
-    Py_INCREF(plpy_t_context.PLy_exc_fatal);
-    PyModule_AddObject(plpy, "Fatal", plpy_t_context.PLy_exc_fatal);
-    Py_INCREF(plpy_t_context.PLy_exc_spi_error);
-    PyModule_AddObject(plpy, "SPIError", plpy_t_context.PLy_exc_spi_error);
+    Py_INCREF(g_plpy_t_context.PLy_exc_error);
+    PyModule_AddObject(plpy, "Error", g_plpy_t_context.PLy_exc_error);
+    Py_INCREF(g_plpy_t_context.PLy_exc_fatal);
+    PyModule_AddObject(plpy, "Fatal", g_plpy_t_context.PLy_exc_fatal);
+    Py_INCREF(g_plpy_t_context.PLy_exc_spi_error);
+    PyModule_AddObject(plpy, "SPIError", g_plpy_t_context.PLy_exc_spi_error);
 
     errno_t rc = EOK;
     rc = memset_s(&hash_ctl, sizeof(hash_ctl), 0, sizeof(hash_ctl));
@@ -219,9 +223,9 @@ static void PLy_add_exceptions(PyObject* plpy)
     hash_ctl.keysize = sizeof(int);
     hash_ctl.entrysize = sizeof(PLyExceptionEntry);
     hash_ctl.hash = tag_hash;
-    plpy_t_context.PLy_spi_exceptions = hash_create("Plpy SPI exceptions", 512, &hash_ctl, HASH_ELEM | HASH_FUNCTION);
+    g_plpy_t_context.PLy_spi_exceptions = hash_create("Plpy SPI exceptions", 512, &hash_ctl, HASH_ELEM | HASH_FUNCTION);
 
-    PLy_generate_spi_exceptions(excmod, plpy_t_context.PLy_exc_spi_error);
+    PLy_generate_spi_exceptions(excmod, g_plpy_t_context.PLy_exc_spi_error);
 }
 
 /*
@@ -238,12 +242,14 @@ static void PLy_generate_spi_exceptions(PyObject* mod, PyObject* base)
         PyObject* sqlstate = NULL;
         PyObject* dict = PyDict_New();
 
-        if (dict == NULL)
+        if (dict == NULL) {
             PLy_elog(ERROR, "could not generate SPI exceptions");
+        }
 
         sqlstate = PyString_FromString(unpack_sql_state(exception_map[i].sqlstate));
-        if (sqlstate == NULL)
+        if (sqlstate == NULL) {
             PLy_elog(ERROR, "could not generate SPI exceptions");
+        }
 
         PyDict_SetItemString(dict, "sqlstate", sqlstate);
         Py_DECREF(sqlstate);
@@ -251,7 +257,7 @@ static void PLy_generate_spi_exceptions(PyObject* mod, PyObject* base)
         Py_INCREF(exc);
         PyModule_AddObject(mod, exception_map[i].classname, exc);
         entry = (PLyExceptionEntry*)hash_search(
-            plpy_t_context.PLy_spi_exceptions, &exception_map[i].sqlstate, HASH_ENTER, &found);
+            g_plpy_t_context.PLy_spi_exceptions, &exception_map[i].sqlstate, HASH_ENTER, &found);
         entry->exc = exc;
         Assert(!found);
     }
@@ -304,8 +310,9 @@ PyObject* PLy_quote_literal(PyObject* self, PyObject* args)
     char* quoted = NULL;
     PyObject* ret = NULL;
 
-    if (!PyArg_ParseTuple(args, "s", &str))
+    if (!PyArg_ParseTuple(args, "s", &str)) {
         return NULL;
+    }
 
     quoted = quote_literal_cstr(str);
     ret = PyString_FromString(quoted);
@@ -320,11 +327,13 @@ PyObject* PLy_quote_nullable(PyObject* self, PyObject* args)
     char* quoted = NULL;
     PyObject* ret = NULL;
 
-    if (!PyArg_ParseTuple(args, "z", &str))
+    if (!PyArg_ParseTuple(args, "z", &str)) {
         return NULL;
+    }
 
-    if (str == NULL)
+    if (str == NULL) {
         return PyString_FromString("NULL");
+    }
 
     quoted = quote_literal_cstr(str);
     ret = PyString_FromString(quoted);
@@ -339,8 +348,9 @@ PyObject* PLy_quote_ident(PyObject* self, PyObject* args)
     const char* quoted = NULL;
     PyObject* ret = NULL;
 
-    if (!PyArg_ParseTuple(args, "s", &str))
+    if (!PyArg_ParseTuple(args, "s", &str)) {
         return NULL;
+    }
 
     quoted = quote_identifier(str);
     ret = PyString_FromString(quoted);
@@ -361,11 +371,13 @@ static PyObject* PLy_output(volatile int level, PyObject* self, PyObject* args)
          */
         PyObject* o = NULL;
 
-        if (!PyArg_UnpackTuple(args, "plpy.elog", 1, 1, &o))
+        if (!PyArg_UnpackTuple(args, "plpy.elog", 1, 1, &o)) {
             PLy_elog(ERROR, "could not unpack arguments in plpy.elog");
+        }
         so = PyObject_Str(o);
-    } else
+    } else {
         so = PyObject_Str(args);
+    }
     if (so == NULL || ((sv = PyString_AsString(so)) == NULL)) {
         level = ERROR;
         sv = dgettext(TEXTDOMAIN, "could not parse error message in plpy.elog");
@@ -392,7 +404,7 @@ static PyObject* PLy_output(volatile int level, PyObject* self, PyObject* args)
         Py_XDECREF(so);
 
         /* Make Python raise the exception */
-        PLy_exception_set(plpy_t_context.PLy_exc_error, "%s", edata->message);
+        PLy_exception_set(g_plpy_t_context.PLy_exc_error, "%s", edata->message);
         return NULL;
     }
     PG_END_TRY();

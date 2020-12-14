@@ -1,0 +1,420 @@
+# -*- coding:utf-8 -*-
+# Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms
+# and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS,
+# WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+# ----------------------------------------------------------------------------
+
+# ----------------------------------------------------------------------
+# Xgboost regression and Classification use sklearn API.
+# ----------------------------------------------------------------------
+import ast
+import collections
+import itertools
+import plpy
+import re
+
+import xgboost as xgb
+import numpy as np
+import cPickle as pickle
+import pandas as pd
+
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import precision_recall_fscore_support
+from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_absolute_error
+from sklearn.metrics import r2_score
+from sklearn.metrics import cohen_kappa_score
+from sklearn.metrics import accuracy_score
+
+from utilities.utilities import unique_string
+from utilities.utilities import split_quoted_delimited_str
+from utilities.utilities import _assert
+from utilities.control import MinWarning
+from utilities.validate_args import get_cols
+from utilities.validate_args import get_expr_type
+from utilities.validate_args import quote_ident
+from utilities.validate_args import unquote_ident
+from utilities.validate_args import _get_table_schema_names
+
+# xgboost donot support category, xgboost only deals with numeric columns
+support_type_list = ('TINYINT', 'SMALLINT', 'INTEGER', 'BINARY_INTEGER', 'BIGINT', 'DECIMAL',
+                    'SMALLSERIAL', 'SERIAL', 'BIGSERIAL',
+                    'REAL', 'FLOAT4', 'DOUBLE PRECISION', 'FLOAT8', 'FLOAT', 'BINARY_DOUBLE', 'DEC',
+                    'BOOLEAN')
+
+
+def get_features_to_use(schema_madlib, input_table, id_column, dependent_varname, str_of_features, str_of_features_to_exclude, verbose=False):
+    """
+        get all columns and used columns.
+        return: quote_idented column.
+    """
+    other_col_set = set([id_column, dependent_varname])
+    other_col_set |= set(unquote_ident(i) for i in [id_column, dependent_varname])
+
+    if str_of_features.strip() == '*':
+        all_col = get_cols(input_table)        # get all columns in order with quote_ident!
+        all_col_set = set(all_col)
+        exclude_set = set(split_quoted_delimited_str(str_of_features_to_exclude))
+        feature_set = all_col_set - exclude_set
+        filtered_feature_list = list(feature_set - other_col_set)
+        filtered_feature_list = [t for t in all_col if t in filtered_feature_list] # columns order is important
+    else:
+        all_col_set = set(get_cols(input_table))
+        feature_list = split_quoted_delimited_str(str_of_features)
+        feature_exclude = split_quoted_delimited_str(str_of_features_to_exclude)
+        return_set = set(feature_list) - set(feature_exclude) - other_col_set
+        # instead of returning list(return_set) we create a list that has
+        # elements in same order as original feature_list
+        filtered_feature_list = [feat for feat in feature_list if feat in return_set]
+
+    if verbose:
+        plpy.info("get_features_to_use() " + str(all_col_set) + " -- " + str(filtered_feature_list))
+    return all_col_set, filtered_feature_list
+
+def get_column_and_ret_type(schema_madlib, input_table, id_column, dependent_varname, features_list, verbose=False):
+    '''
+        1. check the data type of the input table.
+        2. get the type of dependent_varname.
+    '''
+    # Extract feature names from information_schema, and check type.
+    col_list = features_list + [dependent_varname]   # X + [y] with unquote_idented
+
+    # input_table = <s_name>.<t_name>
+    s_name, t_name = _get_table_schema_names(input_table, True)
+    sql = """SELECT 
+                column_name, data_type
+            FROM
+                information_schema.columns
+            WHERE
+                table_name = '{t_name}' AND table_schema IN {s_name} AND column_name IN {col_list};
+    """.format(
+        t_name=t_name,
+        s_name=s_name,
+        col_list=str(col_list).replace('[', '(').replace(']', ')').replace('"', '')
+    )
+    if verbose:
+        plpy.info("get_column_and_ret_type() " + sql)
+
+    result = plpy.execute(sql)
+
+    # xgboost do not support category, xgboost only deals with numeric columns
+    for r in result:
+        if verbose:
+            plpy.info("get_column_and_ret_type() check type: " + r['column_name'] + " --> " + r['data_type'])
+        if r['data_type'].upper() not in support_type_list:
+            plpy.error("Wrong Xgboost type, " + r['column_name'] + " is " + r['data_type'])
+
+    # save the type of dependent_variable.
+    y_type = get_expr_type(dependent_varname, input_table)
+
+    if verbose:
+        plpy.info("get_column_and_ret_type() lable type is: " + str(y_type))
+
+    return y_type
+
+
+def save_table_as_bytea(schema_madlib, input_table, id_column,
+                                     dependent_varname, features_list, verbose, **kwargs):
+    """
+        transfrom table => dataframe => dumpfile
+    """
+    # 1) Extract feature names from information_schema
+    col_list = features_list + [dependent_varname]   # X + [y], quote_idented
+
+    # 2) Fetch dataset for model training
+    sql = """select {id_column}, {col} from {input_table}""".format(
+        id_column=id_column,
+        col=','.join(col_list),
+        input_table=input_table
+    )
+
+    if verbose:
+        plpy.info("save_table_as_bytea() " + str(sql))
+
+    result = plpy.execute(sql)
+    # => df
+    df = pd.DataFrame.from_records(result)
+
+    if verbose:
+        plpy.info("save_table_as_bytea() " + str(df.columns))
+
+    # dump dataframe.
+    return pickle.dumps(df)
+
+
+def xgboost_train_parallel(schema_madlib, dframe, dependent_varname, features_list,
+                            xgb_type, params, evaluation, verbose, **kwargs):
+    """
+        xgboost grid search Algorithm
+        Args:
+        @param dframe,                    -- name of input table
+        @param dependent_varname,         -- name of dependent variable  Y
+        @param features_list,             -- name of independent variables  X
+        @param xgb_type,                  -- 'C' or 'R', classificaiton or Regression
+        @param params,                    -- dictionary. params = "{'eta':0.1, 'max_depth':2, 'min_child_weight':3}"
+    """
+    # 1) Load the dataset for model training
+    df = pickle.loads(dframe)
+
+    # 2) Train XGBoost model & return a serialized representation to store in table, keep the order.
+    features_list = [unquote_ident(x) for x in features_list]
+    features = filter(lambda x: x in df.columns, features_list)
+    if verbose:
+        plpy.info("xgboost_train_parallel(): " + str(df.columns) + " <>" + str(features))
+    X = df[features]
+    y = df[unquote_ident(dependent_varname)]
+
+    if evaluation:
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=0)
+    else:
+        X_train, y_train = X, y
+
+    if verbose:
+        plpy.info("xgboost_train_parallel() X_train.columns: " + str(X_train.columns))
+        plpy.info("xgboost_train_parallel() X_train.dtypes: " + str(X_train.dtypes))
+
+    _assert(xgb_type in ('c', 'C', 'R', 'r'),
+            "Xgboost error: xgb_type must be 'C' or 'R'")
+
+    # Train gradient boosted trees
+    # tuple string => dictionary
+    if type(params) == str:
+        params = ast.literal_eval(params)
+    if type(params) != tuple:
+        plpy.error("Wrong XGboost parameters " + str(params))
+
+    params_dict = dict()
+    for p in params:
+        k, v = p.split("=")
+        params_dict[k.strip()] = v.strip()
+
+    if verbose:
+        plpy.info("xgboost_train_parallel() params list: " + str(params_dict))
+        plpy.info("xgboost_train_parallel() train type: " + xgb_type)
+
+    model_metrics = "evalution is OFF, no metrics"
+
+    if xgb_type == 'C' or xgb_type == 'c':
+        categories = len(set(y_train))
+        plpy.info("xgboost_train_parallel() Classification categories: " + str(categories))
+
+        if categories < 2:
+            plpy.error("Wrong Xgboost Categories: " + str(categories))
+
+        gbm = xgb.XGBClassifier(**params_dict)
+
+        # Fit model
+        gbm.fit(X_train, y_train)
+
+        # 3) Compute and return model metrics score
+        if evaluation:
+            y_pred_test = gbm.predict(X_test)
+
+            if categories == 2:
+                scores = np.array(precision_recall_fscore_support(y_test, y_pred_test)).transpose()
+
+                # precision: TP / (TP + FP) where tp is the number of true positives and fp the number of false positives.
+                # recall: TP / (TP + FN) where tp is the number of true positives and fn the number of false negatives.
+                # fscore: F1=2PR/(P+R)
+                # support: is the number of occurrences of each class in y_true
+                model_metrics = pd.DataFrame(scores, columns=['precision', 'recall', 'f1score', 'support'])
+                model_metrics['class'] = gbm.classes_
+                model_metrics = model_metrics[['class'] + ['precision', 'recall', 'f1score', 'support']]
+
+                model_metrics = model_metrics.to_string(index=False)
+
+            else:
+                model_metrics = dict()
+                model_metrics['kappa'] = cohen_kappa_score(y_test, y_pred_test)
+                model_metrics['acc'] = accuracy_score(y_test, y_pred_test)
+                model_metrics = str(model_metrics)
+
+        # 1) save model_metric, 2) [x], 3) dump model, 4) current parameters
+        return model_metrics, features, pickle.dumps(gbm), str(params)
+
+    else:
+        gbm = xgb.XGBRegressor(**params_dict)
+        gbm.fit(X_train, y_train)
+
+        if evaluation:
+            # R2squared: coefficient of determination
+            metric_labels = ['mae', 'mse', 'R2squared', 'rmse']
+
+            y_test_pred = gbm.predict(X_test)
+            mae2 = mean_absolute_error(y_test_pred, y_test)
+            mse2 = mean_squared_error(y_test_pred, y_test)
+            r2 = r2_score(y_test_pred, y_test)
+            rmse2 = np.sqrt(mse2)
+
+            model_metrics = {'mae': mae2, 'mse': mse2, 'r2squared': r2, 'rmse': rmse2}
+            model_metrics = pd.DataFrame(model_metrics, index=list('1'))
+            model_metrics = model_metrics.to_string()
+
+        # 1) save model_metric, 2) [x], 3) dump model, 4) current parameters
+        return (model_metrics, features, pickle.dumps(gbm), params)
+
+
+def cartesian_product(params):
+    """
+        Expand a dict of parameters into a Cartesian product
+        For example, if the input is:
+            "{'booster': ['gbtree'], 'eta': 0.1, 'max_depth': (5,6,7), 'objective': ('binary:logistic',)}"
+        Then, cartesian_product is:
+            [('booster = gbtree', 'eta = 0.1', 'max_depth = 5', 'objective = binary:logistic'),
+            ('booster = gbtree', 'eta = 0.1', 'max_depth = 6', 'objective = binary:logistic'),
+            ('booster = gbtree', 'eta = 0.1', 'max_depth = 7', 'objective = binary:logistic')]
+    """
+    # transfer params => Cartesian product
+    cp_list = []
+
+    for key, val in params.items():
+        if val and isinstance(val, collections.Iterable):
+            r = []
+            for v in val:
+                r.append("""{k} = {v}""".format(k=key, v=v))
+        else:
+            r = ["""{k} = {v}""".format(k=key, v=val)]
+        cp_list.append(r)
+    cartesian_product = [i for i in itertools.product(*cp_list)]
+    return cartesian_product
+
+
+def xgboost_grid_search(schema_madlib, input_table, grid_search_results_tbl, id_column,
+                        dependent_varname, features_list, xgb_type, params_str, evaluation, verbose, **kwargs):
+    """
+        xgboost grid search main entry.
+    """
+
+    y_type = get_column_and_ret_type(schema_madlib, input_table, id_column, dependent_varname, features_list, verbose)
+ 
+    # Expand the grid-search parameters, Expand the params to run-grid search
+    if params_str is None or params_str is "" or ":" not in params_str:
+        params_str = "{}"
+        plpy.info("xgboost_grid_search() params_str type is: " + params_str)
+
+    # str => dict
+    params = ast.literal_eval(re.sub("[\\t]", "", params_str).strip())
+
+    # trans params => Cartesian product
+    params_grid = cartesian_product(params)
+
+    if verbose:
+        plpy.info("xgboost_grid_search() Cartesian product DONE: " + str(params_grid))
+
+    # Save each parameter list in the grid as a row in a distributed table
+    grid_search_params_temp_tbl = unique_string(desp='gridSearchXGB')
+    sql = """
+        DROP TABLE IF EXISTS {grid_search_params_temp_tbl};
+        CREATE TEMP TABLE {grid_search_params_temp_tbl} (id INT, params TEXT)
+        m4_ifdef(`__POSTGRESQL__', `', `DISTRIBUTED BY (id)')
+        m4_ifdef(`__GSDBMPP__', `DISTRIBUTE BY HASH(id)', `');
+    """.format(grid_search_params_temp_tbl=grid_search_params_temp_tbl)
+
+    if verbose:
+        plpy.info(sql)
+
+    plpy.execute(sql)
+
+    # insert grid search parameters into the g_s_p table
+    sql = """INSERT INTO {grid_search_params_temp_tbl} VALUES ({id}, $${val}$$);"""
+
+    for indx, val in enumerate(params_grid):
+        plpy.execute(
+            sql.format(
+                grid_search_params_temp_tbl=grid_search_params_temp_tbl,
+                id=indx + 1,
+                val=val
+            )
+        )
+
+    # Extract features from table and persist as serialized dataframe
+    col_list = features_list + [dependent_varname]   # X + [y], quote_idented
+    sql = """
+        DROP TABLE IF EXISTS {grid_search_params_temp_tbl}_df;
+        CREATE TEMP TABLE {grid_search_params_temp_tbl}_df m4_ifdef(`__GSDBMPP__', `DISTRIBUTE BY HASH(id)', `')
+        AS
+        (
+            SELECT
+                1 as id,
+                {schema_madlib}.__save_table_as_bytea__(
+                    '{input_table}',
+                    '{id_column}',
+                    '{class_label}',
+                    ARRAY[{features_list}],
+                    {verbose}
+                ) as df
+        ) m4_ifdef(`__POSTGRESQL__', `', `DISTRIBUTED BY (id)');
+    """.format(
+        schema_madlib=schema_madlib,
+        grid_search_params_temp_tbl=grid_search_params_temp_tbl,
+        input_table=input_table,
+        id_column=id_column,
+        class_label=dependent_varname,
+        features_list=str(features_list).replace('[', '').replace(']', ''),
+        verbose=verbose
+    )
+
+    if verbose:
+        plpy.info(sql)
+
+    plpy.execute(sql)
+
+    # 5) Invoke XGBoost's train by passing each row from parameter list table. This will run in parallel.
+    sql = """
+        CREATE TABLE {grid_search_results_tbl} m4_ifdef(`__GSDBMPP__', `DISTRIBUTE BY HASH(id)', `')
+        AS (
+            SELECT
+                id,
+                now() as train_timestamp,
+                '{input_table}' as source_table,
+                '{y_type}'::TEXT as y_type,
+                (mdl_results).metrics,
+                (mdl_results).features,
+                (mdl_results).model,
+                (mdl_results).params
+            FROM (
+                SELECT
+                    t1.id,
+                    {schema_madlib}.__xgboost_train_parallel__(
+                        df,
+                        '{class_label}',
+                        ARRAY[{features}],
+                        '{xgb_type}',
+                        params,
+                        {evaluation},
+                        {verbose}
+                    ) AS mdl_results
+                FROM
+                    {grid_search_params_temp_tbl} t1,
+                    {grid_search_params_temp_tbl}_df
+            )q
+        );
+    """.format(
+        schema_madlib=schema_madlib,
+        y_type=y_type,
+        grid_search_results_tbl=grid_search_results_tbl,
+        grid_search_params_temp_tbl=grid_search_params_temp_tbl,
+        xgb_type=xgb_type,
+        features=str(features_list).replace('[', '').replace(']', '').replace(',', ','),
+        input_table=input_table,
+        class_label=dependent_varname,
+        evaluation=evaluation,
+        verbose=verbose
+    )
+
+    if verbose:
+        plpy.info("xgboost_grid_search() " + sql)
+
+    plpy.execute(sql)
+    return """Grid search results saved in {tbl}""".format(tbl=grid_search_results_tbl)

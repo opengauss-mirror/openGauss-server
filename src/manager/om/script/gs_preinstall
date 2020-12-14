@@ -321,7 +321,8 @@ General options:
         if not 'LD_LIBRARY_PATH' in os.environ:
             os.environ['LD_LIBRARY_PATH'] = ld_path
         elif not ld_path in os.environ.get('LD_LIBRARY_PATH'):
-            os.environ['LD_LIBRARY_PATH'] = ld_path + ":" + os.environ['LD_LIBRARY_PATH']
+            os.environ['LD_LIBRARY_PATH'] = \
+                ld_path + ":" + os.environ['LD_LIBRARY_PATH']
         else:
             rerun = False
 

@@ -1,0 +1,197 @@
+/*
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ *
+ * openGauss is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ * See the Mulan PSL v2 for more details.
+ * -------------------------------------------------------------------------
+ */
+
+m4_include(`SQLCommon.m4')
+
+----------------------------------------------------------------------------------------------
+------ Help messages
+----------------------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.xgboost_sk_classifier(
+    message    TEXT
+) RETURNS TEXT AS $XX$
+    PythonFunction(xgboost_gs, xgboost_sklearn, xgboost_sk_classifier_help_message)
+$XX$ LANGUAGE plpythonu IMMUTABLE;
+-------------------------------------------------------------
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.xgboost_sk_classifier()
+RETURNS TEXT AS $XX$
+    SELECT MADLIB_SCHEMA.xgboost_sk_classifier(''::TEXT);
+$XX$
+LANGUAGE sql IMMUTABLE;
+
+-----------------------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.xgboost_sk_regressor(
+    message    TEXT
+) RETURNS TEXT AS $XX$
+    PythonFunction(xgboost_gs, xgboost_sklearn, xgboost_sk_regressor_help_message)
+$XX$ LANGUAGE plpythonu IMMUTABLE;
+-------------------------------------------------------------
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.xgboost_sk_regressor()
+RETURNS TEXT
+AS $XX$
+    SELECT MADLIB_SCHEMA.xgboost_sk_regressor(''::TEXT);
+$XX$
+LANGUAGE sql IMMUTABLE;
+----------------------------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.xgboost_sk_predict(
+    message    TEXT
+) RETURNS TEXT AS $$
+    PythonFunction(xgboost_gs, xgboost_sklearn, xgboost_sk_predict_help_message)
+$$ LANGUAGE plpythonu IMMUTABLE;
+-------------------------------------------------------------
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.xgboost_sk_predict()
+RETURNS TEXT AS $$
+    SELECT MADLIB_SCHEMA.xgboost_sk_predict(''::TEXT);
+$$
+LANGUAGE sql IMMUTABLE;
+-------------------------------------------------------------
+
+
+----------------------------------------------------------------------------------------------
+------ xgboost Classifier Algo
+----------------------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.xgboost_sk_classifier(
+    input_table TEXT,                -- in, dataset table
+    model_table TEXT,                -- out, save model and features
+    id_column TEXT,                  -- id column of the dataset table
+    dependent_varname TEXT,          -- y, class label
+    str_of_features  TEXT,           -- X,
+    str_of_features_to_exclude TEXT, -- List of column names (comma-separated string) to exlude from the predictors list.
+    params_str TEXT,                 -- xgboost parameters
+    evaluation BOOL,                 -- evaluation the training model, default FALSE.
+    verbose BOOL
+)
+RETURNS TEXT AS $$
+PythonFunction(xgboost_gs, xgboost_sklearn, xgboost_sk_classifier)
+$$ LANGUAGE plpythonu;
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.xgboost_sk_classifier(
+    input_table TEXT,
+    model_table TEXT,
+    id_column TEXT,
+    dependent_varname TEXT,          -- y, class label
+    str_of_features TEXT,            -- X,
+    str_of_features_to_exclude TEXT, -- List of column names (comma-separated string) to exlude from the predictors list.
+    params_str TEXT,
+    evaluation BOOL                  -- evaluation the training model, default FALSE.
+)
+RETURNS TEXT AS $$
+    SELECT MADLIB_SCHEMA.xgboost_sk_classifier($1, $2, $3, $4, $5, $6, $7, $8, FALSE);
+$$ LANGUAGE sql;
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.xgboost_sk_classifier(
+    input_table TEXT,
+    model_table TEXT,
+    id_column TEXT,
+    dependent_varname TEXT,          -- y, class label
+    str_of_features TEXT,            -- X,
+    str_of_features_to_exclude TEXT, -- List of column names (comma-separated string) to exlude from the predictors list.
+    params_str TEXT
+)
+RETURNS TEXT AS $$
+    SELECT MADLIB_SCHEMA.xgboost_sk_classifier($1, $2, $3, $4, $5, $6, $7, FALSE);
+$$ LANGUAGE sql;
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.xgboost_sk_classifier(
+    input_table TEXT,
+    model_table TEXT,
+    id_column TEXT,
+    dependent_varname TEXT,          -- y, class label
+    str_of_features TEXT,            -- X,
+    str_of_features_to_exclude TEXT  -- List of column names (comma-separated string) to exlude from the predictors list.
+)
+RETURNS TEXT AS $$
+    SELECT MADLIB_SCHEMA.xgboost_sk_classifier($1, $2, $3, $4, $5, $6, '');
+$$ LANGUAGE sql;
+
+----------------------------------------------------------------------------------------------
+------ xgboost XGBRegressor
+----------------------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.xgboost_sk_regressor(
+    input_table TEXT,                -- in, dataset table
+    model_table TEXT,                -- out, save model and features
+    id_column TEXT,                  -- id column of the dataset table
+    dependent_varname TEXT,          -- y, class label
+    str_of_features TEXT,            -- X,
+    str_of_features_to_exclude TEXT, -- List of column names (comma-separated string) to exlude from the predictors list.
+    params_str TEXT,                 -- xgboost parameters
+    evaluation BOOL,                 -- evaluation the training model, default FALSE.
+    verbose BOOL
+)
+RETURNS TEXT AS $$
+PythonFunction(xgboost_gs, xgboost_sklearn, xgboost_sk_regressor)
+$$ LANGUAGE plpythonu;
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.xgboost_sk_regressor(
+    input_table TEXT,
+    model_table TEXT,
+    id_column TEXT,
+    dependent_varname TEXT,          -- y, class label
+    str_of_features TEXT,            -- X,
+    str_of_features_to_exclude TEXT, -- List of column names (comma-separated string) to exlude from the predictors list.
+    params_str TEXT,
+    evaluation BOOL                  -- evaluation the training model, default FALSE.
+)
+RETURNS TEXT AS $$
+    SELECT MADLIB_SCHEMA.xgboost_sk_regressor($1, $2, $3, $4, $5, $6, $7, $8, FALSE);
+$$ LANGUAGE sql;
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.xgboost_sk_regressor(
+    input_table TEXT,
+    model_table TEXT,
+    id_column TEXT,
+    dependent_varname TEXT,          -- y, class label
+    str_of_features TEXT,            -- X,
+    str_of_features_to_exclude TEXT, -- List of column names (comma-separated string) to exlude from the predictors list.
+    params_str TEXT
+)
+RETURNS TEXT AS $$
+    SELECT MADLIB_SCHEMA.xgboost_sk_regressor($1, $2, $3, $4, $5, $6, $7, FALSE);
+$$ LANGUAGE sql;
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.xgboost_sk_regressor(
+    input_table TEXT,
+    model_table TEXT,
+    id_column TEXT,
+    dependent_varname TEXT,          -- y, class label
+    str_of_features TEXT,            -- X,
+    str_of_features_to_exclude TEXT  -- List of column names (comma-separated string) to exlude from the predictors list.
+)
+RETURNS TEXT AS $$
+    SELECT MADLIB_SCHEMA.xgboost_sk_regressor($1, $2, $3, $4, $5, $6, '');
+$$ LANGUAGE sql;
+
+------------------------------------------------
+-- XGBoost predict
+------------------------------------------------
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.xgboost_sk_predict(
+    input_table          TEXT,    -- in, test dataset
+    model_table          TEXT,    -- in, model table from training
+    output_table         TEXT,    -- out, prediction of the test
+    id_column            TEXT,    -- id column of the test dataset
+    verbose              BOOL
+) RETURNS TEXT AS $$
+PythonFunction(xgboost_gs, xgboost_sklearn, xgboost_sk_predict)
+$$ LANGUAGE plpythonu;
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.xgboost_sk_predict(
+    input_table          TEXT,
+    model_table          TEXT,
+    output_table         TEXT,
+    id_column            TEXT
+) RETURNS TEXT AS $$
+    SELECT MADLIB_SCHEMA.xgboost_sk_predict($1, $2, $3, $4, FALSE);
+$$ LANGUAGE sql;

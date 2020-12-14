@@ -1,0 +1,349 @@
+# -*- coding:utf-8 -*-
+# Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms
+# and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS,
+# WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+# ----------------------------------------------------------------------------
+
+# ----------------------------------------------------------------------
+# Timeseries predict use facebook module prophet.
+# ----------------------------------------------------------------------
+import plpy
+import cPickle as pickle
+
+from utilities.validate_args import table_exists
+from utilities.validate_args import table_is_empty
+from utilities.validate_args import columns_exist_in_table
+from utilities.validate_args import get_expr_type
+from utilities.validate_args import get_cols
+from utilities.utilities import _assert
+from utilities.control import MinWarning
+
+
+def prophet_fit(schema_madlib, input_table, model_table, column_map, params_str, verbose, **kwargs):
+    """
+        Args:
+        @param input_table,                 -- name of input table
+        @param model_table,                 -- name of output table
+        @param column_map,                  -- map relation of column
+        @param params_str,                  -- names of paraters for prophet
+        @param verbose                      -- verbose or not
+    """
+    with MinWarning('warning'):
+        _validate_args(schema_madlib, input_table, model_table, params_str)
+
+    sql = """
+          DROP TABLE IF EXISTS {model_table};
+          CREATE TABLE {model_table} m4_ifdef(`__GSDBMPP__', `DISTRIBUTE BY HASH(id)', `') 
+          AS
+          (
+              SELECT
+                    1 as id,
+                    (mdl_results).y_type, 
+                    (mdl_results).model,
+                    (mdl_results).params
+              FROM (
+                    SELECT
+                          {schema_madlib}.__get_fbmodel_as_bytea__(
+                          '{input_table}',
+                          $${column_map}$$,
+                          $${params_str}$$,
+                          {verbose}
+                    ) as mdl_results
+               )q
+           );
+          """.format(
+                     schema_madlib=schema_madlib,
+                     model_table=model_table,
+                     input_table=input_table,
+                     column_map=column_map,
+                     params_str=params_str,
+                     verbose=verbose
+              )
+    
+    if verbose:
+        plpy.info(sql) 
+    plpy.execute(sql)
+   
+    return "Prophet_fit over and model is saved in {model_table}".format(model_table=model_table)
+
+
+# ------------------------------------------------------------------------------
+# -- prophet predict function ------------------------------------------------------------
+# ------------------------------------------------------------------------------
+def prophet_predict(schema_madlib, model_table, output_table, periods, freq, cap, floor, include_history, verbose, **kwargs):
+    """
+    Args:
+    @param model_table,                  -- name of model table
+    @param output_table,                 -- name of output table
+    @param periods,                      -- value of predict length
+    @param freq,                         -- frequency of predict value
+    @param cap,                          -- max value of predict value(logistic)
+    @param floor,                        -- min value of predict value(logistic)
+    @param inlcude_history
+    """
+    with MinWarning('warning'):
+        _validate_predict(schema_madlib, model_table, output_table, periods)
+    
+    sql = """select y_type, model from {model_table};""".format(model_table=model_table)
+    if verbose:
+        plpy.info(sql)
+    result = plpy.execute(sql)
+    y_type = result[0]['y_type']
+    
+    model = result[0]['model']
+    model = pickle.loads(model)
+
+    if freq:
+        future = model.make_future_dataframe(periods=periods, freq=freq, include_history=include_history)
+    else:
+        future = model.make_future_dataframe(periods=periods, include_history=include_history)
+    if cap is not None:
+        future['cap'] = cap
+    if floor is not None:
+        future['floor'] = floor
+    forecast = model.predict(future)
+   
+    columns = forecast.columns
+    column_list, value_list = [], []
+    for column in columns:
+        if column == 'ds':
+	    column_list.append('{column} date'.format(column=column))
+            value_list.append("'{{{column}}}'".format(column=column))
+        else:
+            column_list.append('{column} {y_type}'.format(column=column, y_type=y_type))
+            value_list.append('{{{column}}}'.format(column=column))
+    column_information = ', '.join(column_list)
+    value_information = ', '.join(value_list)
+    plpy.info("column_information is: " + str(column_information))    
+    plpy.info("value_information is: " + str(value_information))    
+ 
+    sql = """
+          DROP TABLE IF EXISTS {output_table};
+          CREATE TABLE {output_table} ({column_information})
+          """.format(
+                     output_table=output_table,
+                     column_information=column_information
+                    )
+    if verbose:
+        plpy.info(sql)
+    plpy.execute(sql)
+    
+
+    sql = """INSERT INTO {output_table} VALUES ({value_information});""".format(output_table=output_table,
+                                                                                value_information=value_information)
+    plpy.info("insert sql is {sql}".format(sql=sql))
+    predict_length = len(forecast['ds'])
+    for i in range(predict_length):
+        plpy.execute(
+                     sql.format(**{col:forecast[col][i] for col in columns})
+    )        
+
+    return "prophet predict over and result is saved in {output_table}".format(output_table=output_table)
+
+
+# ------------------------------------------------------------------------------
+# -- validate args  ------------------------------------------------------------
+# ------------------------------------------------------------------------------
+def _validate_args(schema_madlib, input_table, model_table, params_str):
+    """
+    @brief validate the arguments
+    """
+    # 1, check input_table: name.
+    _assert(input_table and input_table.strip().lower() not in ('null', ''),
+            "Prophet error: Invalid data table name!")
+    _assert(table_exists(input_table),
+            "Prophet error: Data table does not exist!")
+    _assert(not table_is_empty(input_table),
+            "Prophet error: Data table is empty!")
+
+    # 3, check output table.
+    _assert(model_table is not None and model_table.strip().lower() not in ('null', ''),
+            "Prophet error: Invalid output table name!")
+    _assert(not table_exists(model_table, only_first_schema=True),
+            "Output table name already exists. Drop the table before calling the function.")
+
+    # 4, check params_str
+    if params_str != '':
+        # let prophet to check the parameter
+        pass
+
+
+def _validate_predict(schema_madlib, model_table, output_table, periods):
+    """
+    @brief validate the predict arguments
+    """
+    # 1, check input_table: name.
+    _assert(model_table and model_table.strip().lower() not in ('null', ''),
+            "Prophet error: Invalid model table name!")
+    _assert(table_exists(model_table),
+            "Prophet error: model table does not exist!")
+    _assert(not table_is_empty(model_table),
+            "Prophet error: Data table is empty!")
+
+    # 3, check output table.
+    _assert(output_table is not None and output_table.strip().lower() not in ('null', ''),
+            "Prophet error: Invalid output_table table name!")
+    _assert(not table_exists(output_table, only_first_schema=True),
+            "Output table name already exists. Drop the table before calling the function.")
+
+    # 4, check periods
+    _assert(isinstance(periods, int) and periods > 0, "Prophet error: Invalid parameter 'periods'")
+
+
+# ------------------------------------------------------------------------------
+# -- Online help function ------------------------------------------------------
+# ------------------------------------------------------------------------------
+def prophet_fit_help_message(schema_madlib, message, **kwargs):
+    """ Help message for Prophet_fit 
+
+    @brief
+    Args:
+        @param schema_madlib string, Name of the schema madlib
+        @param message string, Help message indicator
+
+    Returns:
+        String. Contain the help message string
+    """
+    if not message:
+        help_string="""
+        -----------------------------------------------------------------------
+                                    SUMMARY
+        -----------------------------------------------------------------------
+        facebook prophet API timeseries predict.
+
+        For more details on function usage:
+            SELECT {schema_madlib}.prophet_fit('usage')
+        """
+    elif message in ['usage', 'help', '?']:
+        help_string="""
+        -----------------------------------------------------------------------
+                                        USAGE
+        -----------------------------------------------------------------------
+        SELECT {schema_madlib}.prophet_fit(
+            input_table  TEXT,   -- in, Data table name
+            model_table  TEXT,   -- out, save model and features
+            column_map   TEXT,   -- map relation of column : 'ds', 'y', 'floor', 'cap'
+            params_str   TEXT,   -- prophet parameters
+            verbose      BOOLEAN    -- Boolean, whether to print more info, default is False
+         );
+
+        -----------------------------------------------------------------------
+                                   parameters
+        -----------------------------------------------------------------------
+        below is optional parameters:
+
+        column_map:
+            Prophet has specified column name as follows:
+                'ds': column of date
+                'y': column of predict value
+                'cap': upper limit of predict value
+                'floor': lower limit of predict value
+            
+            so in order to simplify the usage of prophet, we allow user to provide a map relationship between 
+        specified column name and corresponding column name, for example:
+            date  | value 
+         ------------------
+         2000-1-1 |  100 
+         2000-1-2 |  120
+         2000-1-3 |  130
+        
+        in this case, we should provide a map like {{'ds': 'date', 'y': 'value'}}
+        if user do not provide map relationship, then use the default {{'ds': 'ds', 'y': 'y'}}, if you want to use 'cap' and 'floor', 
+        you should definite it in column_map, otherwise will not use.         
+
+        params_str:
+            For example, if the input is:
+                $${{'growth': 'linear', 'changepoints': ['2000-01-01', '2000-02-02'], 'yearly_seasonality': True}}$$
+
+        a full input query:
+            select {schema_madlib}.prophet_fit('inputTable', 'output_modelTable', $${{'ds':'ds', 'y': 'y', 'cap': 'cap'}}$$,  
+            $${{'growth': 'linear', 'changepoints': ['2000-01-01', '2000-02-02'], 'yearly_seasonality': True, 'holidays': ['playoffs']}}$$, True);
+
+        -----------------------------------------------------------------------
+                                        OUTPUT
+        -----------------------------------------------------------------------
+        The output table ('model_table' above) has the following columns:
+            id                -- index
+            model             -- binary model
+                
+        note: the type of ds_column must be DATE
+
+        """
+    else:
+        help_string="No such option. Use {schema_madlib}.prophet_fit()"
+
+    return help_string.format(schema_madlib=schema_madlib)
+
+
+def prophet_predict_help_message(schema_madlib, message, **kwargs):
+    """ Help message for Prophet_predict
+
+    @brief
+    Args:
+        @param schema_madlib string, Name of the schema madlib
+        @param message string, Help message indicator
+
+    Returns:
+        String. Contain the help message string
+    """
+    if not message:
+        help_string="""
+        -----------------------------------------------------------------------
+                                    SUMMARY
+        -----------------------------------------------------------------------
+        facebook prophet API timeseries predict.
+
+        For more details on function usage:
+            SELECT {schema_madlib}.prophet_predict('usage')
+        """
+    elif message in ['usage', 'help', '?']:
+        help_string="""
+        -----------------------------------------------------------------------
+                                        USAGE
+        -----------------------------------------------------------------------
+        SELECT {schema_madlib}.prophet_predict(
+            model_table       TEXT,                    -- in, model table name
+            output_table      TEXT,                    -- out, save predict result
+            periods           INTEGER,                 -- the number of periods to forecast forward.
+            freq              TEXT,                    -- 'day', 'week', 'month', 'quarter', 'year', 1(1 sec), 60(1 minute) or 3600(1 hour)
+            cap               DOUBLE PRECISION,        -- the max value in future predict(logistic mode)
+            floor             DOUBLE PRECISION,        -- the min value in future predict(logistic mode)
+            include_history   BOOLEAN,                 -- to include the historical dates in the data frame for predictions.
+            verbose           BOOLEAN                  -- whether to print more info, default is False
+         );
+
+        -----------------------------------------------------------------------
+                                   parameters
+        -----------------------------------------------------------------------
+        below is optional parameters:
+
+        periods:
+            periods >= 1
+        cap, floor:
+            if growth is 'logistic', user should provide 'cap' or 'floor', if do not use it, just set NULL.
+        
+         example: select {schema_madlib}.prophet_predict('modelTable', 'output_Table', 1000, '10T', 10, NULL, False, False);
+         example: select {schema_madlib}.prophet_predict('modelTable', 'output_Table', 1000, '10T', NULL, NULL, False, False);
+
+
+        -----------------------------------------------------------------------
+                                        OUTPUT
+        -----------------------------------------------------------------------
+        The output table include all result of prophet_predict
+        """
+    else:
+        help_string="No such option. Use {schema_madlib}.prophet_fit()"
+
+    return help_string.format(schema_madlib=schema_madlib)
+

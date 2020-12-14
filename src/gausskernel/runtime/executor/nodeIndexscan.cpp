@@ -23,6 +23,7 @@
  *		ExecIndexRestrPos		restores scan position.
  *		ExecIndexScanEstimate	estimates DSM space needed for parallel index scan
  *		ExecIndexScanInitializeDSM initialize DSM for parallel indexscan
+ *		ExecIndexScanReInitializeDSM reinitialize DSM for fresh scan
  *		ExecIndexScanInitializeWorker attach to DSM info in parallel worker
  */
 #include "postgres.h"
@@ -78,6 +79,25 @@ static TupleTableSlot* IndexNext(IndexScanState* node)
     scandesc = node->iss_ScanDesc;
     econtext = node->ss.ps.ps_ExprContext;
     slot = node->ss.ss_ScanTupleSlot;
+
+    if (scandesc == NULL) {
+        /*
+         * We reach here if the index scan is not parallel, or if we're
+         * serially executing an index scan that was planned to be parallel.
+         */
+        scandesc = abs_idx_beginscan(node->ss.ss_currentRelation, node->iss_RelationDesc, estate->es_snapshot,
+                        node->iss_NumScanKeys, node->iss_NumOrderByKeys, (ScanState*)node);
+        node->iss_ScanDesc = scandesc;
+
+        /*
+         * If no run-time keys to calculate or they are ready, go ahead and
+         * pass the scankeys to the index AM.
+         */
+        if (node->iss_NumRuntimeKeys == 0 || node->iss_RuntimeKeysReady) {
+            abs_idx_rescan_local(scandesc, node->iss_ScanKeys, node->iss_NumScanKeys,
+                         node->iss_OrderByKeys, node->iss_NumOrderByKeys);
+        }
+    }
 
     /*
      * ok, now that we have what we need, fetch the next tuple.
@@ -182,19 +202,6 @@ TupleTableSlot* ExecIndexScan(IndexScanState* node)
  */
 void ExecReScanIndexScan(IndexScanState* node)
 {
-    bool reset_parallel_scan = true;
-
-    /*
-     * If we are here to just update the scan keys, then don't reset parallel
-     * scan.  We don't want each of the participating process in the parallel
-     * scan to update the shared parallel scan state at the start of the scan.
-     * It is quite possible that one of the participants has already begun
-     * scanning the index when another has yet to start it.
-     */
-    if (node->iss_NumRuntimeKeys != 0 && !node->iss_RuntimeKeysReady) {
-        reset_parallel_scan = false;
-    }
-
     /*
      * For recursive-stream rescan, if number of RuntimeKeys not euqal zero,
      * just return without rescan.
@@ -256,10 +263,6 @@ void ExecReScanIndexScan(IndexScanState* node)
     if (node->iss_ScanDesc) {
         abs_idx_rescan(node->iss_ScanDesc, node->iss_ScanKeys, node->iss_NumScanKeys, node->iss_OrderByKeys,
             node->iss_NumOrderByKeys);
-
-        if (reset_parallel_scan && GetIndexScanDesc(node->iss_ScanDesc)->parallel_scan) {
-            index_parallelrescan(GetIndexScanDesc(node->iss_ScanDesc));
-        }
     }
 
     ExecScanReScan(&node->ss);
@@ -703,38 +706,14 @@ IndexScanState* ExecInitIndexScan(IndexScan* node, EState* estate, int eflags)
                 (ScanState*)index_state);
             Assert(PointerIsValid(index_state->iss_ScanDesc));
         }
-    } else {
-        /*
-         * for parallel-aware node, we initialize the scan descriptor after
-         * initializing the shared memory for parallel execution.
-         */
-        if (!node->scan.plan.parallel_aware) {
-            /*
-             * Initialize scan descriptor.
-             */
-            index_state->iss_ScanDesc = abs_idx_beginscan(current_relation,
-                index_state->iss_RelationDesc,
-                estate->es_snapshot,
-                index_state->iss_NumScanKeys,
-                index_state->iss_NumOrderByKeys,
-                (ScanState*)index_state);
-        }
     }
 
-    if (!node->scan.plan.parallel_aware) {
+    if (index_state->iss_ScanDesc == NULL) {
         /*
-        * If no run-time keys to calculate, go ahead and pass the scankeys to the
-        * index AM.
-        */
-        if (index_state->iss_ScanDesc == NULL) {
-            index_state->ss.ps.stubType = PST_Scan;
-        } else if (index_state->iss_NumRuntimeKeys == 0) {
-            abs_idx_rescan_local(index_state->iss_ScanDesc,
-                index_state->iss_ScanKeys,
-                index_state->iss_NumScanKeys,
-                index_state->iss_OrderByKeys,
-                index_state->iss_NumOrderByKeys);
-        }
+         * For non-partition table, iss_ScanDesc always none, so set stubType to PST_None.
+         * For partition table, if ( 0 == node->scan.itrs), scan_desc is NULL, so set stubType to PST_Scan.
+         */
+        index_state->ss.ps.stubType = node->scan.isPartTbl ? PST_Scan : PST_None;
     }
 
     /*
@@ -1411,13 +1390,24 @@ void ExecIndexScanInitializeDSM(IndexScanState *node, ParallelContext *pcxt, int
         node->iss_NumScanKeys, node->iss_NumOrderByKeys, cxt->pwCtx->queryInfo.piscan[nodeid]);
 
     /*
-     * If no run-time keys to calculate, go ahead and pass the scankeys to the
+     * If no run-time keys to calculate or they are ready, go ahead and pass the scankeys to the
      * index AM.
      */
-    if (node->iss_NumRuntimeKeys == 0) {
+    if (node->iss_NumRuntimeKeys == 0 || node->iss_RuntimeKeysReady) {
         abs_idx_rescan(node->iss_ScanDesc, node->iss_ScanKeys, node->iss_NumScanKeys, node->iss_OrderByKeys,
             node->iss_NumOrderByKeys);
     }
+}
+
+/* ----------------------------------------------------------------
+ *		ExecIndexScanReInitializeDSM
+ *
+ *		Reset shared state before beginning a fresh scan.
+ * ----------------------------------------------------------------
+ */
+void ExecIndexScanReInitializeDSM(IndexScanState* node, ParallelContext* pcxt)
+{
+    index_parallelrescan((IndexScanDesc)node->iss_ScanDesc);
 }
 
 /* ----------------------------------------------------------------
@@ -1446,10 +1436,10 @@ void ExecIndexScanInitializeWorker(IndexScanState *node, void *context)
         node->iss_NumScanKeys, node->iss_NumOrderByKeys, piscan);
 
     /*
-     * If no run-time keys to calculate, go ahead and pass the scankeys to the
+     * If no run-time keys to calculate or they are ready, go ahead and pass the scankeys to the
      * index AM.
      */
-    if (node->iss_NumRuntimeKeys == 0) {
+    if (node->iss_NumRuntimeKeys == 0 || node->iss_RuntimeKeysReady) {
         abs_idx_rescan(node->iss_ScanDesc, node->iss_ScanKeys, node->iss_NumScanKeys, node->iss_OrderByKeys,
             node->iss_NumOrderByKeys);
     }

@@ -66,11 +66,11 @@
 #include "securec.h"
 
 /* non-export function prototypes */
-static void CheckPredicate(Expr* predicate);
+void CheckPredicate(Expr* predicate);
 static void ComputeIndexAttrs(IndexInfo* indexInfo, Oid* typeOidP, Oid* collationOidP, Oid* classOidP,
     int16* colOptionP, List* attList, List* exclusionOpNames, Oid relId, const char* accessMethodName, Oid accessMethodId,
     bool amcanorder, bool isconstraint);
-static Oid GetIndexOpClass(List* opclass, Oid attrType, const char* accessMethodName, Oid accessMethodId);
+Oid GetIndexOpClass(List* opclass, Oid attrType, const char* accessMethodName, Oid accessMethodId);
 char* ChooseIndexName(const char* tabname, Oid namespaceId, const List* colnames, const List* exclusionOpNames, bool primary,
     bool isconstraint, bool psort = false);
 static char* ChoosePartitionIndexName(const char* partname, Oid partitionedindexId,
@@ -896,25 +896,25 @@ Oid DefineIndex(Oid relationId, IndexStmt* stmt, Oid indexRelationId, bool is_al
             ForeignServer *server = GetForeignServer(ftbl->serverid);
             if (isMOTTableFromSrvName(server->servername)) {
                 indexRelationId = index_create(rel,
-                        indexRelationName,
-                        indexRelationId,
-                        stmt->oldNode,
-                        indexInfo,
-                        indexColNames,
-                        accessMethodId,
-                        tablespaceId,
-                        collationObjectId,
-                        classObjectId,
-                        coloptions,
-                        reloptions,
-                        stmt->primary,
-                        stmt->isconstraint,
-                        stmt->deferrable,
-                        stmt->initdeferred,
-                        g_instance.attr.attr_common.allowSystemTableMods,
-                        true,
-                        concurrent,
-                        &extra);
+                    indexRelationName,
+                    indexRelationId,
+                    stmt->oldNode,
+                    indexInfo,
+                    indexColNames,
+                    accessMethodId,
+                    tablespaceId,
+                    collationObjectId,
+                    classObjectId,
+                    coloptions,
+                    reloptions,
+                    stmt->primary,
+                    stmt->isconstraint,
+                    stmt->deferrable,
+                    stmt->initdeferred,
+                    g_instance.attr.attr_common.allowSystemTableMods,
+                    true,
+                    concurrent,
+                    &extra);
                 heap_close(rel, NoLock);
                 return indexRelationId;
             }
@@ -1443,7 +1443,7 @@ static bool columnIsExist(Relation rel, const Form_pg_attribute attTup, List* in
  * CheckMutability
  *		Test whether given expression is mutable
  */
-static bool CheckMutability(Expr* expr)
+bool CheckMutability(Expr* expr)
 {
     /*
      * First run the expression through the planner.  This has a couple of
@@ -1475,7 +1475,7 @@ static bool CheckMutability(Expr* expr)
  * any evaluatable predicate will work.  So accept any predicate here
  * (except ones requiring a plan), and let indxpath.c fend for itself.
  */
-static void CheckPredicate(Expr* predicate)
+void CheckPredicate(Expr* predicate)
 {
     /*
      * We don't currently support generation of an actual query plan for a
@@ -1769,7 +1769,7 @@ static void ComputeIndexAttrs(IndexInfo* indexInfo, Oid* typeOidP, Oid* collatio
 /*
  * Resolve possibly-defaulted operator class specification
  */
-static Oid GetIndexOpClass(List* opclass, Oid attrType, const char* accessMethodName, Oid accessMethodId)
+Oid GetIndexOpClass(List* opclass, Oid attrType, const char* accessMethodName, Oid accessMethodId)
 {
     char* schemaname = NULL;
     char* opcname = NULL;

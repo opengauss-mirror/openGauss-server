@@ -1,0 +1,291 @@
+diff --git globalbp.h globalbp.h
+index 190140ed0..613cae251 100644
+--- globalbp.h
++++ globalbp.h
+@@ -24,7 +24,7 @@
+ typedef enum
+ {
+ 	BP_LOCAL = 0,
+-	BP_GLOBAL
++	BP_GLOBAL              /* be removed. */
+ } eBreakpointScope;
+ 
+ /* 
+diff --git pldbgapi.cpp pldbgapi.cpp
+index f7aa0af9f..a4627d9de 100644
+--- pldbgapi.cpp
++++ pldbgapi.cpp
+@@ -138,7 +138,6 @@ PG_FUNCTION_INFO_V1( pldbg_on );					/* start pldebugger, init debug context			*
+ PG_FUNCTION_INFO_V1( pldbg_off );					/* close pldebugger, clear debug context		*/
+ 
+ PG_FUNCTION_INFO_V1( pldbg_attach_to_port );		/* Attach to debugger server at the given port	*/
+-PG_FUNCTION_INFO_V1( pldbg_wait_for_breakpoint );  	/* Wait for the target to reach a breakpoint	*/
+ PG_FUNCTION_INFO_V1( pldbg_step_into );				/* Steop into a function/procedure call			*/
+ PG_FUNCTION_INFO_V1( pldbg_step_over );				/* Step over a function/procedure call			*/
+ PG_FUNCTION_INFO_V1( pldbg_continue );				/* Continue execution until next breakpoint		*/
+@@ -148,15 +147,15 @@ PG_FUNCTION_INFO_V1( pldbg_get_variables );			/* Get a list of variable names/ty
+ PG_FUNCTION_INFO_V1( pldbg_get_stack );				/* Get the call stack from the target			*/
+ PG_FUNCTION_INFO_V1( pldbg_set_breakpoint );		/* CREATE BREAKPOINT equivalent (deprecated)	*/
+ PG_FUNCTION_INFO_V1( pldbg_drop_breakpoint );		/* DROP BREAKPOINT equivalent (deprecated)		*/
+-PG_FUNCTION_INFO_V1( pldbg_select_frame );			/* Change the focus to a different stack frame	*/
+-PG_FUNCTION_INFO_V1( pldbg_deposit_value );		 	/* Change the value of an in-scope variable		*/
+ PG_FUNCTION_INFO_V1( pldbg_abort_target );			/* Abort execution of the target - throws error */
+ PG_FUNCTION_INFO_V1( pldbg_get_proxy_info );		/* Get server version, proxy API version, ...   */
+ 
+ PG_FUNCTION_INFO_V1( pldbg_create_listener );		/* Create a listener for global breakpoints		*/
+ PG_FUNCTION_INFO_V1( pldbg_wait_for_target );		/* Wait for a global breakpoint to fire			*/
+ PG_FUNCTION_INFO_V1( pldbg_set_global_breakpoint );	/* Create a global breakpoint					*/
+-
++PG_FUNCTION_INFO_V1( pldbg_wait_for_breakpoint );  	/* Wait for the target to reach a breakpoint	*/
++PG_FUNCTION_INFO_V1( pldbg_deposit_value );		 	/* Change the value of an in-scope variable		*/
++PG_FUNCTION_INFO_V1( pldbg_select_frame );			/* Change the focus to a different stack frame	*/
+ 
+ /*******************************************************************************
+  * The following symbols represent the magic strings that we send to the 
+@@ -192,25 +191,25 @@ PG_FUNCTION_INFO_V1( pldbg_set_global_breakpoint );	/* Create a global breakpoin
+ 
+ extern "C" Datum pldbg_on( PG_FUNCTION_ARGS );
+ extern "C" Datum pldbg_off( PG_FUNCTION_ARGS );
+-extern "C" Datum pldbg_select_frame( PG_FUNCTION_ARGS );
+ extern "C" Datum pldbg_attach_to_port( PG_FUNCTION_ARGS );
+ extern "C" Datum pldbg_get_source( PG_FUNCTION_ARGS );
+ extern "C" Datum pldbg_get_breakpoints( PG_FUNCTION_ARGS );
+ extern "C" Datum pldbg_get_variables( PG_FUNCTION_ARGS );
+ extern "C" Datum pldbg_get_stack( PG_FUNCTION_ARGS );
+-extern "C" Datum pldbg_wait_for_breakpoint( PG_FUNCTION_ARGS );
+ extern "C" Datum pldbg_set_breakpoint( PG_FUNCTION_ARGS );
+ extern "C" Datum pldbg_drop_breakpoint( PG_FUNCTION_ARGS );
+ extern "C" Datum pldbg_step_into( PG_FUNCTION_ARGS );
+ extern "C" Datum pldbg_step_over( PG_FUNCTION_ARGS );
+ extern "C" Datum pldbg_continue(  PG_FUNCTION_ARGS );
+-extern "C" Datum pldbg_deposit_value( PG_FUNCTION_ARGS );
+ extern "C" Datum pldbg_get_proxy_info( PG_FUNCTION_ARGS );
+ extern "C" Datum pldbg_abort_target( PG_FUNCTION_ARGS );
+ 
+ extern "C" Datum pldbg_create_listener( PG_FUNCTION_ARGS );
+ extern "C" Datum pldbg_wait_for_target( PG_FUNCTION_ARGS );
+ extern "C" Datum pldbg_set_global_breakpoint( PG_FUNCTION_ARGS );
++extern "C" Datum pldbg_select_frame( PG_FUNCTION_ARGS );
++extern "C" Datum pldbg_wait_for_breakpoint( PG_FUNCTION_ARGS );
++extern "C" Datum pldbg_deposit_value( PG_FUNCTION_ARGS );
+ 
+ Datum pldbg_get_pkg_cons(PG_FUNCTION_ARGS);
+ /************************************************************
+@@ -231,7 +230,7 @@ static debugSession    * defaultSession( sessionHandle handle );
+ static sessionHandle     addSession( debugSession * session );
+ static debugSession    * findSession( sessionHandle handle );
+ static TupleDesc	  	 getResultTupleDesc( FunctionCallInfo fcinfo );
+-
++void clearSocketContent(debugSession* session);
+ 
+ /*******************************************************************************
+  * Exported functions
+@@ -537,7 +536,8 @@ Datum pldbg_step_over( PG_FUNCTION_ARGS )
+ Datum pldbg_continue( PG_FUNCTION_ARGS )
+ {
+ 	debugSession * session = defaultSession( PG_GETARG_SESSION( 0 ));
+-	
++
++	clearSocketContent(session);
+ 	sendString( session, PLDBGAPI_CONTINUE );
+ 
+ 	PG_RETURN_DATUM( buildBreakpointDatum( getNString( session )));
+@@ -553,10 +553,12 @@ Datum pldbg_continue( PG_FUNCTION_ARGS )
+ Datum pldbg_abort_target( PG_FUNCTION_ARGS )
+ {
+ 	debugSession * session = defaultSession( PG_GETARG_SESSION( 0 ));
+-	
++	bool res;
++
+ 	sendString( session, PLDBGAPI_ABORT );
++	res = getBool(session) ? true : getBool(session);  /* the first is breakpoint str, except the first command. */
+ 
+-	PG_RETURN_BOOL( getBool( session ));
++	PG_RETURN_BOOL(res);
+ 
+ }
+ 
+@@ -992,9 +994,9 @@ static debugSession * defaultSession( sessionHandle handle )
+ 			mostRecentSession = session;
+ 		}
+ 	}
+-        if (session->state == DBG_SESS_NOTCONNECT) {
+-        ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE), errmsg("Session connect failed.")));
+-        }
++    if (session->state == DBG_SESS_NOTCONNECT) {
++        ereport(ERROR, (errcode(ERRCODE_CONNECTION_FAILURE), errmsg("Session connect failed, server is not on")));
++    }
+ 
+ 	return(session);	  /* keep the compiler happy */
+ }
+@@ -1441,3 +1443,26 @@ static TupleDesc getResultTupleDesc( FunctionCallInfo fcinfo )
+ 	}
+ 	return( rsinfo->expectedDesc );
+ }
++
++/******************************************************************************
++ * clearSocketContent
++ * clear socket content
++ */
++void clearSocketContent(debugSession* session)
++{
++    fd_set fds;
++    struct timeval timeout={0,1};
++    FD_ZERO(&fds);
++    FD_SET(session->serverSocket, &fds);
++    for (;;) {
++        switch (select(session->serverSocket + 1, &fds, NULL, NULL, &timeout)) {
++            case -1:
++                ereport(ERROR, (errmsg("select() failed while waiting for target")));
++            case 0:
++                return;
++            default:
++                pfree(getNString(session));
++                break;
++        }
++    }
++}
+\ No newline at end of file
+diff --git plpgsql_debugger.cpp plpgsql_debugger.cpp
+index ace2806ae..f753d40ae 100644
+--- plpgsql_debugger.cpp
++++ plpgsql_debugger.cpp
+@@ -230,7 +230,7 @@ void pldbg_client_shutdown()
+     while((session = (sessionHashEntry*)hash_seq_search(&scan)) != NULL){
+         sendString(session->m_session, PLDBGAPI_DISCONNECT);
+         closeSession(session->m_session);
+-    }	
++    }
+     }
+ }
+ /*
+@@ -238,9 +238,35 @@ void pldbg_client_shutdown()
+  */
+ void pldbg_server_shutdown()
+ {
+-    dbg_send(" :%s: ", " ");
++    /* server just on before and do not have a client. */
++    if (per_session_ctx.client_r == 0)
++        return;
++
++    /* client mabey down before, we must test it first. */
++    bool client_is_off = false;
++    fd_set fds;
++    struct timeval timeout={1,0};
++
++    FD_ZERO(&fds);
++    FD_SET(per_session_ctx.client_r, &fds);
++    switch (select(per_session_ctx.client_r + 1, &fds, NULL, NULL, &timeout)) {
++        case -1:
++            ereport(ERROR, (errmsg("select() failed while waiting for target")));
++        case 0:
++            client_is_off = false;
++            break;
++        default: /* there is something in socket, mabey shutdown message of client or other command. */
++            if (FD_ISSET(per_session_ctx.client_r, &fds)) {
++                char* cmd = dbg_read_str();
++                if (cmd[0] == PLDBG_DISCONNECT)
++                    client_is_off = true;
++            }
++            break;
++    }
++    if (!client_is_off)
++        dbg_send(" :%s: ", " ");
+     per_session_ctx.client_r = 0;
+-	per_session_ctx.client_w = 0;
++    per_session_ctx.client_w = 0;
+ }
+ 
+ /**********************************************************************
+diff --git plugin_debugger.cpp plugin_debugger.cpp
+index 2593f4f00..eb961aa5c 100644
+--- plugin_debugger.cpp
++++ plugin_debugger.cpp
+@@ -727,48 +727,7 @@ bool breakAtThisLine( Breakpoint ** dst, eBreakpointScope * scope, Oid funcOid,
+ 		return( TRUE );
+ 	}
+ 
+-	/*
+-	 *  We conduct 3 searches here.  
+-	 *	
+-	 *	First, we look for a global breakpoint at this line, targeting our
+-	 *  specific backend process.
+-	 *
+-	 *  Next, we look for a global breakpoint (at this line) that does
+-	 *  not target a specific backend process.
+-	 *
+-	 *	Finally, we look for a local breakpoint at this line (implicitly 
+-	 *  targeting our specific backend process).
+-	 *
+-	 *	NOTE:  We must do the local-breakpoint search last because, when the
+-	 *		   proxy attaches to our process, it marks all of its global
+-	 *		   breakpoints as busy (so other potential targets will ignore
+-	 *		   those breakpoints) and we copy all of those global breakpoints
+-	 *		   into our local breakpoint hash.  If the debugger client exits
+-	 *		   and the user starts another debugger session, we want to see the
+-	 *		   new breakpoints instead of our obsolete local breakpoints (we
+-	 *		   don't have a good way to detect that the proxy has disconnected
+-	 *		   until it's inconvenient - we have to read-from or write-to the
+-	 *		   proxy before we can tell that it's died).
+-	 */
+-
+-    key.targetSessId = MY_SESS_ID;     /* Search for a global breakpoint targeted at our process ID */
+-  
+-	if((( *dst = BreakpointLookup( BP_GLOBAL, &key )) != NULL ) && ((*dst)->data.busy == FALSE ))
+-	{
+-		*scope = BP_GLOBAL;
+-		return( TRUE );
+-	}
+-
+-    key.targetSessId = InvalidSessId;  /* Search for a global breakpoint targeted at any process ID */
+-
+-	if((( *dst = BreakpointLookup( BP_GLOBAL, &key )) != NULL ) && ((*dst)->data.busy == FALSE ))
+-	{
+-		*scope = BP_GLOBAL;
+-		return( TRUE );
+-	}
+-
+     key.targetSessId = MY_SESS_ID;     /* Search for a local breakpoint (targeted at our process ID) */
+-
+ 	if(( *dst = BreakpointLookup( BP_LOCAL, &key )) != NULL )
+ 	{
+ 		*scope = BP_LOCAL;
+@@ -780,7 +739,7 @@ bool breakAtThisLine( Breakpoint ** dst, eBreakpointScope * scope, Oid funcOid,
+ 
+ bool breakpointsForFunction( Oid funcOid )
+ {
+-	if( BreakpointOnId( BP_LOCAL, funcOid ) || BreakpointOnId( BP_GLOBAL, funcOid ))
++	if(BreakpointOnId( BP_LOCAL, funcOid ))
+ 		return( TRUE );
+ 	else
+ 		return( FALSE );
+@@ -1168,18 +1127,6 @@ send_breakpoints(Oid funcOid)
+ 	Breakpoint      * breakpoint;
+ 	HASH_SEQ_STATUS	  scan;
+ 
+-	BreakpointGetList( BP_GLOBAL, &scan );
+-
+-	while(( breakpoint = (Breakpoint *) hash_seq_search( &scan )) != NULL )
+-	{
+-        if ((breakpoint->key.targetSessId == InvalidSessId) || (breakpoint->key.targetSessId == MY_SESS_ID))
+-			if( breakpoint->key.databaseId == t_thrd.proc->databaseId )
+-				if( breakpoint->key.functionId == funcOid )
+-					dbg_send( "%d:%d:%s", funcOid, breakpoint->key.lineNumber, "" );
+-	}
+-
+-	BreakpointReleaseList( BP_GLOBAL );
+-
+ 	BreakpointGetList( BP_LOCAL, &scan );
+ 
+ 	while(( breakpoint = (Breakpoint *) hash_seq_search( &scan )) != NULL )
+@@ -1362,8 +1309,8 @@ void initLocalBreakpoints(void)
+ /*
+  * here we init:
+  *    1) Global breakpoint Lock
+- *    2) Global Breakpoint list
+- *    3) Global BreakCounts Table
++ *    rm 2) Global Breakpoint list
++ *    rm 3) Global BreakCounts Table
+  * in share memory.
+  */
+ void initGlobalBreakpoints(void)

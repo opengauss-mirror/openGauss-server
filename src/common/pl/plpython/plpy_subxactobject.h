@@ -7,6 +7,10 @@
 
 #include "nodes/pg_list.h"
 #include "utils/resowner.h"
+#ifdef ENABLE_MULTIPLE_NODES
+#include "pgxc/execRemote.h"
+#include "pgxc/pgxc.h"
+#endif
 
 typedef struct PLySubtransactionObject {
     PyObject_HEAD bool started;

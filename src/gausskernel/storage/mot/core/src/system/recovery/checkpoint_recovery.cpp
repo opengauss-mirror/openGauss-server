@@ -79,9 +79,10 @@ bool CheckpointRecovery::Recover()
 
     int taskFillStat = FillTasksFromMapFile();
     if (taskFillStat < 0) {
-        MOT_LOG_INFO("CheckpointRecovery:: failed to read map file");
-        return false;                // error was already set
-    } else if (taskFillStat == 0) {  // fresh install
+        MOT_LOG_ERROR("CheckpointRecovery:: failed to read map file");
+        return false;
+    } else if (taskFillStat == 0) {
+        // fresh install
         return true;
     }
 
@@ -125,13 +126,16 @@ bool CheckpointRecovery::Recover()
             return false;
         }
     }
+
     if (!RecoverInProcessTxns()) {
         MOT_LOG_ERROR("Failed to recover the in-process transactions from the checkpoint");
         return false;
     }
 
-    // set the current valid id in the checkpoint manager in case
-    // we will need to retrieve it before a new checkpoint is created
+    /*
+     * Set the current valid id in the checkpoint manager in case
+     * we will need to retrieve it before a new checkpoint is created.
+     */
     engine->GetCheckpointManager()->SetId(m_checkpointId);
 
     MOT_LOG_INFO("Checkpoint Recovery: finished recovering %lu tables from checkpoint id: %lu",
@@ -181,9 +185,9 @@ int CheckpointRecovery::FillTasksFromMapFile()
             CheckpointUtils::CloseFile(fd);
             return -1;
         }
-        m_tableIds.insert(entry.m_id);
-        for (uint32_t i = 0; i <= entry.m_numSegs; i++) {
-            Task* recoveryTask = new (std::nothrow) Task(entry.m_id, i);
+        m_tableIds.insert(entry.m_tableId);
+        for (uint32_t i = 0; i <= entry.m_maxSegId; i++) {
+            Task* recoveryTask = new (std::nothrow) Task(entry.m_tableId, i);
             if (recoveryTask == nullptr) {
                 CheckpointUtils::CloseFile(fd);
                 MOT_LOG_ERROR("CheckpointRecovery::fillTasksFromMapFile: failed to allocate task object");
@@ -352,10 +356,10 @@ void CheckpointRecovery::CheckpointRecoveryWorker(CheckpointRecovery* checkpoint
         if (task != nullptr) {
             bool hadError = false;
             if (!checkpointRecovery->RecoverTableRows(task, keyData, entryData, maxCsn, sState, status)) {
-                MOT_LOG_ERROR("CheckpointRecovery::WorkerFunc recovery of table %lu's data failed", task->m_id);
+                MOT_LOG_ERROR("CheckpointRecovery::WorkerFunc recovery of table %lu's data failed", task->m_tableId);
                 checkpointRecovery->OnError(status,
                     "CheckpointRecovery::WorkerFunc failed to recover table: ",
-                    std::to_string(task->m_id).c_str());
+                    std::to_string(task->m_tableId).c_str());
                 hadError = true;
             }
             delete task;
@@ -393,8 +397,8 @@ bool CheckpointRecovery::RecoverTableRows(
     }
 
     int fd = -1;
-    uint32_t seg = task->m_seg;
-    uint32_t tableId = task->m_id;
+    uint32_t seg = task->m_segId;
+    uint32_t tableId = task->m_tableId;
 
     Table* table = GetTableManager()->GetTable(tableId);
     if (table == nullptr) {
@@ -713,7 +717,6 @@ bool CheckpointRecovery::DeserializeInProcessTxns(int fd, uint64_t numEntries)
 
 bool CheckpointRecovery::IsCheckpointValid(uint64_t id)
 {
-    int fd = -1;
     std::string fileName;
     std::string workingDir;
     bool ret = false;
@@ -724,7 +727,7 @@ bool CheckpointRecovery::IsCheckpointValid(uint64_t id)
         }
 
         CheckpointUtils::MakeEndFilename(fileName, workingDir, id);
-        if (!CheckpointUtils::FileExists(fileName)) {
+        if (!CheckpointUtils::IsFileExists(fileName)) {
             MOT_LOG_ERROR("IsCheckpointValid: checkpoint id %lu is invalid", id);
             break;
         }

@@ -1752,8 +1752,9 @@ static char* pg_get_tabledef_worker(Oid table_oid)
     appendStringInfo(&buf, "SET search_path = %s;", quote_identifier(get_namespace_name(table_info.spcid, true)));
 
     appendStringInfo(&buf,
-        "\nCREATE %s %s %s",
-        table_info.relpersistence == RELPERSISTENCE_UNLOGGED ? "UNLOGGED" : "",
+        "\nCREATE %s%s %s",
+        (table_info.relpersistence == RELPERSISTENCE_UNLOGGED) ? "UNLOGGED " :
+            ((table_info.relpersistence == RELPERSISTENCE_GLOBAL_TEMP) ? "GLOBAL TEMPORARY " : ""),
         rel_type_name,
         rel_name);
 
@@ -9877,7 +9878,11 @@ static void printSubscripts(ArrayRef* aref, deparse_context* context)
         appendStringInfoChar(buf, '[');
         if (lowlist_item != NULL) {
             get_rule_expr((Node*)lfirst(lowlist_item), context, false);
-            appendStringInfoChar(buf, ':');
+            if (unlikely(u_sess->deepsql_cxt.enable_ai_env == true)) {
+                appendStringInfoChar(buf, ',');
+            } else {
+                appendStringInfoChar(buf, ':');
+            }
             lowlist_item = lnext(lowlist_item);
         }
         get_rule_expr((Node*)lfirst(uplist_item), context, false);

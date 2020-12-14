@@ -31,14 +31,14 @@ set enable_parallel_append to on;
 -------------------------------------------
 -- 1. union && union all
 -------------------------------------------
-explain select * from a union select * from b;
-explain select * from a union all select * from b;
-explain select * from a where a1 > 4 union select * from b where b1 < 6;
-explain select * from a where a1 > 4 union all select * from b where b1 < 6;
-explain select * from c where c1 in (select a1 from a union select b1 from b);
-explain select * from (select * from a union all select * from b) as ta, c where ta.a1 = c.c1;
-explain select * from d left outer join (select * from a union all select * from b) as t on d.d1=t.a1;
-explain select d.d1, sum(d.d2), sum(t.a2) from (select * from a union all select * from b) t, d where t.a1=d1 group by d.d1 order by 1,2;
+explain (costs off) select * from a union select * from b;
+explain (costs off) select * from a union all select * from b;
+explain (costs off) select * from a where a1 > 4 union select * from b where b1 < 6;
+explain (costs off) select * from a where a1 > 4 union all select * from b where b1 < 6;
+explain (costs off) select * from c where c1 in (select a1 from a union select b1 from b);
+explain (costs off) select * from (select * from a union all select * from b) as ta, c where ta.a1 = c.c1;
+explain (costs off) select * from d left outer join (select * from a union all select * from b) as t on d.d1=t.a1 order by 1,2,3,4,5,6;
+explain (costs off) select d.d1, sum(d.d2), sum(t.a2) from (select * from a union all select * from b) t, d where t.a1=d1 group by d.d1 order by 1,2;
 
 select * from a union select * from b;
 select * from a union all select * from b;
@@ -46,7 +46,7 @@ select * from a where a1 > 4 union select * from b where b1 < 6;
 select * from a where a1 > 4 union all select * from b where b1 < 6;
 select * from c where c1 in (select a1 from a union select b1 from b);
 select * from (select * from a union all select * from b) as ta, c where ta.a1 = c.c1;
-select * from d left outer join (select * from a union all select * from b) as t on d.d1=t.a1;
+select * from d left outer join (select * from a union all select * from b) as t on d.d1=t.a1 order by 1,2,3,4,5,6;
 select d.d1, sum(d.d2), sum(t.a2) from (select * from a union all select * from b) t, d where t.a1=d1 group by d.d1 order by 1,2;
 
 -- set parallel_workers of table a to 0, subplan of seqscan on a should not be paralleled
@@ -63,8 +63,8 @@ alter table a reset (parallel_workers);
 select * from c except select * from b where b1 >4;
 select * from c except all select * from b where b1 >4;
 
-explain select * from c except select * from b where b1 >4;
-explain select * from c except all select * from b where b1 >4;
+explain (costs off) select * from c except select * from b where b1 >4;
+explain (costs off) select * from c except all select * from b where b1 >4;
 
 
 ---------------------------------------
@@ -73,8 +73,8 @@ explain select * from c except all select * from b where b1 >4;
 select * from e intersect select * from c;
 select * from e intersect all select * from c where c1 != 8;
 
-explain select * from e intersect select * from c;
-explain select * from e intersect all select * from c where c1 != 8;
+explain (costs off) select * from e intersect select * from c;
+explain (costs off) select * from e intersect all select * from c where c1 != 8;
 
 
 --------------------------------------
@@ -88,12 +88,12 @@ select * from b union all (select * from (select * from a union all select * fro
 select * from (select * from a union all select * from b)as x, (select * from d union all select* from e)as y
     where x.a1 = y.d1 order by 1, 2, 3, 4, 5, 6;
 
-explain select * from e intersect (select * from a except select * from b union select * from c);
-explain select d2 from d except all (select d2 from d except select c1 from c) union all select e1 from e;
-explain select * from a union all (select * from b union select * from c where c1 < 5);
-explain select * from a except select * from b union select * from c;
-explain select * from b union all (select * from (select * from a union all select * from b));
-explain select * from (select * from a union all select * from b)as x, (select * from d union all select* from e)as y
+explain (costs off) select * from e intersect (select * from a except select * from b union select * from c);
+explain (costs off) select d2 from d except all (select d2 from d except select c1 from c) union all select e1 from e;
+explain (costs off) select * from a union all (select * from b union select * from c where c1 < 5);
+explain (costs off) select * from a except select * from b union select * from c;
+explain (costs off) select * from b union all (select * from (select * from a union all select * from b));
+explain (costs off) select * from (select * from a union all select * from b)as x, (select * from d union all select* from e)as y
     where x.a1 = y.d1 order by 1, 2, 3, 4, 5, 6;
 ----------------------------------------
 -- clean up

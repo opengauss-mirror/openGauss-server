@@ -441,6 +441,7 @@ static Gather *_copyGather(const Gather *from)
      * copy remainder of node
      */
     COPY_SCALAR_FIELD(num_workers);
+    COPY_SCALAR_FIELD(rescan_param);
     COPY_SCALAR_FIELD(single_copy);
 
     return newnode;
@@ -461,6 +462,7 @@ static BitmapOr* _copyBitmapOr(const BitmapOr* from)
     /*
      * copy remainder of node
      */
+    COPY_SCALAR_FIELD(isshared);
     COPY_NODE_FIELD(bitmapplans);
 
     return newnode;
@@ -702,6 +704,7 @@ static BitmapIndexScan* _copyBitmapIndexScan(const BitmapIndexScan* from)
      * copy remainder of node
      */
     COPY_SCALAR_FIELD(indexid);
+    COPY_SCALAR_FIELD(isshared);
     COPY_NODE_FIELD(indexqual);
     COPY_NODE_FIELD(indexqualorig);
 
@@ -1404,6 +1407,7 @@ static Hash* _copyHash(const Hash* from)
     COPY_SCALAR_FIELD(skewTable);
     COPY_SCALAR_FIELD(skewColumn);
     COPY_SCALAR_FIELD(skewInherit);
+    COPY_SCALAR_FIELD(rows_total);
     COPY_SCALAR_FIELD(skewColType);
     COPY_SCALAR_FIELD(skewColTypmod);
 

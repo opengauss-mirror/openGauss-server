@@ -32,6 +32,8 @@ typedef struct TIDBitmap TIDBitmap;
 
 /* Likewise, TBMIterator is private */
 typedef struct TBMIterator TBMIterator;
+typedef struct TBMSharedIterator TBMSharedIterator;
+typedef struct TBMSharedIteratorState TBMSharedIteratorState;
 
 /* Result structure for tbm_iterate */
 typedef struct {
@@ -44,8 +46,9 @@ typedef struct {
 } TBMIterateResult;
 
 /* function prototypes in nodes/tidbitmap.c */
-extern TIDBitmap* tbm_create(long maxbytes);
+extern TIDBitmap* tbm_create(long maxbytes, MemoryContext dsa);
 extern void tbm_free(TIDBitmap* tbm);
+extern void tbm_free_shared_area(TIDBitmap* tbm, TBMSharedIteratorState *istate);
 
 extern void tbm_add_tuples(
     TIDBitmap* tbm, const ItemPointer tids, int ntids, bool recheck, Oid partitionOid = InvalidOid);
@@ -57,8 +60,12 @@ extern void tbm_intersect(TIDBitmap* a, const TIDBitmap* b);
 extern bool tbm_is_empty(const TIDBitmap* tbm);
 
 extern TBMIterator* tbm_begin_iterate(TIDBitmap* tbm);
+extern TBMSharedIteratorState* tbm_prepare_shared_iterate(TIDBitmap *tbm);
 extern TBMIterateResult* tbm_iterate(TBMIterator* iterator);
+extern TBMIterateResult* tbm_shared_iterate(TBMSharedIterator *iterator);
 extern void tbm_end_iterate(TBMIterator* iterator);
+extern void tbm_end_shared_iterate(TBMSharedIterator *iterator);
+extern TBMSharedIterator *tbm_attach_shared_iterate(TBMSharedIteratorState* istate);
 extern bool tbm_is_global(const TIDBitmap* tbm);
 extern void tbm_set_global(TIDBitmap* tbm, bool isGlobal);
 #endif /* TIDBITMAP_H */

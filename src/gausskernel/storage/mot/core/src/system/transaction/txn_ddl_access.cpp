@@ -74,8 +74,10 @@ uint32_t TxnDDLAccess::Size()
 
 void TxnDDLAccess::Reset()
 {
-    for (int i = 0; i < m_size; i++)
+    for (int i = 0; i < m_size; i++) {
         delete m_accessList[i];
+        m_accessList[i] = nullptr;
+    }
 
     m_size = 0;
 }

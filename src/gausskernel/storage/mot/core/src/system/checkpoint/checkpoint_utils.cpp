@@ -32,12 +32,23 @@ DECLARE_LOGGER(CheckpointUtils, Checkpoint);
 
 namespace CheckpointUtils {
 
-bool FileExists(std::string fileName)
+bool IsFileExists(std::string fileName)
 {
-    struct stat buf;
-    if (stat(fileName.c_str(), &buf) == -1 && errno == ENOENT) {
+    struct stat statBuf = {0};
+    if (stat(fileName.c_str(), &statBuf) == -1 && errno == ENOENT) {
         return false;
-    } else if (!S_ISREG(buf.st_mode)) {
+    } else if (!S_ISREG(statBuf.st_mode)) {
+        return false;
+    }
+    return true;
+}
+
+bool IsDirExists(std::string dirName)
+{
+    struct stat statBuf = {0};
+    if (stat(dirName.c_str(), &statBuf) == -1 && errno == ENOENT) {
+        return false;
+    } else if (!S_ISDIR(statBuf.st_mode)) {
         return false;
     }
     return true;
@@ -134,8 +145,9 @@ bool GetWorkingDir(std::string& dir)
 {
     dir.clear();
     char cwd[maxPath] = {0};
-    if (GetGlobalConfiguration().m_checkpointDir.length()) {
-        errno_t erc = strncpy_s(cwd, maxPath, GetGlobalConfiguration().m_checkpointDir.c_str(), maxPath - 1);
+    size_t checkpointDirLength = GetGlobalConfiguration().m_checkpointDir.length();
+    if (checkpointDirLength > 0) {
+        errno_t erc = strncpy_s(cwd, maxPath, GetGlobalConfiguration().m_checkpointDir.c_str(), checkpointDirLength);
         securec_check(erc, "\0", "\0");
     } else if (!getcwd(cwd, sizeof(cwd))) {
         MOT_REPORT_SYSTEM_ERROR(getcwd, "N/A", "Failed to get current working directory");

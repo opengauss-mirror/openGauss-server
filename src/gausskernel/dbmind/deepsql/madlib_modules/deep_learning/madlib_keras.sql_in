@@ -1,0 +1,2187 @@
+/* ----------------------------------------------------------------------- *//**
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ *
+ *
+ * @file madlib_keras.sql_in
+ *
+ * @brief SQL functions for distributed deep learning with keras
+ * @date June 2019
+ *
+ *
+ *//* ----------------------------------------------------------------------- */
+
+m4_include(`SQLCommon.m4')
+
+/**
+@addtogroup grp_keras
+
+@brief Fit, evaluate and predict using the Keras API.
+
+<div class="toc"><b>Contents</b><ul>
+<li class="level1"><a href="#keras_fit">Fit</a></li>
+<li class="level1"><a href="#keras_evaluate">Evaluate</a></li>
+<li class="level1"><a href="#keras_predict">Predict</a></li>
+<li class="level1"><a href="#keras_predict_byom">Predict BYOM</a></li>
+<li class="level1"><a href="#example">Examples</a></li>
+<li class="level1"><a href="#notes">Notes</a></li>
+<li class="level1"><a href="#background">Technical Background</a></li>
+<li class="level1"><a href="#literature">Literature</a></li>
+<li class="level1"><a href="#related">Related Topics</a></li>
+</ul></div>
+
+\warning <em> This MADlib method is still in early stage development.
+Interface and implementation are subject to change. </em>
+
+This module allows you to use SQL to call deep learning
+models designed in Keras [1], which is a high-level neural
+network API written in Python.
+Keras was developed for fast experimentation.  It can run
+on top of different backends and the one that is currently
+supported by MADlib is TensorFlow [2].  The implementation
+in MADlib is distributed and designed to train
+a single model across multiple segments (workers)
+in Greenplum database.  (PostgreSQL is also supported.)
+Alternatively, to train multiple models at the same time for model
+architecture search or hyperparameter tuning, you can
+use <a href="group__grp__keras__run__model__selection.html">Model Selection</a>.
+
+The main use case is image classification
+using sequential models, which are made up of a
+linear stack of layers.  This includes multilayer perceptrons (MLPs)
+and convolutional neural networks (CNNs).  Regression is not
+currently supported.
+
+Before using Keras in MADlib you will need to mini-batch
+your training and evaluation datasets by calling the
+<a href="group__grp__input__preprocessor__dl.html">Preprocessor
+for Images</a> which is a utility that prepares image data for
+use by models that support mini-batch as an optimization option.
+This is a one-time operation and you would only
+need to re-run the preprocessor if your input data has changed.
+The advantage of using mini-batching is that it
+can perform better than stochastic gradient descent
+because it uses more than one training example at a time,
+typically resulting faster and smoother convergence [3].
+
+You can also do inference on models that have not been trained in MADlib,
+but rather imported from an external source.  This is in the section
+called "Predict BYOM" below, where "BYOM" stands for "Bring Your Own Model."
+
+Note that the following MADlib functions are targeting a specific Keras
+version (2.2.4) with a specific TensorFlow kernel version (1.14).
+Using a newer or older version may or may not work as intended.
+
+@note CUDA GPU memory cannot be released until the process holding it is terminated.
+When a MADlib deep learning function is called with GPUs, Greenplum internally
+creates a process (called a slice) which calls TensorFlow to do the computation.
+This process holds the GPU memory until one of the following two things happen:
+query finishes and user logs out of the Postgres client/session; or,
+query finishes and user waits for the timeout set by gp_vmem_idle_resource_timeout.
+The default value for this timeout is 18 sec [8].  So the recommendation is:
+log out/reconnect to the session after every GPU query; or
+wait for gp_vmem_idle_resource_timeout before you run another GPU query (you can
+also set it to a lower value).
+
+@anchor keras_fit
+@par Fit
+The fit (training) function has the following format:
+
+<pre class="syntax">
+madlib_keras_fit(
+    source_table,
+    model,
+    model_arch_table,
+    model_id,
+    compile_params,
+    fit_params,
+    num_iterations,
+    use_gpus,
+    validation_table,
+    metrics_compute_frequency,
+    warm_start,
+    name,
+    description
+    )
+</pre>
+
+\b Arguments
+<dl class="arglist">
+  <dt>source_table</dt>
+  <dd>TEXT. Name of the table containing the training data.
+  This is the name of the output
+  table from the image preprocessor.  Independent
+  and dependent variables are specified in the preprocessor
+  step which is why you do not need to explictly state
+  them here as part of the fit function.</dd>
+
+  <dt>model</dt>
+  <dd>TEXT. Name of the output table containing the model.
+  Details of the output table are shown below.
+  </dd>
+
+  <dt>model_arch_table</dt>
+  <dd>TEXT. Name of the table containing the model
+  architecture and (optionally) initial weights to use for
+  training.
+  </dd>
+
+  <dt>model_id</dt>
+  <dd>INTEGER. This is the id in 'model_arch_table'
+  containing the model architecture and (optionally)
+  initial weights to use for training.
+  </dd>
+
+  <DT>compile_params</DT>
+  <DD>TEXT.
+    Parameters passed to the compile method of the Keras
+    model class [4].  These parameters will be passed through as is
+    so they must conform to the Keras API definition.
+    As an example, you might use something like: <em>loss='categorical_crossentropy', optimizer='adam', metrics=['acc']</em>.
+    The mandatory parameters that must be specified are 'optimizer'
+    and 'loss'.  Others are optional and will use the default
+    values as per Keras if not specified here.  Also, when
+    specifying 'loss' and 'metrics' do <em>not</em> include the
+    module and submodule prefixes
+    like <em>loss='losses.categorical_crossentropy'</em>
+    or <em>optimizer='keras.optmizers.adam'</em>. 
+
+    @note
+    The following loss function is not supported: <em>sparse_categorical_crossentropy</em>.
+    The following metrics are not supported: 
+    <em>sparse_categorical_accuracy,sparse_top_k_categorical_accuracy,sparse_categorical_crossentropy</em>.
+
+  </DD>
+
+  <DT>fit_params </DT>
+  <DD>TEXT.  Parameters passed to the fit method of the Keras
+    model class [4].  These will be passed through as is
+    so they must conform to the Keras API definition.
+    As an example, you might use something like:
+    <em>batch_size=128, epochs=4</em>.
+    There are no mandatory parameters so
+    if you specify NULL, it will use all default
+    values as per Keras.
+  </DD>
+
+  <DT>num_iterations</DT>
+  <DD>INTEGER.  Number of iterations to train.
+  </DD>
+
+  <DT>use_gpus (optional)</DT>
+  <DD>BOOLEAN, default: FALSE (i.e., CPU). Determines whether GPUs
+  are to be used for training the neural network.  Set to TRUE to use GPUs.
+
+    @note
+    This parameter must not conflict with how the distribution rules are set in
+    the preprocessor function.  For example, if you set a distribution rule to use
+    certain segments on hosts that do not have GPUs attached, you will get an error
+    if you set ‘use_gpus’ to TRUE.  Also, we have seen some memory related issues
+    when segments share GPU resources.
+    For example, if you have 1 GPU per segment host and your cluster has 4
+    segments per segment host, it means that all 4
+    segments will share the same
+    GPU on each host. The current recommended
+    configuration is 1 GPU per segment.
+  </DD>
+
+  <dt>validation_table (optional)</dt>
+  <dd>TEXT, default: none. Name of the table containing
+  the validation dataset.
+  Note that the validation dataset must be preprocessed
+  in the same way as the training dataset, so this
+  is the name of the output
+  table from running the image preprocessor on the validation dataset.
+  Using a validation dataset can mean a
+  longer training time, depending on its size.
+  This can be controlled using the 'metrics_compute_frequency'
+  paremeter described below.</dd>
+
+  <DT>metrics_compute_frequency (optional)</DT>
+  <DD>INTEGER, default: once at the end of training
+  after 'num_iterations'.  Frequency to compute per-iteration
+  metrics for the training dataset and validation dataset
+  (if specified).  There can be considerable cost to
+  computing metrics every iteration, especially if the
+  training dataset is large.  This parameter is a way of
+  controlling the frequency of those computations.
+  For example, if you specify 5, then metrics will be computed
+  every 5 iterations as well as at the end of training
+  after 'num_iterations'.  If you use the default,
+  metrics will be computed only
+  once after 'num_iterations' have completed.
+  </DD>
+
+  <DT>warm_start (optional)</DT>
+  <DD>BOOLEAN, default: FALSE.
+    Initalize weights with the coefficients
+    from the last call of the fit
+    function. If set to TRUE, weights will be
+    initialized from the model table
+    generated by the previous training run.
+
+    @note
+    The warm start feature works based on the name of the
+    model output table from a previous training run.
+    When using warm start, do not drop the model output table
+    or the model output summary table
+    before calling the fit function, since these are needed to obtain the
+    weights from the previous run.
+    If you are not using warm start, the model output table
+    and the model output table summary must be dropped in
+    the usual way before calling the training function.
+  </DD>
+
+  <DT>name (optional)</DT>
+  <DD>TEXT, default: NULL.
+    Free text string to identify a name, if desired.
+  </DD>
+
+  <DT>description (optional)</DT>
+  <DD>TEXT, default: NULL.
+    Free text string to provide a description, if desired.
+  </DD>
+</dl>
+
+<b>Output tables</b>
+<br>
+    The model table produced by fit contains the following columns:
+    <table class="output">
+      <tr>
+        <th>model_weights</th>
+        <td>BYTEA8. Byte array containing the weights of the neural net.</td>
+      </tr>
+      <tr>
+        <th>model_arch</th>
+        <td>TEXT. A JSON representation of the model architecture
+        used in training.</td>
+      </tr>
+    </table>
+
+A summary table named \<model\>_summary is also created, which has the following columns:
+    <table class="output">
+    <tr>
+        <th>source_table</th>
+        <td>Source table used for training.</td>
+    </tr>
+    <tr>
+        <th>model</th>
+        <td>Model output table produced by training.</td>
+    </tr>
+    <tr>
+        <th>independent_varname</th>
+        <td>Independent variables column from the original
+        source table in the image preprocessing step.</td>
+    </tr>
+    <tr>
+        <th>dependent_varname</th>
+        <td>Dependent variable column from the original
+        source table in the image preprocessing step.</td>
+    </tr>
+    <tr>
+        <th>model_arch_table</th>
+        <td>Name of the table containing
+        the model architecture and (optionally) the
+        initial model weights.</td>
+    </tr>
+    <tr>
+        <th>model_id</th>
+        <td>The id of the model in
+        the model architecture table used for training.</td>
+    </tr>
+    <tr>
+        <th>compile_params</th>
+        <td>Compile parameters passed to Keras.</td>
+    </tr>
+    <tr>
+        <th>fit_params</th>
+        <td>Fit parameters passed to Keras.</td>
+    </tr>
+    <tr>
+        <th>num_iterations</th>
+        <td>Number of iterations of training completed.</td>
+    </tr>
+    <tr>
+        <th>validation_table</th>
+        <td>Name of the table containing
+        the validation dataset (if specified).</td>
+    </tr>
+    <tr>
+        <th>metrics_compute_frequency</th>
+        <td>Frequency that per-iteration metrics are computed
+        for the training dataset and validation
+        dataset.</td>
+    </tr>
+    <tr>
+        <th>name</th>
+        <td>Name of the training run (free text).</td>
+    </tr>
+    <tr>
+        <th>description</th>
+        <td>Description of the training run (free text).</td>
+    </tr>
+    <tr>
+        <th>model_type</th>
+        <td>General identifier for type of model trained.
+        Currently says 'madlib_keras'.</td>
+    </tr>
+    <tr>
+        <th>model_size</th>
+        <td>Size of the model in KB.  Models are stored in
+        'bytea' data format which is used for binary strings
+        in PostgreSQL type databases.</td>
+    </tr>
+    <tr>
+        <th>start_training_time</th>
+        <td>Timestamp for start of training.</td>
+    </tr>
+    <tr>
+        <th>end_training_time</th>
+        <td>Timestamp for end of training.</td>
+    </tr>
+    <tr>
+        <th>metrics_elapsed_time</th>
+        <td> Array of elapsed time for metric computations as
+        per the 'metrics_compute_frequency' parameter.
+        Useful for drawing a curve showing loss, accuracy or
+        other metrics as a function of time.
+        For example, if 'metrics_compute_frequency=5'
+        this would be an array of elapsed time for every 5th
+        iteration, plus the last iteration.</td>
+    </tr>
+    <tr>
+        <th>madlib_version</th>
+        <td>Version of MADlib used.</td>
+    </tr>
+    <tr>
+        <th>num_classes</th>
+        <td>Count of distinct classes values used.</td>
+    </tr>
+    <tr>
+        <th>class_values</th>
+        <td>Array of actual class values used.</td>
+    </tr>
+    <tr>
+        <th>dependent_vartype</th>
+        <td>Data type of the dependent variable.</td>
+    </tr>
+    <tr>
+        <th>normalizing_constant</th>
+        <td>Normalizing constant used from the
+        image preprocessing step.</td>
+    </tr>
+    <tr>
+        <th>metrics_type</th>
+        <td>Metric specified in the 'compile_params'.</td>
+    </tr>
+    <tr>
+        <th>training_metrics_final</th>
+        <td>Final value of the training
+        metric after all iterations have completed.
+        The metric reported is the one
+        specified in the 'metrics_type' parameter.</td>
+    </tr>
+    <tr>
+        <th>training_loss_final</th>
+        <td>Final value of the training loss after all
+        iterations have completed.</td>
+    </tr>
+    <tr>
+        <th>training_metrics</th>
+        <td>Array of training metrics as
+        per the 'metrics_compute_frequency' parameter.
+        For example, if 'metrics_compute_frequency=5'
+        this would be an array of metrics for every 5th
+        iteration, plus the last iteration.</td>
+    </tr>
+    <tr>
+        <th>training_loss</th>
+        <td>Array of training losses as
+        per the 'metrics_compute_frequency' parameter.
+        For example, if 'metrics_compute_frequency=5'
+        this would be an array of losses for every 5th
+        iteration, plus the last iteration.</td>
+    </tr>
+    <tr>
+        <th>validation_metrics_final</th>
+        <td>Final value of the validation
+        metric after all iterations have completed.
+        The metric reported is the one
+        specified in the 'metrics_type' parameter.</td>
+    </tr>
+    <tr>
+        <th>validation_loss_final</th>
+        <td>Final value of the validation loss after all
+        iterations have completed.</td>
+    </tr>
+    <tr>
+        <th>validation_metrics</th>
+        <td>Array of validation metrics as
+        per the 'metrics_compute_frequency' parameter.
+        For example, if 'metrics_compute_frequency=5'
+        this would be an array of metrics for every 5th
+        iteration, plus the last iteration.</td>
+    </tr>
+    <tr>
+        <th>validation_loss</th>
+        <td>Array of validation losses as
+        per the 'metrics_compute_frequency' parameter.
+        For example, if 'metrics_compute_frequency=5'
+        this would be an array of losses for every 5th
+        iteration, plus the last iteration.</td>
+    </tr>
+    <tr>
+        <th>metrics_iters</th>
+        <td>Array indicating the iterations for which
+        metrics are calculated, as derived from the
+        parameters 'num_iterations' and 'metrics_compute_frequency'.
+        For example, if 'num_iterations=5'
+        and 'metrics_compute_frequency=2', then 'metrics_iters' value
+        would be {2,4,5} indicating that metrics were computed
+        at iterations 2, 4 and 5 (at the end).
+        If 'num_iterations=5'
+        and 'metrics_compute_frequency=1', then 'metrics_iters' value
+        would be {1,2,3,4,5} indicating that metrics were computed
+        at every iteration.</td>
+    </tr>
+   </table>
+
+@anchor keras_evaluate
+@par Evaluate
+The evaluation function has the following format:
+
+<pre class="syntax">
+madlib_keras_evaluate(
+    model_table,
+    test_table,
+    output_table,
+    use_gpus,
+    mst_key
+    )
+</pre>
+
+\b Arguments
+<dl class="arglist">
+
+<DT>model_table</DT>
+  <DD>TEXT. Name of the table containing the model
+  to use for validation.
+  </DD>
+
+  <DT>test_table</DT>
+  <dd>TEXT. Name of the table containing the evaluation dataset.
+  Note that test/validation data must be preprocessed in the same
+  way as the training dataset, so
+  this is the name of the output
+  table from the image preprocessor.  Independent
+  and dependent variables are specified in the preprocessor
+  step which is why you do not need to explictly state
+  them here as part of the fit function.</dd>
+
+  <DT>output_table</DT>
+  <DD>TEXT. Name of table that validation output will be
+  written to. Table contains:</DD>
+    <table class="output">
+      <tr>
+        <th>loss</th>
+        <td>Loss value on evaluation dataset.</td>
+      </tr>
+      <tr>
+        <th>metric</th>
+        <td>Metric value on evaluation dataset, where 'metrics_type'
+        below identifies the type of metric.</td>
+      </tr>
+      <tr>
+        <th>metrics_type</th>
+        <td>Type of metric used that was used in the training step.</td>
+      </tr>
+
+  <DT>use_gpus (optional)</DT>
+  <DD>BOOLEAN, default: FALSE (i.e., CPU). Determines whether GPUs
+  are to be used for training the neural network.  Set to TRUE to use GPUs.
+
+    @note
+    This parameter must not conflict with how the distribution rules are set in
+    the preprocessor function.  For example, if you set a distribution rule to use
+    certain segments on hosts that do not have GPUs attached, you will get an error
+    if you set ‘use_gpus’ to TRUE.  Also, we have seen some memory related issues
+    when segments share GPU resources.
+    For example, if you have 1 GPU per segment host and your cluster has 4
+    segments per segment host, it means that all 4
+    segments will share the same
+    GPU on each host. The current recommended
+    configuration is 1 GPU per segment.
+  </DD>
+
+  <DT>mst_key (optional)</DT>
+  <DD>INTEGER, default: NULL. ID that defines a unique tuple for
+  model architecture-compile parameters-fit parameters in a model
+  selection table.  Do not use this if training one model at a time using madlib_keras_fit().
+  See the <a href="group__grp__keras__run__model__selection.html">Model Selection</a> section
+  for more details on model selection by training multiple models at a time.
+  </DD>
+</DL>
+
+@anchor keras_predict
+@par Predict
+The prediction function has the following format:
+<pre class="syntax">
+madlib_keras_predict(
+    model_table,
+    test_table,
+    id_col,
+    independent_varname,
+    output_table,
+    pred_type,
+    use_gpus,
+    mst_key
+    )
+</pre>
+
+\b Arguments
+<dl class="arglist">
+
+<DT>model_table</DT>
+  <DD>TEXT. Name of the table containing the model
+  to use for prediction.
+  </DD>
+
+  <DT>test_table</DT>
+  <DD>TEXT. Name of the table containing the dataset to
+  predict on.  Note that test data is not preprocessed (unlike
+  fit and evaluate) so put one test image per row for prediction.
+  Also see the comment below for the 'independent_varname' parameter
+  regarding normalization.
+
+  </DD>
+
+  <DT>id_col</DT>
+  <DD>TEXT. Name of the id column in the test data table.
+  </DD>
+
+  <DT>independent_varname</DT>
+  <DD>TEXT. Column with independent variables in the test table.
+  If a 'normalizing_const' is specified when preprocessing the
+  training dataset, this same normalization will be applied to
+  the independent variables used in predict.
+  </DD>
+
+  <DT>output_table</DT>
+  <DD>TEXT. Name of the table that prediction output will be
+  written to. Table contains:</DD>
+    <table class="output">
+      <tr>
+        <th>id</th>
+        <td>Gives the 'id' for each prediction, corresponding to each row from the test_table.</td>
+      </tr>
+      <tr>
+        <th>estimated_COL_NAME</th>
+        <td>
+        (For pred_type='response') The estimated class
+         for classification, where
+         COL_NAME is the name of the column to be
+         predicted from test data.
+        </td>
+      </tr>
+      <tr>
+        <th>prob_CLASS</th>
+        <td>
+        (For pred_type='prob' for classification) The
+        probability of a given class.
+        There will be one column for each class
+        in the training data.
+        </td>
+      </tr>
+
+  <DT>pred_type (optional)</DT>
+  <DD>TEXT, default: 'response'. The type of output
+  desired, where 'response' gives the actual prediction
+  and 'prob' gives the probability value for each class.
+  </DD>
+
+  <DT>use_gpus (optional)</DT>
+  <DD>BOOLEAN, default: FALSE (i.e., CPU).
+    Flag to enable GPU support for training neural network.
+    The number of GPUs to use is determined by the parameters
+    passed to the preprocessor.
+
+    @note
+    We have seen some memory related issues when segments
+    share GPU resources.
+    For example, if you provide 1 GPU and your
+    database cluster is set up to have 4
+    segments per segment host, it means that all 4
+    segments on a segment host will share the same
+    GPU. The current recommended
+    configuration is 1 GPU per segment.
+  </DD>
+
+  <DT>mst_key (optional)</DT>
+  <DD>INTEGER, default: NULL. ID that defines a unique tuple for
+  model architecture-compile parameters-fit parameters in a model
+  selection table.  Do not use this if training one model at a time using madlib_keras_fit().
+  See the <a href="group__grp__keras__run__model__selection.html">Model Selection</a> section
+  for more details on model selection by training multiple models at a time.
+  </DD>
+</DL>
+
+
+@anchor keras_predict_byom
+@par Predict BYOM (bring your own model)
+The predict BYOM function allows you to do inference on models that
+have not been trained on MADlib, but rather imported from elsewhere.
+It has the following format:
+<pre class="syntax">
+madlib_keras_predict_byom(
+    model_arch_table,
+    model_id,
+    test_table,
+    id_col,
+    independent_varname,
+    output_table,
+    pred_type,
+    use_gpus,
+    class_values,
+    normalizing_const
+    )
+</pre>
+
+
+\b Arguments
+<dl class="arglist">
+
+<DT>model_arch_table</DT>
+  <DD>TEXT. Name of the architecture table containing the model
+  to use for prediction. The model weights and architecture can be loaded to
+  this table by using the
+  <a href="group__grp__keras__model__arch.html">load_keras_model</a> function.
+  </DD>
+
+  <DT>model_id</DT>
+  <DD>INTEGER. This is the id in 'model_arch_table' containing the model
+  architecture and model weights to use for prediction.
+  </DD>
+
+  <DT>test_table</DT>
+  <DD>TEXT. Name of the table containing the dataset to
+  predict on.  Note that test data is not preprocessed (unlike
+  fit and evaluate) so put one test image per row for prediction.
+  Set the 'normalizing_const' below for the independent variable if necessary.
+  </DD>
+
+  <DT>id_col</DT>
+  <DD>TEXT. Name of the id column in the test data table.
+  </DD>
+
+  <DT>independent_varname</DT>
+  <DD>TEXT. Column with independent variables in the test table.
+  Set the 'normalizing_const' below if necessary.
+  </DD>
+
+  <DT>output_table</DT>
+  <DD>TEXT. Name of the table that prediction output will be
+  written to. Table contains:</DD>
+    <table class="output">
+      <tr>
+        <th>id</th>
+        <td>Gives the 'id' for each prediction, corresponding to each row from the 'test_table'.</td>
+      </tr>
+      <tr>
+        <th>estimated_dependent_var</th>
+        <td>
+        (For pred_type='response') Estimated class for classification. If
+        the 'class_values' parameter is passed in as NULL, then we assume that the class
+        labels are [0,1,2...,n-1] where n-1 is the number of classes in the model
+        architecture.
+        </td>
+      </tr>
+      <tr>
+        <th>prob_CLASS</th>
+        <td>
+         (For pred_type='prob' for classification)
+         Probability of a given class.
+         If 'class_values' is passed in as NULL, we create one column called
+         'prob' which is an array of probabilities for each class.
+         If 'class_values' is not NULL, then there will be one
+         column for each class.
+        </td>
+      </tr>
+
+  <DT>pred_type (optional)</DT>
+  <DD>TEXT, default: 'response'. The type of output desired, where 'response'
+   gives the actual prediction and 'prob' gives the probability value for each class.
+  </DD>
+
+  <DT>use_gpus (optional)</DT>
+  <DD>BOOLEAN, default: FALSE (i.e., CPU).
+    Flag to enable GPU support for training neural network.
+    The number of GPUs to use is determined by the parameters
+    passed to the preprocessor.
+
+    @note
+    We have seen some memory related issues when segments
+    share GPU resources.
+    For example, if you provide 1 GPU and your
+    database cluster is set up to have 4
+    segments per segment host, it means that all 4
+    segments on a segment host will share the same
+    GPU. The current recommended
+    configuration is 1 GPU per segment.
+  </DD>
+
+  <DT>class_values (optional)</DT>
+  <DD>TEXT[], default: NULL.
+    List of class labels that were used while training the model. See the 'output_table'
+    column above for more details.
+
+    @note
+    If you specify the class values parameter,
+    it must reflect how the dependent variable was 1-hot encoded for training. If you accidently
+    pick another order that does not match the 1-hot encoding, the predictions would be wrong.
+  </DD>
+
+  <DT>normalizing_const (optional)</DT>
+  <DD>DOUBLE PRECISION, default: 1.0.
+  The normalizing constant to divide each value in the 'independent_varname'
+  array by. For example, you would use 255 for this value if the image data is
+  in the form 0-255.
+  </DD>
+</DL>
+
+
+@anchor example
+@par Examples
+
+@note
+Deep learning works best on very large datasets,
+but that is not convenient for a quick introduction
+to the syntax. So in this example we use an MLP on the well
+known iris data set from https://archive.ics.uci.edu/ml/datasets/iris.
+For more realistic examples with images please refer
+to the deep learning notebooks
+at https://github.com/apache/madlib-site/tree/asf-site/community-artifacts.
+
+<h4>Classification</h4>
+
+-#  Create an input data set.
+<pre class="example">
+DROP TABLE IF EXISTS iris_data;
+CREATE TABLE iris_data(
+    id serial,
+    attributes numeric[],
+    class_text varchar
+);
+INSERT INTO iris_data(id, attributes, class_text) VALUES
+(1,ARRAY[5.1,3.5,1.4,0.2],'Iris-setosa'),
+(2,ARRAY[4.9,3.0,1.4,0.2],'Iris-setosa'),
+(3,ARRAY[4.7,3.2,1.3,0.2],'Iris-setosa'),
+(4,ARRAY[4.6,3.1,1.5,0.2],'Iris-setosa'),
+(5,ARRAY[5.0,3.6,1.4,0.2],'Iris-setosa'),
+(6,ARRAY[5.4,3.9,1.7,0.4],'Iris-setosa'),
+(7,ARRAY[4.6,3.4,1.4,0.3],'Iris-setosa'),
+(8,ARRAY[5.0,3.4,1.5,0.2],'Iris-setosa'),
+(9,ARRAY[4.4,2.9,1.4,0.2],'Iris-setosa'),
+(10,ARRAY[4.9,3.1,1.5,0.1],'Iris-setosa'),
+(11,ARRAY[5.4,3.7,1.5,0.2],'Iris-setosa'),
+(12,ARRAY[4.8,3.4,1.6,0.2],'Iris-setosa'),
+(13,ARRAY[4.8,3.0,1.4,0.1],'Iris-setosa'),
+(14,ARRAY[4.3,3.0,1.1,0.1],'Iris-setosa'),
+(15,ARRAY[5.8,4.0,1.2,0.2],'Iris-setosa'),
+(16,ARRAY[5.7,4.4,1.5,0.4],'Iris-setosa'),
+(17,ARRAY[5.4,3.9,1.3,0.4],'Iris-setosa'),
+(18,ARRAY[5.1,3.5,1.4,0.3],'Iris-setosa'),
+(19,ARRAY[5.7,3.8,1.7,0.3],'Iris-setosa'),
+(20,ARRAY[5.1,3.8,1.5,0.3],'Iris-setosa'),
+(21,ARRAY[5.4,3.4,1.7,0.2],'Iris-setosa'),
+(22,ARRAY[5.1,3.7,1.5,0.4],'Iris-setosa'),
+(23,ARRAY[4.6,3.6,1.0,0.2],'Iris-setosa'),
+(24,ARRAY[5.1,3.3,1.7,0.5],'Iris-setosa'),
+(25,ARRAY[4.8,3.4,1.9,0.2],'Iris-setosa'),
+(26,ARRAY[5.0,3.0,1.6,0.2],'Iris-setosa'),
+(27,ARRAY[5.0,3.4,1.6,0.4],'Iris-setosa'),
+(28,ARRAY[5.2,3.5,1.5,0.2],'Iris-setosa'),
+(29,ARRAY[5.2,3.4,1.4,0.2],'Iris-setosa'),
+(30,ARRAY[4.7,3.2,1.6,0.2],'Iris-setosa'),
+(31,ARRAY[4.8,3.1,1.6,0.2],'Iris-setosa'),
+(32,ARRAY[5.4,3.4,1.5,0.4],'Iris-setosa'),
+(33,ARRAY[5.2,4.1,1.5,0.1],'Iris-setosa'),
+(34,ARRAY[5.5,4.2,1.4,0.2],'Iris-setosa'),
+(35,ARRAY[4.9,3.1,1.5,0.1],'Iris-setosa'),
+(36,ARRAY[5.0,3.2,1.2,0.2],'Iris-setosa'),
+(37,ARRAY[5.5,3.5,1.3,0.2],'Iris-setosa'),
+(38,ARRAY[4.9,3.1,1.5,0.1],'Iris-setosa'),
+(39,ARRAY[4.4,3.0,1.3,0.2],'Iris-setosa'),
+(40,ARRAY[5.1,3.4,1.5,0.2],'Iris-setosa'),
+(41,ARRAY[5.0,3.5,1.3,0.3],'Iris-setosa'),
+(42,ARRAY[4.5,2.3,1.3,0.3],'Iris-setosa'),
+(43,ARRAY[4.4,3.2,1.3,0.2],'Iris-setosa'),
+(44,ARRAY[5.0,3.5,1.6,0.6],'Iris-setosa'),
+(45,ARRAY[5.1,3.8,1.9,0.4],'Iris-setosa'),
+(46,ARRAY[4.8,3.0,1.4,0.3],'Iris-setosa'),
+(47,ARRAY[5.1,3.8,1.6,0.2],'Iris-setosa'),
+(48,ARRAY[4.6,3.2,1.4,0.2],'Iris-setosa'),
+(49,ARRAY[5.3,3.7,1.5,0.2],'Iris-setosa'),
+(50,ARRAY[5.0,3.3,1.4,0.2],'Iris-setosa'),
+(51,ARRAY[7.0,3.2,4.7,1.4],'Iris-versicolor'),
+(52,ARRAY[6.4,3.2,4.5,1.5],'Iris-versicolor'),
+(53,ARRAY[6.9,3.1,4.9,1.5],'Iris-versicolor'),
+(54,ARRAY[5.5,2.3,4.0,1.3],'Iris-versicolor'),
+(55,ARRAY[6.5,2.8,4.6,1.5],'Iris-versicolor'),
+(56,ARRAY[5.7,2.8,4.5,1.3],'Iris-versicolor'),
+(57,ARRAY[6.3,3.3,4.7,1.6],'Iris-versicolor'),
+(58,ARRAY[4.9,2.4,3.3,1.0],'Iris-versicolor'),
+(59,ARRAY[6.6,2.9,4.6,1.3],'Iris-versicolor'),
+(60,ARRAY[5.2,2.7,3.9,1.4],'Iris-versicolor'),
+(61,ARRAY[5.0,2.0,3.5,1.0],'Iris-versicolor'),
+(62,ARRAY[5.9,3.0,4.2,1.5],'Iris-versicolor'),
+(63,ARRAY[6.0,2.2,4.0,1.0],'Iris-versicolor'),
+(64,ARRAY[6.1,2.9,4.7,1.4],'Iris-versicolor'),
+(65,ARRAY[5.6,2.9,3.6,1.3],'Iris-versicolor'),
+(66,ARRAY[6.7,3.1,4.4,1.4],'Iris-versicolor'),
+(67,ARRAY[5.6,3.0,4.5,1.5],'Iris-versicolor'),
+(68,ARRAY[5.8,2.7,4.1,1.0],'Iris-versicolor'),
+(69,ARRAY[6.2,2.2,4.5,1.5],'Iris-versicolor'),
+(70,ARRAY[5.6,2.5,3.9,1.1],'Iris-versicolor'),
+(71,ARRAY[5.9,3.2,4.8,1.8],'Iris-versicolor'),
+(72,ARRAY[6.1,2.8,4.0,1.3],'Iris-versicolor'),
+(73,ARRAY[6.3,2.5,4.9,1.5],'Iris-versicolor'),
+(74,ARRAY[6.1,2.8,4.7,1.2],'Iris-versicolor'),
+(75,ARRAY[6.4,2.9,4.3,1.3],'Iris-versicolor'),
+(76,ARRAY[6.6,3.0,4.4,1.4],'Iris-versicolor'),
+(77,ARRAY[6.8,2.8,4.8,1.4],'Iris-versicolor'),
+(78,ARRAY[6.7,3.0,5.0,1.7],'Iris-versicolor'),
+(79,ARRAY[6.0,2.9,4.5,1.5],'Iris-versicolor'),
+(80,ARRAY[5.7,2.6,3.5,1.0],'Iris-versicolor'),
+(81,ARRAY[5.5,2.4,3.8,1.1],'Iris-versicolor'),
+(82,ARRAY[5.5,2.4,3.7,1.0],'Iris-versicolor'),
+(83,ARRAY[5.8,2.7,3.9,1.2],'Iris-versicolor'),
+(84,ARRAY[6.0,2.7,5.1,1.6],'Iris-versicolor'),
+(85,ARRAY[5.4,3.0,4.5,1.5],'Iris-versicolor'),
+(86,ARRAY[6.0,3.4,4.5,1.6],'Iris-versicolor'),
+(87,ARRAY[6.7,3.1,4.7,1.5],'Iris-versicolor'),
+(88,ARRAY[6.3,2.3,4.4,1.3],'Iris-versicolor'),
+(89,ARRAY[5.6,3.0,4.1,1.3],'Iris-versicolor'),
+(90,ARRAY[5.5,2.5,4.0,1.3],'Iris-versicolor'),
+(91,ARRAY[5.5,2.6,4.4,1.2],'Iris-versicolor'),
+(92,ARRAY[6.1,3.0,4.6,1.4],'Iris-versicolor'),
+(93,ARRAY[5.8,2.6,4.0,1.2],'Iris-versicolor'),
+(94,ARRAY[5.0,2.3,3.3,1.0],'Iris-versicolor'),
+(95,ARRAY[5.6,2.7,4.2,1.3],'Iris-versicolor'),
+(96,ARRAY[5.7,3.0,4.2,1.2],'Iris-versicolor'),
+(97,ARRAY[5.7,2.9,4.2,1.3],'Iris-versicolor'),
+(98,ARRAY[6.2,2.9,4.3,1.3],'Iris-versicolor'),
+(99,ARRAY[5.1,2.5,3.0,1.1],'Iris-versicolor'),
+(100,ARRAY[5.7,2.8,4.1,1.3],'Iris-versicolor'),
+(101,ARRAY[6.3,3.3,6.0,2.5],'Iris-virginica'),
+(102,ARRAY[5.8,2.7,5.1,1.9],'Iris-virginica'),
+(103,ARRAY[7.1,3.0,5.9,2.1],'Iris-virginica'),
+(104,ARRAY[6.3,2.9,5.6,1.8],'Iris-virginica'),
+(105,ARRAY[6.5,3.0,5.8,2.2],'Iris-virginica'),
+(106,ARRAY[7.6,3.0,6.6,2.1],'Iris-virginica'),
+(107,ARRAY[4.9,2.5,4.5,1.7],'Iris-virginica'),
+(108,ARRAY[7.3,2.9,6.3,1.8],'Iris-virginica'),
+(109,ARRAY[6.7,2.5,5.8,1.8],'Iris-virginica'),
+(110,ARRAY[7.2,3.6,6.1,2.5],'Iris-virginica'),
+(111,ARRAY[6.5,3.2,5.1,2.0],'Iris-virginica'),
+(112,ARRAY[6.4,2.7,5.3,1.9],'Iris-virginica'),
+(113,ARRAY[6.8,3.0,5.5,2.1],'Iris-virginica'),
+(114,ARRAY[5.7,2.5,5.0,2.0],'Iris-virginica'),
+(115,ARRAY[5.8,2.8,5.1,2.4],'Iris-virginica'),
+(116,ARRAY[6.4,3.2,5.3,2.3],'Iris-virginica'),
+(117,ARRAY[6.5,3.0,5.5,1.8],'Iris-virginica'),
+(118,ARRAY[7.7,3.8,6.7,2.2],'Iris-virginica'),
+(119,ARRAY[7.7,2.6,6.9,2.3],'Iris-virginica'),
+(120,ARRAY[6.0,2.2,5.0,1.5],'Iris-virginica'),
+(121,ARRAY[6.9,3.2,5.7,2.3],'Iris-virginica'),
+(122,ARRAY[5.6,2.8,4.9,2.0],'Iris-virginica'),
+(123,ARRAY[7.7,2.8,6.7,2.0],'Iris-virginica'),
+(124,ARRAY[6.3,2.7,4.9,1.8],'Iris-virginica'),
+(125,ARRAY[6.7,3.3,5.7,2.1],'Iris-virginica'),
+(126,ARRAY[7.2,3.2,6.0,1.8],'Iris-virginica'),
+(127,ARRAY[6.2,2.8,4.8,1.8],'Iris-virginica'),
+(128,ARRAY[6.1,3.0,4.9,1.8],'Iris-virginica'),
+(129,ARRAY[6.4,2.8,5.6,2.1],'Iris-virginica'),
+(130,ARRAY[7.2,3.0,5.8,1.6],'Iris-virginica'),
+(131,ARRAY[7.4,2.8,6.1,1.9],'Iris-virginica'),
+(132,ARRAY[7.9,3.8,6.4,2.0],'Iris-virginica'),
+(133,ARRAY[6.4,2.8,5.6,2.2],'Iris-virginica'),
+(134,ARRAY[6.3,2.8,5.1,1.5],'Iris-virginica'),
+(135,ARRAY[6.1,2.6,5.6,1.4],'Iris-virginica'),
+(136,ARRAY[7.7,3.0,6.1,2.3],'Iris-virginica'),
+(137,ARRAY[6.3,3.4,5.6,2.4],'Iris-virginica'),
+(138,ARRAY[6.4,3.1,5.5,1.8],'Iris-virginica'),
+(139,ARRAY[6.0,3.0,4.8,1.8],'Iris-virginica'),
+(140,ARRAY[6.9,3.1,5.4,2.1],'Iris-virginica'),
+(141,ARRAY[6.7,3.1,5.6,2.4],'Iris-virginica'),
+(142,ARRAY[6.9,3.1,5.1,2.3],'Iris-virginica'),
+(143,ARRAY[5.8,2.7,5.1,1.9],'Iris-virginica'),
+(144,ARRAY[6.8,3.2,5.9,2.3],'Iris-virginica'),
+(145,ARRAY[6.7,3.3,5.7,2.5],'Iris-virginica'),
+(146,ARRAY[6.7,3.0,5.2,2.3],'Iris-virginica'),
+(147,ARRAY[6.3,2.5,5.0,1.9],'Iris-virginica'),
+(148,ARRAY[6.5,3.0,5.2,2.0],'Iris-virginica'),
+(149,ARRAY[6.2,3.4,5.4,2.3],'Iris-virginica'),
+(150,ARRAY[5.9,3.0,5.1,1.8],'Iris-virginica');
+</pre>
+Create a test/validation dataset from the training data:
+<pre class="example">
+DROP TABLE IF EXISTS iris_train, iris_test;
+-- Set seed so results are reproducible
+SELECT setseed(0);
+SELECT madlib.train_test_split('iris_data',     -- Source table
+                               'iris',          -- Output table root name
+                                0.8,            -- Train proportion
+                                NULL,           -- Test proportion (0.2)
+                                NULL,           -- Strata definition
+                                NULL,           -- Output all columns
+                                NULL,           -- Sample without replacement
+                                TRUE            -- Separate output tables
+                              );
+SELECT COUNT(*) FROM iris_train;
+</pre>
+<pre class="result">
+ count
+------+
+   120
+</pre>
+
+-# Call the preprocessor for deep learning.  For the training dataset:
+<pre class="example">
+\\x off
+DROP TABLE IF EXISTS iris_train_packed, iris_train_packed_summary;
+SELECT madlib.training_preprocessor_dl('iris_train',         -- Source table
+                                       'iris_train_packed',  -- Output table
+                                       'class_text',         -- Dependent variable
+                                       'attributes'          -- Independent variable
+                                        );
+SELECT * FROM iris_train_packed_summary;
+</pre>
+<pre class="result">
+-[ RECORD 1 ]-------+---------------------------------------------
+source_table        | iris_train
+output_table        | iris_train_packed
+dependent_varname   | class_text
+independent_varname | attributes
+dependent_vartype   | character varying
+class_values        | {Iris-setosa,Iris-versicolor,Iris-virginica}
+buffer_size         | 60
+normalizing_const   | 1.0
+num_classes         | 3
+</pre>
+For the validation dataset:
+<pre class="example">
+DROP TABLE IF EXISTS iris_test_packed, iris_test_packed_summary;
+SELECT madlib.validation_preprocessor_dl('iris_test',          -- Source table
+                                         'iris_test_packed',   -- Output table
+                                         'class_text',         -- Dependent variable
+                                         'attributes',         -- Independent variable
+                                         'iris_train_packed'   -- From training preprocessor step
+                                          );
+SELECT * FROM iris_test_packed_summary;
+</pre>
+<pre class="result">
+-[ RECORD 1 ]-------+---------------------------------------------
+source_table        | iris_test
+output_table        | iris_test_packed
+dependent_varname   | class_text
+independent_varname | attributes
+dependent_vartype   | character varying
+class_values        | {Iris-setosa,Iris-versicolor,Iris-virginica}
+buffer_size         | 15
+normalizing_const   | 1.0
+num_classes         | 3
+</pre>
+
+-# Define and load model architecture.  Use Keras to define
+the model architecture:
+<pre class="example">
+import keras
+from keras.models import Sequential
+from keras.layers import Dense
+model_simple = Sequential()
+model_simple.add(Dense(10, activation='relu', input_shape=(4,)))
+model_simple.add(Dense(10, activation='relu'))
+model_simple.add(Dense(3, activation='softmax'))
+model_simple.summary()
+\verbatim
+
+_________________________________________________________________
+Layer (type)                 Output Shape              Param #
+=================================================================
+dense_1 (Dense)              (None, 10)                50
+_________________________________________________________________
+dense_2 (Dense)              (None, 10)                110
+_________________________________________________________________
+dense_3 (Dense)              (None, 3)                 33
+=================================================================
+Total params: 193
+Trainable params: 193
+Non-trainable params: 0
+\endverbatim
+</pre>
+Export the model to JSON:
+<pre class="example">
+model_simple.to_json()
+</pre>
+<pre class="result">
+'{"class_name": "Sequential", "keras_version": "2.1.6", "config": [{"class_name": "Dense", "config": {"kernel_initializer": {"class_name": "VarianceScaling", "config": {"distribution": "uniform", "scale": 1.0, "seed": null, "mode": "fan_avg"}}, "name": "dense_1", "kernel_constraint": null, "bias_regularizer": null, "bias_constraint": null, "dtype": "float32", "activation": "relu", "trainable": true, "kernel_regularizer": null, "bias_initializer": {"class_name": "Zeros", "config": {}}, "units": 10, "batch_input_shape": [null, 4], "use_bias": true, "activity_regularizer": null}}, {"class_name": "Dense", "config": {"kernel_initializer": {"class_name": "VarianceScaling", "config": {"distribution": "uniform", "scale": 1.0, "seed": null, "mode": "fan_avg"}}, "name": "dense_2", "kernel_constraint": null, "bias_regularizer": null, "bias_constraint": null, "activation": "relu", "trainable": true, "kernel_regularizer": null, "bias_initializer": {"class_name": "Zeros", "config": {}}, "units": 10, "use_bias": true, "activity_regularizer": null}}, {"class_name": "Dense", "config": {"kernel_initializer": {"class_name": "VarianceScaling", "config": {"distribution": "uniform", "scale": 1.0, "seed": null, "mode": "fan_avg"}}, "name": "dense_3", "kernel_constraint": null, "bias_regularizer": null, "bias_constraint": null, "activation": "softmax", "trainable": true, "kernel_regularizer": null, "bias_initializer": {"class_name": "Zeros", "config": {}}, "units": 3, "use_bias": true, "activity_regularizer": null}}], "backend": "tensorflow"}'
+</pre>
+Load into model architecture table:
+<pre class="example">
+DROP TABLE IF EXISTS model_arch_library;
+SELECT madlib.load_keras_model('model_arch_library',  -- Output table,
+$$
+{"class_name": "Sequential", "keras_version": "2.1.6", "config": [{"class_name": "Dense", "config": {"kernel_initializer": {"class_name": "VarianceScaling", "config": {"distribution": "uniform", "scale": 1.0, "seed": null, "mode": "fan_avg"}}, "name": "dense_1", "kernel_constraint": null, "bias_regularizer": null, "bias_constraint": null, "dtype": "float32", "activation": "relu", "trainable": true, "kernel_regularizer": null, "bias_initializer": {"class_name": "Zeros", "config": {}}, "units": 10, "batch_input_shape": [null, 4], "use_bias": true, "activity_regularizer": null}}, {"class_name": "Dense", "config": {"kernel_initializer": {"class_name": "VarianceScaling", "config": {"distribution": "uniform", "scale": 1.0, "seed": null, "mode": "fan_avg"}}, "name": "dense_2", "kernel_constraint": null, "bias_regularizer": null, "bias_constraint": null, "activation": "relu", "trainable": true, "kernel_regularizer": null, "bias_initializer": {"class_name": "Zeros", "config": {}}, "units": 10, "use_bias": true, "activity_regularizer": null}}, {"class_name": "Dense", "config": {"kernel_initializer": {"class_name": "VarianceScaling", "config": {"distribution": "uniform", "scale": 1.0, "seed": null, "mode": "fan_avg"}}, "name": "dense_3", "kernel_constraint": null, "bias_regularizer": null, "bias_constraint": null, "activation": "softmax", "trainable": true, "kernel_regularizer": null, "bias_initializer": {"class_name": "Zeros", "config": {}}, "units": 3, "use_bias": true, "activity_regularizer": null}}], "backend": "tensorflow"}
+$$
+::json,  -- JSON blob
+                               NULL,                  -- Weights
+                               'Sophie',              -- Name
+                               'A simple model'       -- Descr
+);
+</pre>
+
+-# Train model and view summary table:
+<pre class="example">
+DROP TABLE IF EXISTS iris_model, iris_model_summary;
+SELECT madlib.madlib_keras_fit('iris_train_packed',   -- source table
+                               'iris_model',          -- model output table
+                               'model_arch_library',  -- model arch table
+                                1,                    -- model arch id
+                                $$ loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'] $$,  -- compile_params
+                                $$ batch_size=5, epochs=3 $$,  -- fit_params
+                                10                    -- num_iterations
+                              );
+SELECT * FROM iris_model_summary;
+</pre>
+<pre class="result">
+-[ RECORD 1 ]-------------+--------------------------------------------------------------------------
+source_table              | iris_train_packed
+model                     | iris_model
+dependent_varname         | class_text
+independent_varname       | attributes
+model_arch_table          | model_arch_library
+model_id                  | 1
+compile_params            |  loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy']
+fit_params                |  batch_size=5, epochs=3
+num_iterations            | 10
+validation_table          |
+metrics_compute_frequency | 10
+name                      |
+description               |
+model_type                | madlib_keras
+model_size                | 0.7900390625
+start_training_time       | 2019-06-05 20:55:15.785034
+end_training_time         | 2019-06-05 20:55:25.373035
+metrics_elapsed_time      | {9.58799290657043}
+madlib_version            | 1.17.0
+num_classes               | 3
+class_values              | {Iris-setosa,Iris-versicolor,Iris-virginica}
+dependent_vartype         | character varying
+normalizing_const         | 1
+metrics_type              | {accuracy}
+training_metrics_final    | 0.766666650772
+training_loss_final       | 0.721103310585
+training_metrics          | {0.766666650772095}
+training_loss             | {0.721103310585022}
+validation_metrics_final  |
+validation_loss_final     |
+validation_metrics        |
+validation_loss           |
+metrics_iters             | {10}
+</pre>
+
+-# Use the test dataset to evaluate the model we built above:
+<pre class="example">
+DROP TABLE IF EXISTS iris_validate;
+SELECT madlib.madlib_keras_evaluate('iris_model',       -- model
+                                   'iris_test_packed',  -- test table
+                                   'iris_validate'      -- output table
+                                   );
+SELECT * FROM iris_validate;
+</pre>
+<pre class="result">
+       loss        |      metric       | metrics_type
+-------------------+-------------------+--------------
+ 0.719491899013519 | 0.800000011920929 | {accuracy}
+(1 row)
+</pre>
+
+-# Predict.  We will use the validation dataset for prediction
+as well, which is not usual but serves to show the
+syntax. The prediction is in the 'estimated_class_text'
+column:
+<pre class="example">
+DROP TABLE IF EXISTS iris_predict;
+SELECT madlib.madlib_keras_predict('iris_model', -- model
+                                   'iris_test',  -- test_table
+                                   'id',  -- id column
+                                   'attributes', -- independent var
+                                   'iris_predict'  -- output table
+                                   );
+SELECT * FROM iris_predict ORDER BY id;
+</pre>
+<pre class="result">
+ id  | estimated_class_text
+-----+----------------------
+   4 | Iris-setosa
+   6 | Iris-setosa
+   8 | Iris-setosa
+  12 | Iris-setosa
+  13 | Iris-setosa
+  15 | Iris-setosa
+  24 | Iris-setosa
+  30 | Iris-setosa
+  38 | Iris-setosa
+  49 | Iris-setosa
+  60 | Iris-virginica
+  68 | Iris-versicolor
+  69 | Iris-versicolor
+  76 | Iris-versicolor
+  78 | Iris-versicolor
+  81 | Iris-versicolor
+  85 | Iris-virginica
+  90 | Iris-versicolor
+  91 | Iris-versicolor
+  94 | Iris-virginica
+ 104 | Iris-virginica
+ 106 | Iris-versicolor
+ 107 | Iris-virginica
+ 110 | Iris-virginica
+ 119 | Iris-versicolor
+ 127 | Iris-virginica
+ 129 | Iris-virginica
+ 134 | Iris-versicolor
+ 139 | Iris-virginica
+ 144 | Iris-virginica
+(30 rows)
+</pre>
+Count missclassifications:
+<pre class="example">
+SELECT COUNT(*) FROM iris_predict JOIN iris_test USING (id)
+WHERE iris_predict.estimated_class_text != iris_test.class_text;
+</pre>
+<pre class="result">
+ count
+-------+
+     6
+(1 row)
+</pre>
+Accuracy:
+<pre class="example">
+SELECT round(count(*)*100/(150*0.2),2) as test_accuracy_percent from
+    (select iris_test.class_text as actual, iris_predict.estimated_class_text as estimated
+     from iris_predict inner join iris_test
+     on iris_test.id=iris_predict.id) q
+WHERE q.actual=q.estimated;
+</pre>
+<pre class="result">
+ test_accuracy_percent
+-----------------------+
+                 80.00
+(1 row)
+</pre>
+
+-# Predict BYOM.
+We will use the validation dataset for prediction
+as well, which is not usual but serves to show the
+syntax. See <a href="group__grp__keras__model__arch.html">load_keras_model</a>
+for details on how to load the model architecture and weights.
+In this example we will use weights we already have:
+<pre class="example">
+UPDATE model_arch_library
+SET model_weights = iris_model.model_weights
+FROM iris_model
+WHERE model_arch_library.model_id = 1;
+</pre>
+Now train using a model from the model architecture table directly
+without referencing the model table from the MADlib training.  Note that if you
+specify the class values parameter as we do below, it must reflect how the dependent
+variable was 1-hot encoded for training. In this example the 'training_preprocessor_dl()'
+in Step 2 above encoded in the order {'Iris-setosa', 'Iris-versicolor', 'Iris-virginica'} so
+this is the order we pass in the parameter. If we accidently pick another order that does
+not match the 1-hot encoding, the predictions would be wrong.
+<pre class="example">
+DROP TABLE IF EXISTS iris_predict_byom;
+SELECT madlib.madlib_keras_predict_byom('model_arch_library',  -- model arch table
+                                         1,                    -- model arch id
+                                        'iris_test',           -- test_table
+                                        'id',                  -- id column
+                                        'attributes',          -- independent var
+                                        'iris_predict_byom',   -- output table
+                                        'response',            -- prediction type
+                                         FALSE,                -- use GPUs
+                                         ARRAY['Iris-setosa', 'Iris-versicolor', 'Iris-virginica'], -- class values
+                                         1.0                   -- normalizing const
+                                   );
+SELECT * FROM iris_predict_byom ORDER BY id;
+</pre>
+The prediction is in the 'estimated_dependent_var' column:
+<pre class="result">
+ id  | estimated_dependent_var
+-----+----------------------
+   4 | Iris-setosa
+   6 | Iris-setosa
+   8 | Iris-setosa
+  12 | Iris-setosa
+  13 | Iris-setosa
+  15 | Iris-setosa
+  24 | Iris-setosa
+  30 | Iris-setosa
+  38 | Iris-setosa
+  49 | Iris-setosa
+  60 | Iris-virginica
+  68 | Iris-versicolor
+  69 | Iris-versicolor
+  76 | Iris-versicolor
+  78 | Iris-versicolor
+  81 | Iris-versicolor
+  85 | Iris-virginica
+  90 | Iris-versicolor
+  91 | Iris-versicolor
+  94 | Iris-virginica
+ 104 | Iris-virginica
+ 106 | Iris-versicolor
+ 107 | Iris-virginica
+ 110 | Iris-virginica
+ 119 | Iris-versicolor
+ 127 | Iris-virginica
+ 129 | Iris-virginica
+ 134 | Iris-versicolor
+ 139 | Iris-virginica
+ 144 | Iris-virginica
+(30 rows)
+ </pre>
+Count missclassifications:
+<pre class="example">
+SELECT COUNT(*) FROM iris_predict_byom JOIN iris_test USING (id)
+WHERE iris_predict_byom.estimated_dependent_var != iris_test.class_text;
+</pre>
+<pre class="result">
+ count
+-------+
+     6
+(1 row)
+</pre>
+Accuracy:
+<pre class="example">
+SELECT round(count(*)*100/(150*0.2),2) as test_accuracy_percent from
+    (select iris_test.class_text as actual, iris_predict_byom.estimated_dependent_var as estimated
+     from iris_predict_byom inner join iris_test
+     on iris_test.id=iris_predict_byom.id) q
+WHERE q.actual=q.estimated;
+</pre>
+<pre class="result">
+ test_accuracy_percent
+-----------------------+
+                 80.00
+(1 row)
+</pre>
+
+
+<h4>Classification with Other Parameters</h4>
+
+-# Validation dataset.  Now use a validation dataset
+and compute metrics every 3rd iteration using
+the 'metrics_compute_frequency' parameter. This can
+help reduce run time if you do not need metrics
+computed at every iteration.
+<pre class="example">
+DROP TABLE IF EXISTS iris_model, iris_model_summary;
+SELECT madlib.madlib_keras_fit('iris_train_packed',   -- source table
+                               'iris_model',          -- model output table
+                               'model_arch_library',  -- model arch table
+                                1,                    -- model arch id
+                                $$ loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'] $$,  -- compile_params
+                                $$ batch_size=5, epochs=3 $$,  -- fit_params
+                                10,                   -- num_iterations
+                                FALSE,                -- use GPUs
+                                'iris_test_packed',   -- validation dataset
+                                3,                    -- metrics compute frequency
+                                FALSE,                -- warm start
+                               'Sophie L.',           -- name
+                               'Simple MLP for iris dataset'  -- description
+                              );
+SELECT * FROM iris_model_summary;
+</pre>
+<pre class="result">
+-[ RECORD 1 ]-------------+--------------------------------------------------------------------------
+source_table              | iris_train_packed
+model                     | iris_model
+dependent_varname         | class_text
+independent_varname       | attributes
+model_arch_table          | model_arch_library
+model_id                  | 1
+compile_params            |  loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy']
+fit_params                |  batch_size=5, epochs=3
+num_iterations            | 10
+validation_table          | iris_test_packed
+metrics_compute_frequency | 3
+name                      | Sophie L.
+description               | Simple MLP for iris dataset
+model_type                | madlib_keras
+model_size                | 0.7900390625
+start_training_time       | 2019-06-05 20:58:23.224629
+end_training_time         | 2019-06-05 20:58:35.477499
+metrics_elapsed_time      | {4.69859290122986,8.2062520980835,10.8104848861694,12.2528700828552}
+madlib_version            | 1.17.0
+num_classes               | 3
+class_values              | {Iris-setosa,Iris-versicolor,Iris-virginica}
+dependent_vartype         | character varying
+normalizing_const         | 1
+metrics_type              | {accuracy}
+training_metrics_final    | 0.941666662693
+training_loss_final       | 0.40586027503
+training_metrics          | {0.699999988079071,0.800000011920929,0.899999976158142,0.941666662693024}
+training_loss             | {0.825238645076752,0.534248650074005,0.427499741315842,0.405860275030136}
+validation_metrics_final  | 0.866666674614
+validation_loss_final     | 0.409001916647
+validation_metrics        | {0.733333349227905,0.733333349227905,0.866666674613953,0.866666674613953}
+validation_loss           | {0.827081918716431,0.536275088787079,0.431326270103455,0.409001916646957}
+metrics_iters             | {3,6,9,10}
+</pre>
+
+-# Predict probabilities for each class:
+<pre class="example">
+DROP TABLE IF EXISTS iris_predict;
+SELECT madlib.madlib_keras_predict('iris_model',      -- model
+                                   'iris_test',       -- test_table
+                                   'id',              -- id column
+                                   'attributes',      -- independent var
+                                   'iris_predict',    -- output table
+                                   'prob'             -- response type
+                                   );
+SELECT * FROM iris_predict ORDER BY id;
+</pre>
+<pre class="result">
+ id  | prob_Iris-setosa | prob_Iris-versicolor | prob_Iris-virginica
+-----+------------------+----------------------+---------------------
+   4 |        0.9241953 |          0.059390426 |          0.01641435
+   6 |        0.9657151 |           0.02809224 |        0.0061926916
+   8 |        0.9543316 |           0.03670931 |         0.008959154
+  12 |       0.93851465 |          0.048681837 |         0.012803554
+  13 |       0.93832576 |           0.04893658 |         0.012737647
+  15 |       0.98717564 |           0.01091238 |        0.0019119986
+  24 |        0.9240628 |          0.060805064 |         0.015132156
+  30 |       0.92063266 |          0.062279057 |         0.017088294
+  38 |        0.9353765 |          0.051353406 |         0.013270103
+  49 |        0.9709265 |          0.023811856 |         0.005261566
+  60 |      0.034395564 |            0.5260507 |          0.43955377
+  68 |      0.031360663 |           0.53689945 |          0.43173987
+  69 |     0.0098787155 |           0.46121457 |          0.52890676
+  76 |      0.031186827 |            0.5644549 |          0.40435827
+  78 |       0.00982633 |           0.48929632 |           0.5008774
+  81 |       0.03658528 |           0.53248984 |           0.4309249
+  85 |      0.015423619 |           0.48452598 |           0.5000504
+  90 |      0.026857043 |            0.5155698 |          0.45757324
+  91 |      0.013675574 |           0.47155368 |           0.5147708
+  94 |      0.073440716 |            0.5418821 |           0.3846772
+ 104 |     0.0021637122 |            0.3680499 |          0.62978643
+ 106 |    0.00052832486 |           0.30891812 |           0.6905536
+ 107 |      0.007315576 |           0.40949163 |           0.5831927
+ 110 |     0.0022259138 |            0.4058138 |          0.59196025
+ 119 |    0.00018505375 |           0.24510723 |           0.7547077
+ 127 |      0.009542585 |           0.46958733 |          0.52087003
+ 129 |     0.0019719477 |           0.36288205 |            0.635146
+ 134 |     0.0056418083 |           0.43401477 |          0.56034344
+ 139 |       0.01067015 |            0.4755573 |          0.51377255
+ 144 |     0.0018909549 |           0.37689638 |           0.6212126
+(30 rows)
+</pre>
+
+-# Warm start.  Next, use the warm_start parameter
+to continue learning, using the coefficients from
+the run above. Note that we don't drop the
+model table or model summary table:
+<pre class="example">
+SELECT madlib.madlib_keras_fit('iris_train_packed',   -- source table
+                               'iris_model',          -- model output table
+                               'model_arch_library',  -- model arch table
+                                1,                    -- model arch id
+                                $$ loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'] $$,  -- compile_params
+                                $$ batch_size=5, epochs=3 $$,  -- fit_params
+                                5,                   -- num_iterations
+                                FALSE,               -- use GPUs
+                                'iris_test_packed',   -- validation dataset
+                                1,                    -- metrics compute frequency
+                                TRUE,                 -- warm start
+                               'Sophie L.',           -- name
+                               'Simple MLP for iris dataset'  -- description
+                              );
+SELECT * FROM iris_model_summary;
+</pre>
+<pre class="result">
+-[ RECORD 1 ]-------------+--------------------------------------------------------------------------------------------
+source_table              | iris_train_packed
+model                     | iris_model
+dependent_varname         | class_text
+independent_varname       | attributes
+model_arch_table          | model_arch_library
+model_id                  | 1
+compile_params            |  loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy']
+fit_params                |  batch_size=5, epochs=3
+num_iterations            | 5
+validation_table          | iris_test_packed
+metrics_compute_frequency | 1
+name                      | Sophie L.
+description               | Simple MLP for iris dataset
+model_type                | madlib_keras
+model_size                | 0.7900390625
+start_training_time       | 2019-06-05 20:59:43.971792
+end_training_time         | 2019-06-05 20:59:51.654586
+metrics_elapsed_time      | {2.89326310157776,4.14273309707642,5.24781513214111,6.34498596191406,7.68279695510864}
+madlib_version            | 1.17.0
+num_classes               | 3
+class_values              | {Iris-setosa,Iris-versicolor,Iris-virginica}
+dependent_vartype         | character varying
+normalizing_const         | 1
+metrics_type              | {accuracy}
+training_metrics_final    | 0.933333337307
+training_loss_final       | 0.334455043077
+training_metrics          | {0.933333337306976,0.933333337306976,0.975000023841858,0.975000023841858,0.933333337306976}
+training_loss             | {0.386842548847198,0.370587915182114,0.357161343097687,0.344598710536957,0.334455043077469}
+validation_metrics_final  | 0.866666674614
+validation_loss_final     | 0.34414178133
+validation_metrics        | {0.866666674613953,0.866666674613953,0.933333337306976,0.866666674613953,0.866666674613953}
+validation_loss           | {0.391442179679871,0.376414686441422,0.362262904644012,0.351912915706635,0.344141781330109}
+metrics_iters             | {1,2,3,4,5}
+</pre>
+Note that the loss and accuracy values pick up from where the previous run left off.
+
+<h4>Transfer Learning</h4>
+Here we want
+to start with initial weights from a pre-trained model
+rather than training from scratch. We also want to use
+a model architecture with the earlier feature layer(s)
+frozen to save on training time. The example below is
+somewhat contrived but gives you the idea of the steps.
+
+-# Define and load a model architecture with
+the 1st hidden layer frozen:
+
+<pre class="example">
+model_transfer = Sequential()
+model_transfer.add(Dense(10, activation='relu', input_shape=(4,), trainable=False))
+model_transfer.add(Dense(10, activation='relu'))
+model_transfer.add(Dense(3, activation='softmax'))
+model_simple.summary()
+\verbatim
+
+_________________________________________________________________
+Layer (type)                 Output Shape              Param #
+=================================================================
+dense_1 (Dense)              (None, 10)                50
+_________________________________________________________________
+dense_2 (Dense)              (None, 10)                110
+_________________________________________________________________
+dense_3 (Dense)              (None, 3)                 33
+=================================================================
+Total params: 193
+Trainable params: 143
+Non-trainable params: 50
+\endverbatim
+</pre>
+Export the model to JSON:
+<pre class="example">
+model_simple.to_json()
+</pre>
+<pre class="result">
+'{"class_name": "Sequential", "keras_version": "2.1.6", "config": [{"class_name": "Dense", "config": {"kernel_initializer": {"class_name": "VarianceScaling", "config": {"distribution": "uniform", "scale": 1.0, "seed": null, "mode": "fan_avg"}}, "name": "dense_2", "kernel_constraint": null, "bias_regularizer": null, "bias_constraint": null, "dtype": "float32", "activation": "relu", "trainable": false, "kernel_regularizer": null, "bias_initializer": {"class_name": "Zeros", "config": {}}, "units": 10, "batch_input_shape": [null, 4], "use_bias": true, "activity_regularizer": null}}, {"class_name": "Dense", "config": {"kernel_initializer": {"class_name": "VarianceScaling", "config": {"distribution": "uniform", "scale": 1.0, "seed": null, "mode": "fan_avg"}}, "name": "dense_3", "kernel_constraint": null, "bias_regularizer": null, "bias_constraint": null, "activation": "relu", "trainable": true, "kernel_regularizer": null, "bias_initializer": {"class_name": "Zeros", "config": {}}, "units": 10, "use_bias": true, "activity_regularizer": null}}, {"class_name": "Dense", "config": {"kernel_initializer": {"class_name": "VarianceScaling", "config": {"distribution": "uniform", "scale": 1.0, "seed": null, "mode": "fan_avg"}}, "name": "dense_4", "kernel_constraint": null, "bias_regularizer": null, "bias_constraint": null, "activation": "softmax", "trainable": true, "kernel_regularizer": null, "bias_initializer": {"class_name": "Zeros", "config": {}}, "units": 3, "use_bias": true, "activity_regularizer": null}}], "backend": "tensorflow"}'
+</pre>
+Load into model architecture table:
+<pre class="example">
+SELECT madlib.load_keras_model('model_arch_library',  -- Output table,
+$$
+{"class_name": "Sequential", "keras_version": "2.1.6", "config": [{"class_name": "Dense", "config": {"kernel_initializer": {"class_name": "VarianceScaling", "config": {"distribution": "uniform", "scale": 1.0, "seed": null, "mode": "fan_avg"}}, "name": "dense_2", "kernel_constraint": null, "bias_regularizer": null, "bias_constraint": null, "dtype": "float32", "activation": "relu", "trainable": false, "kernel_regularizer": null, "bias_initializer": {"class_name": "Zeros", "config": {}}, "units": 10, "batch_input_shape": [null, 4], "use_bias": true, "activity_regularizer": null}}, {"class_name": "Dense", "config": {"kernel_initializer": {"class_name": "VarianceScaling", "config": {"distribution": "uniform", "scale": 1.0, "seed": null, "mode": "fan_avg"}}, "name": "dense_3", "kernel_constraint": null, "bias_regularizer": null, "bias_constraint": null, "activation": "relu", "trainable": true, "kernel_regularizer": null, "bias_initializer": {"class_name": "Zeros", "config": {}}, "units": 10, "use_bias": true, "activity_regularizer": null}}, {"class_name": "Dense", "config": {"kernel_initializer": {"class_name": "VarianceScaling", "config": {"distribution": "uniform", "scale": 1.0, "seed": null, "mode": "fan_avg"}}, "name": "dense_4", "kernel_constraint": null, "bias_regularizer": null, "bias_constraint": null, "activation": "softmax", "trainable": true, "kernel_regularizer": null, "bias_initializer": {"class_name": "Zeros", "config": {}}, "units": 3, "use_bias": true, "activity_regularizer": null}}], "backend": "tensorflow"}
+$$
+::json,  -- JSON blob
+                               NULL,                  -- Weights
+                               'Maria',               -- Name
+                               'A transfer model'     -- Descr
+);
+</pre>
+Fetch the weights from a previous MADlib run. (Normally
+these would be downloaded from a source that trained
+the same model architecture on a related dataset.)
+<pre class="example">
+UPDATE model_arch_library
+SET model_weights = iris_model.model_weights
+FROM iris_model
+WHERE model_arch_library.model_id = 2;
+</pre>
+Now train the model using the transfer model and the pre-trained weights:
+<pre class="example">
+DROP TABLE IF EXISTS iris_model, iris_model_summary;
+SELECT madlib.madlib_keras_fit('iris_train_packed',   -- source table
+                               'iris_model',          -- model output table
+                               'model_arch_library',  -- model arch table
+                                2,                    -- model arch id
+                                $$ loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'] $$,  -- compile_params
+                                $$ batch_size=5, epochs=3 $$,  -- fit_params
+                                10                    -- num_iterations
+                              );
+SELECT * FROM iris_model_summary;
+</pre>
+<pre class="result">
+-[ RECORD 1 ]-------------+--------------------------------------------------------------------------
+source_table              | iris_train_packed
+model                     | iris_model
+dependent_varname         | class_text
+independent_varname       | attributes
+model_arch_table          | model_arch_library
+model_id                  | 2
+compile_params            |  loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy']
+fit_params                |  batch_size=5, epochs=3
+num_iterations            | 10
+validation_table          |
+metrics_compute_frequency | 10
+name                      |
+description               |
+model_type                | madlib_keras
+model_size                | 0.7900390625
+start_training_time       | 2019-06-05 21:01:03.998422
+end_training_time         | 2019-06-05 21:01:13.525838
+metrics_elapsed_time      | {9.52741599082947}
+madlib_version            | 1.17.0
+num_classes               | 3
+class_values              | {Iris-setosa,Iris-versicolor,Iris-virginica}
+dependent_vartype         | character varying
+normalizing_const         | 1
+metrics_type              | {accuracy}
+training_metrics_final    | 0.975000023842
+training_loss_final       | 0.245171800256
+training_metrics          | {0.975000023841858}
+training_loss             | {0.245171800255775}
+validation_metrics_final  |
+validation_loss_final     |
+validation_metrics        |
+validation_loss           |
+metrics_iters             | {10}
+</pre>
+
+@anchor notes
+@par Notes
+
+1. Refer to the deep learning section of the Apache MADlib
+wiki [5] for important information including supported libraries
+and versions.
+
+2. Classification is currently supported, not regression.
+
+3. Reminder about the distinction between warm start and transfer learning.  Warm start uses model
+state (weights) from the model output table from a previous training run -
+set the 'warm_start' parameter to TRUE in the fit function.
+Transfer learning uses initial model state (weights) stored in the 'model_arch_table' - in this case set the
+'warm_start' parameter to FALSE in the fit function.
+
+@anchor background
+@par Technical Background
+
+For an introduction to deep learning foundations, including MLP and CNN,
+refer to [6].
+
+This module trains a single large model across the database cluster
+using the bulk synchronous parallel (BSP) approach, with model averaging [7].
+
+On the effect of database cluster size: as the database cluster size increases, the per iteration
+loss will be higher since the model only sees 1/n of the data, where n is the number of segments.
+However, each iteration runs faster than single node because it is only traversing 1/n of the data.
+For highly non-convex solution spaces, convergence behavior may diminish as cluster size increases.
+Ensure that each segment has sufficient volume of data and examples of each class value.
+
+Alternatively, to train multiple models at the same time for model
+architecture search or hyperparameter tuning, you can
+use <a href="group__grp__keras__run__model__selection.html">Model Selection</a>,
+which does not do model averaging and hence may have better covergence efficiency.
+
+@anchor literature
+@literature
+
+@anchor mlp-lit-1
+[1] https://keras.io/
+
+[2] https://www.tensorflow.org/
+
+[3] "Neural Networks for Machine Learning", Lectures 6a and 6b on mini-batch gradient descent,
+Geoffrey Hinton with Nitish Srivastava and Kevin Swersky,
+http://www.cs.toronto.edu/~tijmen/csc321/slides/lecture_slides_lec6.pdf
+
+[4] https://keras.io/models/model/
+
+[5] Deep learning section of Apache MADlib wiki, https://cwiki.apache.org/confluence/display/MADLIB/Deep+Learning
+
+[6] Deep Learning, Ian Goodfellow, Yoshua Bengio and Aaron Courville, MIT Press, 2016.
+
+[7] "Resource-Efficient and Reproducible Model Selection on Deep Learning Systems," Supun Nakandala,
+Yuhao Zhang, and Arun Kumar, Technical Report, Computer Science and Engineering, University of California,
+San Diego https://adalabucsd.github.io/papers/TR_2019_Cerebro.pdf.
+
+[8] Greenplum Database server configuration parameters https://gpdb.docs.pivotal.io/latest/ref_guide/config_params/guc-list.html
+
+@anchor related
+@par Related Topics
+
+File madlib_keras.sql_in documenting the training, evaluate and predict functions.
+
+*/
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.madlib_keras_fit(
+    source_table            VARCHAR,
+    model                   VARCHAR,
+    model_arch_table        VARCHAR,
+    model_id                INTEGER,
+    compile_params          VARCHAR,
+    fit_params              VARCHAR,
+    num_iterations          INTEGER,
+    use_gpus                BOOLEAN,
+    validation_table        VARCHAR,
+    metrics_compute_frequency  INTEGER,
+    warm_start              BOOLEAN,
+    name                    VARCHAR,
+    description             VARCHAR,
+    object_table            VARCHAR
+) RETURNS VOID AS $$
+    PythonFunctionBodyOnly(`deep_learning', `madlib_keras')
+    from utilities.control import SetGUC
+    with AOControl(False):
+        with SetGUC("plan_cache_mode", "force_generic_plan"):
+            madlib_keras.fit(**globals())
+$$ LANGUAGE plpythonu VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.madlib_keras_fit(
+    source_table            VARCHAR,
+    model                   VARCHAR,
+    model_arch_table        VARCHAR,
+    model_id                INTEGER,
+    compile_params          VARCHAR,
+    fit_params              VARCHAR,
+    num_iterations          INTEGER,
+    use_gpus                BOOLEAN,
+    validation_table        VARCHAR,
+    metrics_compute_frequency  INTEGER,
+    warm_start              BOOLEAN,
+    name                    VARCHAR,
+    description             VARCHAR
+) RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.madlib_keras_fit($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NULL);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.madlib_keras_fit(
+    source_table            VARCHAR,
+    model                   VARCHAR,
+    model_arch_table        VARCHAR,
+    model_id                INTEGER,
+    compile_params          VARCHAR,
+    fit_params              VARCHAR,
+    num_iterations          INTEGER,
+    use_gpus                BOOLEAN,
+    validation_table        VARCHAR,
+    metrics_compute_frequency  INTEGER,
+    warm_start              BOOLEAN,
+    name                    VARCHAR
+) RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.madlib_keras_fit($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULL);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.madlib_keras_fit(
+    source_table            VARCHAR,
+    model                   VARCHAR,
+    model_arch_table        VARCHAR,
+    model_id                INTEGER,
+    compile_params          VARCHAR,
+    fit_params              VARCHAR,
+    num_iterations          INTEGER,
+    use_gpus                BOOLEAN,
+    validation_table        VARCHAR,
+    metrics_compute_frequency  INTEGER,
+    warm_start              BOOLEAN
+) RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.madlib_keras_fit($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL, NULL);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA');
+
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.madlib_keras_fit(
+    source_table            VARCHAR,
+    model                   VARCHAR,
+    model_arch_table        VARCHAR,
+    model_id                INTEGER,
+    compile_params          VARCHAR,
+    fit_params              VARCHAR,
+    num_iterations          INTEGER,
+    use_gpus                BOOLEAN,
+    validation_table        VARCHAR,
+    metrics_compute_frequency  INTEGER
+) RETURNS VOID AS $$
+SELECT MADLIB_SCHEMA.madlib_keras_fit($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, NULL, NULL);
+$$ LANGUAGE sql VOLATILE
+    m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA');
+
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.madlib_keras_fit(
+    source_table            VARCHAR,
+    model                   VARCHAR,
+    model_arch_table        VARCHAR,
+    model_id                INTEGER,
+    compile_params          VARCHAR,
+    fit_params              VARCHAR,
+    num_iterations          INTEGER,
+    use_gpus                BOOLEAN,
+    validation_table        VARCHAR
+) RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.madlib_keras_fit($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL, NULL, NULL, NULL);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.madlib_keras_fit(
+    source_table            VARCHAR,
+    model                   VARCHAR,
+    model_arch_table        VARCHAR,
+    model_id                INTEGER,
+    compile_params          VARCHAR,
+    fit_params              VARCHAR,
+    num_iterations          INTEGER,
+    use_gpus                BOOLEAN
+) RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.madlib_keras_fit($1, $2, $3, $4, $5, $6, $7, $8, NULL, NULL, NULL, NULL, NULL);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.madlib_keras_fit(
+    source_table            VARCHAR,
+    model                   VARCHAR,
+    model_arch_table        VARCHAR,
+    model_id                INTEGER,
+    compile_params          VARCHAR,
+    fit_params              VARCHAR,
+    num_iterations          INTEGER
+) RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.madlib_keras_fit($1, $2, $3, $4, $5, $6, $7, FALSE, NULL, NULL, NULL, NULL, NULL);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.fit_transition(
+    state                       BYTEA,
+    dependent_var               BYTEA,
+    independent_var             BYTEA,
+    dependent_var_shape         INTEGER[],
+    independent_var_shape       INTEGER[],
+    model_architecture          TEXT,
+    compile_params              TEXT,
+    fit_params                  TEXT,
+    dist_key                    INTEGER,
+    dist_key_mapping            INTEGER[],
+    current_seg_id              INTEGER,
+    segments_per_host           INTEGER,
+    images_per_seg              INTEGER[],
+    use_gpus                    BOOLEAN,
+    accessible_gpus_for_seg                INTEGER[],
+    prev_serialized_weights     BYTEA,
+    is_final_iteration          BOOLEAN,
+    custom_function_map        BYTEA
+) RETURNS BYTEA AS $$
+PythonFunctionBodyOnlyNoSchema(`deep_learning', `madlib_keras')
+    return madlib_keras.fit_transition(**globals())
+$$ LANGUAGE plpythonu
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `NO SQL', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.fit_merge(
+    state1          BYTEA,
+    state2          BYTEA
+) RETURNS BYTEA AS $$
+PythonFunctionBodyOnlyNoSchema(`deep_learning', `madlib_keras')
+    return madlib_keras.fit_merge(**globals())
+$$ LANGUAGE plpythonu
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `NO SQL', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.fit_final(
+    state BYTEA
+) RETURNS BYTEA AS $$
+PythonFunctionBodyOnlyNoSchema(`deep_learning', `madlib_keras')
+    return madlib_keras.fit_final(**globals())
+$$ LANGUAGE plpythonu
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `NO SQL', `');
+
+DROP AGGREGATE IF EXISTS MADLIB_SCHEMA.fit_step(
+    BYTEA,
+    BYTEA,
+    TEXT,
+    TEXT,
+    TEXT,
+    TEXT,
+    TEXT,
+    INTEGER,
+    INTEGER[],
+    INTEGER,
+    INTEGER,
+    INTEGER[],
+    BOOLEAN,
+    INTEGER[],
+    BYTEA,
+    BOOLEAN,
+    BYTEA);
+CREATE AGGREGATE MADLIB_SCHEMA.fit_step(
+    /* dep_var */                BYTEA,
+    /* ind_var */                BYTEA,
+    /* dep_var_shape */          INTEGER[],
+    /* ind_var_shape */          INTEGER[],
+    /* model_architecture */     TEXT,
+    /* compile_params */         TEXT,
+    /* fit_params */             TEXT,
+    /* dist_key */               INTEGER,
+    /* dist_key_mapping */       INTEGER[],
+    /* current_seg_id */         INTEGER,
+    /* segments_per_host */      INTEGER,
+    /* images_per_seg */         INTEGER[],
+    /* use_gpus  */              BOOLEAN,
+    /* segments_per_host  */     INTEGER[],
+    /* serialized_weights */     BYTEA,
+    /* is_final_iteration */     BOOLEAN,
+    /* custom_loss_cfunction */  BYTEA
+)(
+    STYPE=BYTEA,
+    SFUNC=MADLIB_SCHEMA.fit_transition,
+    m4_ifdef(`__POSTGRESQL__', `', `prefunc=MADLIB_SCHEMA.fit_merge,')
+    FINALFUNC=MADLIB_SCHEMA.fit_final
+);
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.madlib_keras_predict(
+    model_table             VARCHAR,
+    test_table              VARCHAR,
+    id_col                  VARCHAR,
+    independent_varname     VARCHAR,
+    output_table            VARCHAR,
+    pred_type               VARCHAR,
+    use_gpus                BOOLEAN,
+    mst_key                 INTEGER
+) RETURNS VOID AS $$
+    PythonFunctionBodyOnly(`deep_learning', `madlib_keras_predict')
+    from utilities.control import SetGUC
+    with AOControl(False):
+        with SetGUC("plan_cache_mode", "force_generic_plan"):
+            madlib_keras_predict.Predict(schema_madlib,
+                   model_table,
+                   test_table,
+                   id_col,
+                   independent_varname,
+                   output_table,
+                   pred_type,
+                   use_gpus,
+                   mst_key)
+$$ LANGUAGE plpythonu VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.madlib_keras_predict(
+    model_table             VARCHAR,
+    test_table              VARCHAR,
+    id_col                  VARCHAR,
+    independent_varname     VARCHAR,
+    output_table            VARCHAR,
+    pred_type               VARCHAR,
+    use_gpus                BOOLEAN
+) RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.madlib_keras_predict($1, $2, $3, $4, $5, $6, $7, NULL);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.madlib_keras_predict(
+    model_table             VARCHAR,
+    test_table              VARCHAR,
+    id_col                  VARCHAR,
+    independent_varname     VARCHAR,
+    output_table            VARCHAR,
+    pred_type               VARCHAR
+) RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.madlib_keras_predict($1, $2, $3, $4, $5, $6, FALSE, NULL);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.madlib_keras_predict(
+    model_table             VARCHAR,
+    test_table              VARCHAR,
+    id_col                  VARCHAR,
+    independent_varname     VARCHAR,
+    output_table            VARCHAR
+) RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.madlib_keras_predict($1, $2, $3, $4, $5, NULL, FALSE, NULL);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.internal_keras_predict(
+    independent_var    REAL[],
+    model_architecture TEXT,
+    model_weights      BYTEA,
+    is_response        BOOLEAN,
+    normalizing_const  DOUBLE PRECISION,
+    current_seg_id     INTEGER,
+    seg_ids            INTEGER[],
+    images_per_seg     INTEGER[],
+    use_gpus           BOOLEAN,
+    gpus_per_host      INTEGER,
+    segments_per_host  INTEGER
+) RETURNS DOUBLE PRECISION[] AS $$
+    PythonFunctionBodyOnlyNoSchema(`deep_learning', `madlib_keras_predict')
+    return madlib_keras_predict.internal_keras_predict(**globals())
+$$ LANGUAGE plpythonu VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA', `');
+
+-------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.madlib_keras_predict_byom(
+    model_arch_table        VARCHAR,
+    model_id                INTEGER,
+    test_table              VARCHAR,
+    id_col                  VARCHAR,
+    independent_varname     VARCHAR,
+    output_table            VARCHAR,
+    pred_type               VARCHAR,
+    use_gpus                BOOLEAN,
+    class_values            TEXT[],
+    normalizing_const       DOUBLE PRECISION
+) RETURNS VOID AS $$
+    PythonFunctionBodyOnly(`deep_learning', `madlib_keras_predict')
+    from utilities.control import SetGUC
+    with AOControl(False):
+        with SetGUC("plan_cache_mode", "force_generic_plan"):
+            madlib_keras_predict.PredictBYOM(**globals())
+$$ LANGUAGE plpythonu VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.madlib_keras_predict_byom(
+    model_arch_table        VARCHAR,
+    model_id                INTEGER,
+    test_table              VARCHAR,
+    id_col                  VARCHAR,
+    independent_varname     VARCHAR,
+    output_table            VARCHAR,
+    pred_type               VARCHAR,
+    use_gpus                BOOLEAN,
+    class_values            TEXT[]
+) RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.madlib_keras_predict_byom($1, $2, $3, $4, $5, $6, $7, $8, $9, NULL);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA', `');
+
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.madlib_keras_predict_byom(
+    model_arch_table        VARCHAR,
+    model_id                INTEGER,
+    test_table              VARCHAR,
+    id_col                  VARCHAR,
+    independent_varname     VARCHAR,
+    output_table            VARCHAR,
+    pred_type               VARCHAR,
+    use_gpus                BOOLEAN
+) RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.madlib_keras_predict_byom($1, $2, $3, $4, $5, $6, $7, $8, NULL, NULL);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA', `');
+
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.madlib_keras_predict_byom(
+    model_arch_table        VARCHAR,
+    model_id                INTEGER,
+    test_table              VARCHAR,
+    id_col                  VARCHAR,
+    independent_varname     VARCHAR,
+    output_table            VARCHAR,
+    pred_type               VARCHAR
+) RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.madlib_keras_predict_byom($1, $2, $3, $4, $5, $6, $7, NULL, NULL, NULL);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.madlib_keras_predict_byom(
+    model_arch_table        VARCHAR,
+    model_id                INTEGER,
+    test_table              VARCHAR,
+    id_col                  VARCHAR,
+    independent_varname     VARCHAR,
+    output_table            VARCHAR
+) RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.madlib_keras_predict_byom($1, $2, $3, $4, $5, $6, NULL, NULL, NULL, NULL);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA', `');
+
+-------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.madlib_keras_evaluate(
+    model_table             VARCHAR,
+    test_table              VARCHAR,
+    output_table            VARCHAR,
+    use_gpus                BOOLEAN,
+    mst_key                 INTEGER
+) RETURNS VOID AS $$
+    PythonFunctionBodyOnly(`deep_learning', `madlib_keras')
+    from utilities.control import SetGUC
+    with AOControl(False):
+        with SetGUC("plan_cache_mode", "force_generic_plan"):
+            madlib_keras.evaluate(**globals())
+$$ LANGUAGE plpythonu VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.madlib_keras_evaluate(
+    model_table             VARCHAR,
+    test_table              VARCHAR,
+    output_table            VARCHAR,
+    use_gpus                BOOLEAN
+) RETURNS VOID AS $$
+  SELECT MADLIB_SCHEMA.madlib_keras_evaluate($1, $2, $3, $4, NULL);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.madlib_keras_evaluate(
+    model_table             VARCHAR,
+    test_table              VARCHAR,
+    output_table            VARCHAR
+) RETURNS VOID AS $$
+  SELECT MADLIB_SCHEMA.madlib_keras_evaluate($1, $2, $3, NULL, NULL);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `MODIFIES SQL DATA');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.internal_keras_eval_transition(
+    state                              REAL[3],
+    dependent_var                      BYTEA,
+    independent_var                    BYTEA,
+    dependent_var_shape                INTEGER[],
+    independent_var_shape              INTEGER[],
+    model_architecture                 TEXT,
+    serialized_weights                 BYTEA,
+    compile_params                     TEXT,
+    dist_key                           INTEGER,
+    dist_key_mapping                   INTEGER[],
+    current_seg_id                     INTEGER,
+    segments_per_host                  INTEGER,
+    images_per_seg                     INTEGER[],
+    use_gpus                           BOOLEAN,
+    accessible_gpus_for_seg                       INTEGER[],
+    is_final_iteration                 BOOLEAN,
+    custom_function_map                BYTEA
+) RETURNS REAL[3] AS $$
+PythonFunctionBodyOnlyNoSchema(`deep_learning', `madlib_keras')
+    return madlib_keras.internal_keras_eval_transition(**globals())
+$$ LANGUAGE plpythonu
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `NO SQL', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.internal_keras_eval_merge(
+    state1          REAL[3],
+    state2          REAL[3]
+) RETURNS REAL[3] AS $$
+PythonFunctionBodyOnlyNoSchema(`deep_learning', `madlib_keras')
+    return madlib_keras.internal_keras_eval_merge(**globals())
+$$ LANGUAGE plpythonu
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `NO SQL', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.internal_keras_eval_final(
+    state REAL[3]
+) RETURNS REAL[2] AS $$
+PythonFunctionBodyOnlyNoSchema(`deep_learning', `madlib_keras')
+    return madlib_keras.internal_keras_eval_final(**globals())
+$$ LANGUAGE plpythonu
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `NO SQL', `');
+
+DROP AGGREGATE IF EXISTS MADLIB_SCHEMA.internal_keras_evaluate(
+                                       BYTEA,
+                                       BYTEA,
+                                       INTEGER[],
+                                       INTEGER[],
+                                       TEXT,
+                                       BYTEA,
+                                       TEXT,
+                                       INTEGER,
+                                       INTEGER[],
+                                       INTEGER,
+                                       INTEGER,
+                                       INTEGER[],
+                                       BOOLEAN,
+                                       INTEGER[],
+                                       BOOLEAN,
+                                       BYTEA);
+
+CREATE AGGREGATE MADLIB_SCHEMA.internal_keras_evaluate(
+    /* dependent_var */             BYTEA,
+    /* independent_var */           BYTEA,
+    /* dependent_var_shape */       INTEGER[],
+    /* independent_var_shape */     INTEGER[],
+    /* model_architecture */        TEXT,
+    /* model_weights */             BYTEA,
+    /* compile_params */            TEXT,
+    /* dist_key */                  INTEGER,
+    /* dist_key_mapping */          INTEGER[],
+    /* current_seg_id */            INTEGER,
+    /* segments_per_host */         INTEGER,
+    /* images_per_seg*/             INTEGER[],
+    /* use_gpus */                  BOOLEAN,
+    /* accessible_gpus_for_seg */              INTEGER[],
+    /* is_final_iteration */        BOOLEAN,
+    /* custom_function_map */       BYTEA
+)(
+    STYPE=REAL[3],
+    INITCOND='{0,0,0}',
+    SFUNC=MADLIB_SCHEMA.internal_keras_eval_transition,
+    m4_ifdef(`__POSTGRESQL__', `', `prefunc=MADLIB_SCHEMA.internal_keras_eval_merge,')
+    FINALFUNC=MADLIB_SCHEMA.internal_keras_eval_final
+);
+
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.madlib_keras_fit(
+     message VARCHAR
+) RETURNS VARCHAR AS $$
+    PythonFunctionBodyOnly(`deep_learning', `madlib_keras')
+    with AOControl(False):
+        return madlib_keras.fit_help(**globals())
+$$ LANGUAGE plpythonu IMMUTABLE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `CONTAINS SQL', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.madlib_keras_fit()
+RETURNS VARCHAR AS $$
+    SELECT MADLIB_SCHEMA.madlib_keras_fit('');
+$$ LANGUAGE sql IMMUTABLE
+m4_ifdef(`\_\_HAS_FUNCTION_PROPERTIES\_\_', `CONTAINS SQL', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.madlib_keras_evaluate(
+     message VARCHAR
+) RETURNS VARCHAR AS $$
+    PythonFunctionBodyOnly(`deep_learning', `madlib_keras')
+    with AOControl(False):
+        return madlib_keras.evaluate_help(**globals())
+$$ LANGUAGE plpythonu IMMUTABLE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `CONTAINS SQL', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.madlib_keras_evaluate()
+RETURNS VARCHAR AS $$
+    SELECT MADLIB_SCHEMA.madlib_keras_evaluate('');
+$$ LANGUAGE sql IMMUTABLE
+m4_ifdef(`\_\_HAS_FUNCTION_PROPERTIES\_\_', `CONTAINS SQL', `');
+
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.madlib_keras_predict(
+     message VARCHAR
+) RETURNS VARCHAR AS $$
+    PythonFunctionBodyOnly(`deep_learning', `madlib_keras_predict')
+    with AOControl(False):
+        return madlib_keras_predict.predict_help(**globals())
+$$ LANGUAGE plpythonu IMMUTABLE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `CONTAINS SQL', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.madlib_keras_predict()
+RETURNS VARCHAR AS $$
+    SELECT MADLIB_SCHEMA.madlib_keras_predict('');
+$$ LANGUAGE sql IMMUTABLE
+m4_ifdef(`\_\_HAS_FUNCTION_PROPERTIES\_\_', `CONTAINS SQL', `');
+

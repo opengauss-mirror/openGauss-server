@@ -43,6 +43,10 @@
 #include "pgxc/pgxc.h"
 #include "parser/parsetree.h"
 
+#define IS_JOIN_TYPE_PARALLEL_SAFE(jointype) ((jointype) != JOIN_UNIQUE_OUTER && (jointype) != JOIN_FULL && \
+    (jointype) != JOIN_RIGHT && (jointype) != JOIN_RIGHT_SEMI && (jointype) != JOIN_RIGHT_ANTI && \
+    (jointype) != JOIN_RIGHT_ANTI_FULL)
+
 static void try_partial_mergejoin_path(PlannerInfo *root, RelOptInfo *joinrel, JoinType jointype,
     SpecialJoinInfo *sjinfo, Path *outer_path, Path *inner_path, List *restrict_clauses, List *pathkeys,
     List *mergeclauses, List *outersortkeys, List *innersortkeys);
@@ -825,7 +829,7 @@ static void try_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType j
                     ? 1
                     : u_sess->opt_cxt.query_dop;
     initial_cost_hashjoin(
-        root, &workspace, jointype, hashclauses, outer_path, inner_path, sjinfo, semifactors, max_dop);
+        root, &workspace, jointype, hashclauses, outer_path, inner_path, sjinfo, semifactors, max_dop, false);
 
     if (add_path_precheck(joinrel, workspace.startup_cost, workspace.total_cost, NIL, required_outer) ||
         add_path_hintcheck(root->parse->hintState, joinrel->relids, outer_path, inner_path, HINT_KEYWORD_HASHJOIN)) {
@@ -899,6 +903,7 @@ static void try_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType j
                     semifactors,
                     outerpath,
                     innerpath,
+                    false, /* parallel_hash */
                     restrict_clauses,
                     required_outer,
                     hashclauses);
@@ -914,6 +919,7 @@ static void try_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType j
                         semifactors,
                         outer_path,
                         inner_path,
+                        false, /* parallel_hash */
                         restrict_clauses,
                         required_outer,
                         hashclauses));
@@ -929,9 +935,13 @@ static void try_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType j
  * try_partial_hashjoin_path
  *	  Consider a partial hashjoin join path; if it appears useful, push it into
  *	  the joinrel's partial_pathlist via add_partial_path().
+ *	  The outer side is partial.  If parallel_hash is true, then the inner path
+ *	  must be partial and will be run in parallel to create one or more shared
+ *	  hash tables; otherwise the inner path must be complete and a copy of it
+ *	  is run in every process to create separate identical private hash tables.
  */
 static void try_partial_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, Path* outer_path, Path* inner_path,
-    List* hashclauses, JoinType jointype, JoinPathExtraData* extra)
+    List* hashclauses, JoinType jointype, JoinPathExtraData* extra, bool parallel_hash)
 {
     JoinCostWorkspace workspace;
 
@@ -953,8 +963,16 @@ static void try_partial_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, Pa
      * Before creating a path, get a quick lower bound on what it is likely
      * to cost.  Bail out right away if it looks terrible.
      */
-    initial_cost_hashjoin(
-        root, &workspace, jointype, hashclauses, outer_path, inner_path, extra->sjinfo, &extra->semifactors, 1);
+    initial_cost_hashjoin(root,
+        &workspace,
+        jointype,
+        hashclauses,
+        outer_path,
+        inner_path,
+        extra->sjinfo,
+        &extra->semifactors,
+        1,
+        parallel_hash);
     if (!add_partial_path_precheck(joinrel, workspace.total_cost, NIL)) {
         return;
     }
@@ -969,6 +987,7 @@ static void try_partial_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, Pa
             &extra->semifactors,
             outer_path,
             inner_path,
+            parallel_hash,
             extra->restrictlist,
             NULL,
             hashclauses));
@@ -1083,8 +1102,8 @@ static void sort_inner_and_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
              * JOIN_RIGHT, because they can produce false null extended rows.  Also,
              * the resulting path must not be parameterized.
              */
-            if (joinrel->consider_parallel && save_jointype != JOIN_UNIQUE_OUTER && save_jointype != JOIN_FULL &&
-                save_jointype != JOIN_RIGHT && outerrel->partial_pathlist != NIL) {
+            if (joinrel->consider_parallel && IS_JOIN_TYPE_PARALLEL_SAFE(save_jointype)
+                && outerrel->partial_pathlist != NIL) {
                 cheapest_partial_outer = (Path *)linitial(outerrel->partial_pathlist);
 
                 if (inner_path->parallel_safe) {
@@ -1431,8 +1450,8 @@ static void match_unsorted_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
             * parameterized. Similarly, we can't handle JOIN_FULL and JOIN_RIGHT,
             * because they can produce false null extended rows.
             */
-            if (joinrel->consider_parallel && save_jointype != JOIN_UNIQUE_OUTER && save_jointype != JOIN_FULL &&
-                save_jointype != JOIN_RIGHT && outerrel->partial_pathlist != NIL) {
+            if (joinrel->consider_parallel && IS_JOIN_TYPE_PARALLEL_SAFE(save_jointype) &&
+                outerrel->partial_pathlist != NIL) {
                 if (nestjoinOK) {
                     consider_parallel_nestloop(root, joinrel, outerrel, innerrel, save_jointype, extra);
                 }
@@ -1510,7 +1529,12 @@ static void consider_parallel_mergejoin(PlannerInfo *root, RelOptInfo *joinrel, 
 static void consider_parallel_nestloop(PlannerInfo* root, RelOptInfo* joinrel, RelOptInfo* outerrel,
     RelOptInfo* innerrel, JoinType jointype, JoinPathExtraData* extra)
 {
+    JoinType saveJointype = jointype;
     ListCell* lc1 = NULL;
+
+    if (jointype == JOIN_UNIQUE_INNER) {
+        jointype = JOIN_INNER;
+    }
 
     foreach (lc1, outerrel->partial_pathlist) {
         Path* outerpath = (Path*)lfirst(lc1);
@@ -1534,12 +1558,13 @@ static void consider_parallel_nestloop(PlannerInfo* root, RelOptInfo* joinrel, R
                 continue;
 
             /*
-             * Like match_unsorted_outer, we only consider a single nestloop
-             * path when the jointype is JOIN_UNIQUE_INNER.  But we have to scan
-             * cheapest_parameterized_paths to find the one we want to consider,
-             * because cheapest_total_path might not be parallel-safe.
+             * If we're doing JOIN_UNIQUE_INNER, we can only use the inner's
+             * cheapest_total_path, and we have to unique-ify it.  (We might
+             * be able to relax this to allow other safe, unparameterized
+             * inner paths, but right now create_unique_path is not on board
+             * with that.)
              */
-            if (jointype == JOIN_UNIQUE_INNER) {
+            if (saveJointype == JOIN_UNIQUE_INNER) {
                 if (!bms_is_empty(PATH_REQ_OUTER(innerpath)))
                     continue;
                 innerpath = (Path*)create_unique_path(root, innerrel, innerpath, extra->sjinfo);
@@ -1775,38 +1800,59 @@ static void hash_inner_and_outer(PlannerInfo* root, RelOptInfo* joinrel, RelOptI
                  * because the outer path will be partial, and therefore we won't be
                  * able to properly guarantee uniqueness.  Also, the resulting path
                  * must not be parameterized.
+                 * We would be able to support JOIN_FULL and JOIN_RIGHT for Parallelgs
+                 * Hash, since in that case we're back to a single hash table with a
+                 * single set of match bits for each batch, but that will require
+                 * figuring out a deadlock-free way to wait for the probe to finish.
                  */
-                if (joinrel->consider_parallel && jointype != JOIN_UNIQUE_OUTER && jointype != JOIN_FULL &&
-                    jointype != JOIN_RIGHT && outerrel->partial_pathlist != NIL) {
-                    Path* cheapest_partial_outer;
+                if (joinrel->consider_parallel && IS_JOIN_TYPE_PARALLEL_SAFE(save_jointype) &&
+                    outerrel->partial_pathlist != NIL) {
+                    Path* cheapest_partial_outer = NULL;
+                    Path* cheapest_partial_inner = NULL;
                     Path* cheapest_safe_inner = NULL;
 
                     cheapest_partial_outer = (Path*)linitial(outerrel->partial_pathlist);
 
                     /*
+                     * Can we use a partial inner plan too, so that we can build a
+                     * shared hash table in parallel?  We can't handle
+                     * JOIN_UNIQUE_INNER because we can't guarantee uniqueness.
+                     */
+                    if (innerrel->partial_pathlist != NIL && save_jointype != JOIN_UNIQUE_INNER &&
+                        u_sess->attr.attr_sql.enable_parallel_hash) {
+                        cheapest_partial_inner = (Path*)linitial(innerrel->partial_pathlist);
+                        try_partial_hashjoin_path(root,
+                            joinrel,
+                            cheapest_partial_outer,
+                            cheapest_partial_inner,
+                            hashclauses,
+                            jointype,
+                            extra,
+                            true /* parallel_hash */);
+                    }
+
+                    /*
                      * Normally, given that the joinrel is parallel-safe, the cheapest
                      * total inner path will also be parallel-safe, but if not, we'll
-                     * have to search cheapest_parameterized_paths for the cheapest
-                     * unparameterized inner path.
+                     * have to search for the cheapest safe, unparameterized inner
+                     * path.  If doing JOIN_UNIQUE_INNER, we can't use any alternative
+                     * inner path.
                      */
                     if (cheapest_total_inner->parallel_safe) {
                         cheapest_safe_inner = cheapest_total_inner;
-                    } else {
-                        ListCell* lc;
-
-                        foreach (lc, innerrel->cheapest_parameterized_paths) {
-                            Path* innerpath = (Path*)lfirst(lc);
-
-                            if (innerpath->parallel_safe && bms_is_empty(PATH_REQ_OUTER(innerpath))) {
-                                cheapest_safe_inner = innerpath;
-                                break;
-                            }
-                        }
+                    } else if (save_jointype != JOIN_UNIQUE_INNER) {
+                        cheapest_safe_inner = get_cheapest_parallel_safe_total_inner(innerrel->pathlist);
                     }
 
                     if (cheapest_safe_inner != NULL) {
-                        try_partial_hashjoin_path(
-                            root, joinrel, cheapest_partial_outer, cheapest_safe_inner, hashclauses, jointype, extra);
+                        try_partial_hashjoin_path(root,
+                            joinrel,
+                            cheapest_partial_outer,
+                            cheapest_safe_inner,
+                            hashclauses,
+                            jointype,
+                            extra,
+                            false /* parallel_hash */);
                     }
                 }
             }

@@ -2838,6 +2838,7 @@ static BitmapOr* _readBitmapOr(BitmapOr* local_node)
     READ_TEMP_LOCALS();
 
     _readPlan(&local_node->plan);
+    READ_BOOL_FIELD(isshared);
     READ_NODE_FIELD(bitmapplans);
 
     READ_DONE();
@@ -3059,6 +3060,7 @@ static BitmapIndexScan* _readBitmapIndexScan(BitmapIndexScan* local_node)
     _readScan(&local_node->scan);
 
     READ_OID_FIELD(indexid);
+    READ_BOOL_FIELD(isshared);
     READ_NODE_FIELD(indexqual);
     READ_NODE_FIELD(indexqualorig);
 #ifdef STREAMPLAN
@@ -3574,6 +3576,7 @@ static Hash* _readHash(Hash* local_node)
 
     READ_INT_FIELD(skewColumn);
     READ_BOOL_FIELD(skewInherit);
+    READ_FLOAT_FIELD(rows_total);
     READ_OID_FIELD(skewColType);
     READ_INT_FIELD(skewColTypmod);
 
@@ -4870,6 +4873,7 @@ static Gather* _readGather(void)
     _readPlan(&local_node->plan);
 
     READ_INT_FIELD(num_workers);
+    READ_INT_FIELD(rescan_param);
     READ_BOOL_FIELD(single_copy);
     READ_DONE();
 }

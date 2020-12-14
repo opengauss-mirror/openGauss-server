@@ -137,10 +137,7 @@ public:
      * @brief Retrieves the currently iterated primary sentinel.
      * @return The primary sentinel.
      */
-    virtual Sentinel* GetPrimarySentinel() const
-    {
-        return nullptr;
-    }
+    virtual Sentinel* GetPrimarySentinel() const = 0;
 
 protected:
     /**

@@ -581,9 +581,11 @@ Row* Table::RemoveKeyFromIndex(Row* row, Sentinel* sentinel, uint64_t tid, GcMan
         MOT_ASSERT(currSentinel->GetCounter() == 0);
 #endif
         currSentinel = ix->IndexRemove(&key, tid);
+        MOT_ASSERT(currSentinel == sentinel);
         if (likely(gc != nullptr)) {
             if (ix->GetIndexOrder() == IndexOrder::INDEX_ORDER_PRIMARY) {
                 OutputRow = currSentinel->GetData();
+                MOT_ASSERT(OutputRow != nullptr);
                 gc->GcRecordObject(ix->GetIndexId(), currSentinel, nullptr, Index::SentinelDtor, SENTINEL_SIZE(ix));
                 gc->GcRecordObject(ix->GetIndexId(), OutputRow, nullptr, Row::RowDtor, ROW_SIZE_FROM_POOL(this));
             } else {
@@ -666,7 +668,7 @@ RC Table::AddColumn(const char* colName, uint64_t size, MOT_CATALOG_FIELD_TYPES 
     decltype(this->m_tupleSize) old_size = m_tupleSize;
     decltype(this->m_tupleSize) new_size = old_size + size;
     if (new_size < old_size)
-        return RC_COL_SIZE_INVLALID;
+        return RC_COL_SIZE_INVALID;
 
     m_columns[m_fieldCnt] = Column::AllocColumn(type);
     if (m_columns[m_fieldCnt] == nullptr) {
@@ -1108,7 +1110,10 @@ void Table::Deserialize(const char* in)
     CommonColumnMeta col;
     for (uint32_t i = 0; i < saveFieldCount; i++) {
         dataIn = DesrializeMeta(dataIn, col);
-        AddColumn(col.m_name, col.m_size, col.m_type, col.m_isNotNull);
+        if (AddColumn(col.m_name, col.m_size, col.m_type, col.m_isNotNull) != RC_OK) {
+            MOT_LOG_ERROR("Table::deserialize - failed to add column %u", i);
+            return;
+        }
     }
 
     if (!InitRowPool()) {

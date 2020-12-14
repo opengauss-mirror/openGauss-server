@@ -1,0 +1,99 @@
+/*
+* Test case of facebook-prophet
+*/
+
+m4_include(`SQLCommon.m4')
+
+select MADLIB_SCHEMA.prophet_fit();
+select MADLIB_SCHEMA.prophet_fit('usage');
+
+DROP TABLE IF EXISTS ts_data2;
+CREATE TABLE ts_data2 (date date, value float);
+
+
+INSERT INTO ts_data2 (date, value) VALUES ('1949-01-01', 112);INSERT INTO ts_data2 (date, value) VALUES ('1949-02-01', 118);
+INSERT INTO ts_data2 (date, value) VALUES ('1949-03-01', 132);INSERT INTO ts_data2 (date, value) VALUES ('1949-04-01', 129);
+INSERT INTO ts_data2 (date, value) VALUES ('1949-05-01', 121);INSERT INTO ts_data2 (date, value) VALUES ('1949-06-01', 135);
+INSERT INTO ts_data2 (date, value) VALUES ('1949-07-01', 148);INSERT INTO ts_data2 (date, value) VALUES ('1949-08-01', 148);
+INSERT INTO ts_data2 (date, value) VALUES ('1949-09-01', 136);INSERT INTO ts_data2 (date, value) VALUES ('1949-10-01', 119);
+INSERT INTO ts_data2 (date, value) VALUES ('1949-11-01', 104);INSERT INTO ts_data2 (date, value) VALUES ('1949-12-01', 118);
+INSERT INTO ts_data2 (date, value) VALUES ('1950-01-01', 115);INSERT INTO ts_data2 (date, value) VALUES ('1950-02-01', 126);
+INSERT INTO ts_data2 (date, value) VALUES ('1950-03-01', 141);INSERT INTO ts_data2 (date, value) VALUES ('1950-04-01', 135);
+INSERT INTO ts_data2 (date, value) VALUES ('1950-05-01', 125);INSERT INTO ts_data2 (date, value) VALUES ('1950-06-01', 149);
+INSERT INTO ts_data2 (date, value) VALUES ('1950-07-01', 170);INSERT INTO ts_data2 (date, value) VALUES ('1950-08-01', 170);
+INSERT INTO ts_data2 (date, value) VALUES ('1950-09-01', 158);INSERT INTO ts_data2 (date, value) VALUES ('1950-10-01', 133);
+INSERT INTO ts_data2 (date, value) VALUES ('1950-11-01', 114);INSERT INTO ts_data2 (date, value) VALUES ('1950-12-01', 140);
+INSERT INTO ts_data2 (date, value) VALUES ('1951-01-01', 145);INSERT INTO ts_data2 (date, value) VALUES ('1951-02-01', 150);
+INSERT INTO ts_data2 (date, value) VALUES ('1951-03-01', 178);INSERT INTO ts_data2 (date, value) VALUES ('1951-04-01', 163);
+INSERT INTO ts_data2 (date, value) VALUES ('1951-05-01', 172);INSERT INTO ts_data2 (date, value) VALUES ('1951-06-01', 178);
+INSERT INTO ts_data2 (date, value) VALUES ('1951-07-01', 199);INSERT INTO ts_data2 (date, value) VALUES ('1951-08-01', 199);
+INSERT INTO ts_data2 (date, value) VALUES ('1951-09-01', 184);INSERT INTO ts_data2 (date, value) VALUES ('1951-10-01', 162);
+INSERT INTO ts_data2 (date, value) VALUES ('1951-11-01', 146);INSERT INTO ts_data2 (date, value) VALUES ('1951-12-01', 166);
+INSERT INTO ts_data2 (date, value) VALUES ('1952-01-01', 171);INSERT INTO ts_data2 (date, value) VALUES ('1952-02-01', 180);
+INSERT INTO ts_data2 (date, value) VALUES ('1952-03-01', 193);INSERT INTO ts_data2 (date, value) VALUES ('1952-04-01', 181);
+INSERT INTO ts_data2 (date, value) VALUES ('1952-05-01', 183);INSERT INTO ts_data2 (date, value) VALUES ('1952-06-01', 218);
+INSERT INTO ts_data2 (date, value) VALUES ('1952-07-01', 230);INSERT INTO ts_data2 (date, value) VALUES ('1952-08-01', 242);
+INSERT INTO ts_data2 (date, value) VALUES ('1952-09-01', 209);INSERT INTO ts_data2 (date, value) VALUES ('1952-10-01', 191);
+INSERT INTO ts_data2 (date, value) VALUES ('1952-11-01', 172);INSERT INTO ts_data2 (date, value) VALUES ('1952-12-01', 194);
+INSERT INTO ts_data2 (date, value) VALUES ('1953-01-01', 196);INSERT INTO ts_data2 (date, value) VALUES ('1953-02-01', 196);
+INSERT INTO ts_data2 (date, value) VALUES ('1953-03-01', 236);INSERT INTO ts_data2 (date, value) VALUES ('1953-04-01', 235);
+INSERT INTO ts_data2 (date, value) VALUES ('1953-05-01', 229);INSERT INTO ts_data2 (date, value) VALUES ('1953-06-01', 243);
+INSERT INTO ts_data2 (date, value) VALUES ('1953-07-01', 264);INSERT INTO ts_data2 (date, value) VALUES ('1953-08-01', 272);
+INSERT INTO ts_data2 (date, value) VALUES ('1953-09-01', 237);INSERT INTO ts_data2 (date, value) VALUES ('1953-10-01', 211);
+INSERT INTO ts_data2 (date, value) VALUES ('1953-11-01', 180);INSERT INTO ts_data2 (date, value) VALUES ('1953-12-01', 201);
+INSERT INTO ts_data2 (date, value) VALUES ('1954-01-01', 204);INSERT INTO ts_data2 (date, value) VALUES ('1954-02-01', 188);
+INSERT INTO ts_data2 (date, value) VALUES ('1954-03-01', 235);INSERT INTO ts_data2 (date, value) VALUES ('1954-04-01', 227);
+INSERT INTO ts_data2 (date, value) VALUES ('1954-05-01', 234);INSERT INTO ts_data2 (date, value) VALUES ('1954-06-01', 264);
+INSERT INTO ts_data2 (date, value) VALUES ('1954-07-01', 302);INSERT INTO ts_data2 (date, value) VALUES ('1954-08-01', 293);
+INSERT INTO ts_data2 (date, value) VALUES ('1954-09-01', 259);INSERT INTO ts_data2 (date, value) VALUES ('1954-10-01', 229);
+INSERT INTO ts_data2 (date, value) VALUES ('1954-11-01', 203);INSERT INTO ts_data2 (date, value) VALUES ('1954-12-01', 229);
+INSERT INTO ts_data2 (date, value) VALUES ('1955-01-01', 242);INSERT INTO ts_data2 (date, value) VALUES ('1955-02-01', 233);
+INSERT INTO ts_data2 (date, value) VALUES ('1955-03-01', 267);INSERT INTO ts_data2 (date, value) VALUES ('1955-04-01', 269);
+INSERT INTO ts_data2 (date, value) VALUES ('1955-05-01', 270);INSERT INTO ts_data2 (date, value) VALUES ('1955-06-01', 315);
+INSERT INTO ts_data2 (date, value) VALUES ('1955-07-01', 364);INSERT INTO ts_data2 (date, value) VALUES ('1955-08-01', 347);
+INSERT INTO ts_data2 (date, value) VALUES ('1955-09-01', 312);INSERT INTO ts_data2 (date, value) VALUES ('1955-10-01', 274);
+INSERT INTO ts_data2 (date, value) VALUES ('1955-11-01', 237);INSERT INTO ts_data2 (date, value) VALUES ('1955-12-01', 278);
+INSERT INTO ts_data2 (date, value) VALUES ('1956-01-01', 284);INSERT INTO ts_data2 (date, value) VALUES ('1956-02-01', 277);
+INSERT INTO ts_data2 (date, value) VALUES ('1956-03-01', 317);INSERT INTO ts_data2 (date, value) VALUES ('1956-04-01', 313);
+INSERT INTO ts_data2 (date, value) VALUES ('1956-05-01', 318);INSERT INTO ts_data2 (date, value) VALUES ('1956-06-01', 374);
+INSERT INTO ts_data2 (date, value) VALUES ('1956-07-01', 413);INSERT INTO ts_data2 (date, value) VALUES ('1956-08-01', 405);
+INSERT INTO ts_data2 (date, value) VALUES ('1956-09-01', 355);INSERT INTO ts_data2 (date, value) VALUES ('1956-10-01', 306);
+INSERT INTO ts_data2 (date, value) VALUES ('1956-11-01', 271);INSERT INTO ts_data2 (date, value) VALUES ('1956-12-01', 306);
+INSERT INTO ts_data2 (date, value) VALUES ('1957-01-01', 315);INSERT INTO ts_data2 (date, value) VALUES ('1957-02-01', 301);
+INSERT INTO ts_data2 (date, value) VALUES ('1957-03-01', 356);INSERT INTO ts_data2 (date, value) VALUES ('1957-04-01', 348);
+INSERT INTO ts_data2 (date, value) VALUES ('1957-05-01', 355);INSERT INTO ts_data2 (date, value) VALUES ('1957-06-01', 422);
+INSERT INTO ts_data2 (date, value) VALUES ('1957-07-01', 465);INSERT INTO ts_data2 (date, value) VALUES ('1957-08-01', 467);
+INSERT INTO ts_data2 (date, value) VALUES ('1957-09-01', 404);INSERT INTO ts_data2 (date, value) VALUES ('1957-10-01', 347);
+INSERT INTO ts_data2 (date, value) VALUES ('1957-11-01', 305);INSERT INTO ts_data2 (date, value) VALUES ('1957-12-01', 336);
+INSERT INTO ts_data2 (date, value) VALUES ('1958-01-01', 340);INSERT INTO ts_data2 (date, value) VALUES ('1958-02-01', 318);
+INSERT INTO ts_data2 (date, value) VALUES ('1958-03-01', 362);INSERT INTO ts_data2 (date, value) VALUES ('1958-04-01', 348);
+INSERT INTO ts_data2 (date, value) VALUES ('1958-05-01', 363);INSERT INTO ts_data2 (date, value) VALUES ('1958-06-01', 435);
+INSERT INTO ts_data2 (date, value) VALUES ('1958-07-01', 491);INSERT INTO ts_data2 (date, value) VALUES ('1958-08-01', 505);
+INSERT INTO ts_data2 (date, value) VALUES ('1958-09-01', 404);INSERT INTO ts_data2 (date, value) VALUES ('1958-10-01', 359);
+INSERT INTO ts_data2 (date, value) VALUES ('1958-11-01', 310);INSERT INTO ts_data2 (date, value) VALUES ('1958-12-01', 337);
+INSERT INTO ts_data2 (date, value) VALUES ('1959-01-01', 360);INSERT INTO ts_data2 (date, value) VALUES ('1959-02-01', 342);
+INSERT INTO ts_data2 (date, value) VALUES ('1959-03-01', 406);INSERT INTO ts_data2 (date, value) VALUES ('1959-04-01', 396);
+INSERT INTO ts_data2 (date, value) VALUES ('1959-05-01', 420);INSERT INTO ts_data2 (date, value) VALUES ('1959-06-01', 472);
+INSERT INTO ts_data2 (date, value) VALUES ('1959-07-01', 548);INSERT INTO ts_data2 (date, value) VALUES ('1959-08-01', 559);
+INSERT INTO ts_data2 (date, value) VALUES ('1959-09-01', 463);INSERT INTO ts_data2 (date, value) VALUES ('1959-10-01', 407);
+INSERT INTO ts_data2 (date, value) VALUES ('1959-11-01', 362);INSERT INTO ts_data2 (date, value) VALUES ('1959-12-01', 405);
+INSERT INTO ts_data2 (date, value) VALUES ('1960-01-01', 417);INSERT INTO ts_data2 (date, value) VALUES ('1960-02-01', 391);
+INSERT INTO ts_data2 (date, value) VALUES ('1960-03-01', 419);INSERT INTO ts_data2 (date, value) VALUES ('1960-04-01', 461);
+INSERT INTO ts_data2 (date, value) VALUES ('1960-05-01', 472);INSERT INTO ts_data2 (date, value) VALUES ('1960-06-01', 535);
+INSERT INTO ts_data2 (date, value) VALUES ('1960-07-01', 622);INSERT INTO ts_data2 (date, value) VALUES ('1960-08-01', 606);
+INSERT INTO ts_data2 (date, value) VALUES ('1960-09-01', 508);INSERT INTO ts_data2 (date, value) VALUES ('1960-10-01', 461);
+INSERT INTO ts_data2 (date, value) VALUES ('1960-11-01', 390);INSERT INTO ts_data2 (date, value) VALUES ('1960-12-01', 432);
+
+
+ALTER TABLE ts_data2 ADD COLUMN cap FLOAT;
+ALTER TABLE ts_data2 ADD COLUMN floor FLOAT;
+UPDATE ts_data2 SET cap=600;
+UPDATE ts_data2 SET floor=0;
+
+DROP TABLE IF EXISTS prophet_model2;
+SELECT MADLIB_SCHEMA.prophet_fit('ts_data2', 'prophet_model2', $${'ds':'date', 'y': 'value', 'cap': 'cap', 'floor': 'floor'}$$, $${'growth': 'logistic'}$$, True);
+SELECT ASSERT(count(*) = 1, 'prophet: prophet parameter counts error') FROM prophet_model2;
+
+DROP TABLE IF EXISTS prophet_output;
+SELECT MADLIB_SCHEMA.prophet_predict('prophet_model2', 'prophet_output2', 10, '1D', 600, 0, False);
+

@@ -21,9 +21,11 @@
 #include "executor/instrument.h"
 #include "nodes/params.h"
 #include "nodes/plannodes.h"
+#include "nodes/tidbitmap.h"
 #include "storage/pagecompress.h"
 #include "utils/bloom_filter.h"
 #include "utils/reltrigger.h"
+#include "utils/sharedtuplestore.h"
 #include "utils/sortsupport.h"
 #include "utils/tuplesort.h"
 #include "utils/tuplestore.h"
@@ -700,6 +702,8 @@ typedef HASH_SEQ_STATUS TupleHashIterator;
  * ----------------
  */
 typedef struct ExprState ExprState;
+
+struct ParallelHashJoinState;
 
 typedef Datum (*ExprStateEvalFunc)(ExprState* expression, ExprContext* econtext, bool* isNull, ExprDoneCond* isDone);
 typedef ScalarVector* (*VectorExprFun)(
@@ -1650,6 +1654,8 @@ typedef struct IndexScanState {
  *		ScanDesc		   index scan descriptor
  *		VMBuffer		   buffer in use for visibility map testing, if any
  *		HeapFetches		   number of tuples we were forced to fetch from heap
+
+ *		ioss_PscanLen	   Size of parallel index-only scan descriptor
  * ----------------
  */
 typedef struct IndexOnlyScanState {
@@ -1670,6 +1676,8 @@ typedef struct IndexOnlyScanState {
     List* ioss_IndexPartitionList;
     LOCKMODE lockMode;
     Relation ioss_CurrentIndexPartition;
+
+    Size ioss_PscanLen;
 } IndexOnlyScanState;
 
 /* ----------------
@@ -1707,15 +1715,65 @@ typedef struct BitmapIndexScanState {
 } BitmapIndexScanState;
 
 /* ----------------
- *	 BitmapHeapScanState information
+ * 	 SharedBitmapState information
  *
- *		bitmapqualorig	   execution state for bitmapqualorig expressions
- *		tbm				   bitmap obtained from child index scan(s)
- *		tbmiterator		   iterator for scanning current pages
- *		tbmres			   current-page data
- *		prefetch_iterator  iterator for prefetching ahead of current page
- *		prefetch_pages	   # pages prefetch iterator is ahead of current
- *		prefetch_target    target prefetch distance
+ * 		BM_INITIAL		TIDBitmap creation is not yet started, so first worker
+ * 						to see this state will set the state to BM_INPROGRESS
+ * 						and that process will be responsible for creating
+ * 						TIDBitmap.
+ * 		BM_INPROGRESS	TIDBitmap creation is in progress; workers need to
+ * 						sleep until it's finished.
+ * 		BM_FINISHED		TIDBitmap creation is done, so now all workers can
+ * 						proceed to iterate over TIDBitmap.
+ * ----------------
+ */
+typedef enum {
+    BM_INITIAL,
+    BM_INPROGRESS,
+    BM_FINISHED
+} SharedBitmapState;
+
+/* ----------------
+ * 	 ParallelBitmapHeapState information
+ * 		tbmiterator				iterator for scanning current pages
+ * 		prefetch_iterator		iterator for prefetching ahead of current page
+ * 		mutex					mutual exclusion for the prefetching variable
+ * 								and state
+ * 		prefetch_pages			# pages prefetch iterator is ahead of current
+ * 		prefetch_target			current target prefetch distance
+ * 		state					current state of the TIDBitmap
+ * 		cv						conditional wait variable
+ * 		phs_snapshot_data		snapshot data shared to workers
+ * ----------------
+ */
+typedef struct ParallelBitmapHeapState {
+    TBMSharedIteratorState *tbmiterator;
+    TBMSharedIteratorState *prefetch_iterator;
+    Size pscan_len;
+    int prefetch_pages;
+    int prefetch_target;
+    int plan_node_id;
+    SharedBitmapState state;
+    pthread_mutex_t cv_mtx;
+    pthread_cond_t cv;
+    char phs_snapshot_data[FLEXIBLE_ARRAY_MEMBER];
+} ParallelBitmapHeapState;
+
+/* ----------------
+ * 	 BitmapHeapScanState information
+ *
+ * 		bitmapqualorig	   execution state for bitmapqualorig expressions
+ * 		tbm				   bitmap obtained from child index scan(s)
+ * 		tbmiterator		   iterator for scanning current pages
+ * 		tbmres			   current-page data
+ * 		prefetch_iterator  iterator for prefetching ahead of current page
+ * 		prefetch_pages	   # pages prefetch iterator is ahead of current
+ * 		prefetch_target    target prefetch distance
+ *		pscan_len		   size of the shared memory for parallel bitmap
+ *		initialized		   is node is ready to iterate
+ *		shared_tbmiterator	   shared iterator
+ *		shared_prefetch_iterator shared iterator for prefetching
+ *		pstate			   shared state for parallel bitmap scan
  * ----------------
  */
 typedef struct BitmapHeapScanState {
@@ -1728,6 +1786,11 @@ typedef struct BitmapHeapScanState {
     int prefetch_pages;
     int prefetch_target;
     GPIScanDesc gpi_scan;  /* global partition index scan use information */
+    Size pscan_len;
+    bool initialized;
+    TBMSharedIterator *shared_tbmiterator;
+    TBMSharedIterator *shared_prefetch_iterator;
+    ParallelBitmapHeapState *pstate;
 } BitmapHeapScanState;
 
 /* ----------------
@@ -2108,6 +2171,7 @@ typedef struct HashJoinState {
     bool hj_OuterNotEmpty;
     bool hj_streamBothSides;
     bool hj_rebuildHashtable;
+    bool isParallel;
 } HashJoinState;
 
 /* ----------------------------------------------------------------
@@ -2331,6 +2395,16 @@ typedef struct GatherState {
 } GatherState;
 
 /* ----------------
+ *	 Shared memory container for per-worker hash information
+ * ----------------
+ */
+typedef struct SharedHashInfo {
+    int num_workers;
+    int plan_node_id; /* used to identify speicific plan */
+    Instrumentation instrument[FLEXIBLE_ARRAY_MEMBER];
+} SharedHashInfo;
+
+/* ----------------
  *	 HashState information
  * ----------------
  */
@@ -2341,7 +2415,12 @@ typedef struct HashState {
     int32 local_work_mem;    /* work_mem local for this hash join */
     int64 spill_size;
 
+    /* Parallel hash state. */
+    struct ParallelHashJoinState* parallel_state;
     /* hashkeys is same as parent's hj_InnerHashKeys */
+
+    SharedHashInfo* shared_info; /* one entry per worker */
+    Instrumentation* instrument; /* this worker's entry */
 } HashState;
 
 /* ----------------

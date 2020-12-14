@@ -96,7 +96,8 @@ typedef struct PlannedStmt {
 
     Node* utilityStmt; /* non-null if this is DECLARE CURSOR */
 
-    List* subplans; /* Plan trees for SubPlan expressions */
+    List* subplans; /* Plan trees for SubPlan expressions; note
+                     * that some could be NULL */
 
     Bitmapset* rewindPlanIDs; /* indices of subplans that require REWIND */
 
@@ -506,6 +507,7 @@ typedef struct BitmapAnd {
  */
 typedef struct BitmapOr {
     Plan plan;
+    bool isshared;
     List* bitmapplans;
 } BitmapOr;
 
@@ -682,6 +684,7 @@ typedef struct IndexOnlyScan {
 typedef struct BitmapIndexScan {
     Scan scan;
     Oid indexid;         /* OID of index to scan */
+    bool isshared;
     char* indexname;     /*	name of index to scan */
     List* indexqual;     /* list of index quals (OpExprs) */
     List* indexqualorig; /* the same in original form */
@@ -1160,6 +1163,7 @@ typedef struct Unique {
 typedef struct Gather {
     Plan plan;
     int num_workers;
+    int rescan_param; /* ID of Param that signals a rescan, or -1 */
     bool single_copy;
 } Gather;
 
@@ -1177,9 +1181,10 @@ typedef struct Hash {
     Oid skewTable;         /* outer join key's table OID, or InvalidOid */
     AttrNumber skewColumn; /* outer join key's column #, or zero */
     bool skewInherit;      /* is outer join rel an inheritance tree? */
-    Oid skewColType;       /* datatype of the outer key column */
-    int32 skewColTypmod;   /* typmod of the outer key column */
-                           /* all other info is in the parent HashJoin node */
+    double rows_total;     /* estimate total rows if parallel_aware */
+    Oid skewColType;     /* datatype of the outer key column */
+    int32 skewColTypmod; /* typmod of the outer key column */
+                         /* all other info is in the parent HashJoin node */
 } Hash;
 
 /* ----------------

@@ -17,3 +17,18 @@ See the Mulan PSL v2 for more details.
 class ExecutionError(Exception):
     pass
 
+
+class OptionError(Exception):
+    pass
+
+
+class ConfigureError(Exception):
+    pass
+
+
+class SecurityError(Exception):
+    pass
+
+
+class DBStatusError(Exception):
+    pass

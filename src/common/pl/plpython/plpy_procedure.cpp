@@ -16,12 +16,8 @@
 #include "utils/syscache.h"
 
 #include "plpython.h"
-
 #include "plpy_procedure.h"
-
 #include "plpy_elog.h"
-#include "plpy_main.h"
-
 
 static PLyProcedure* PLy_procedure_create(HeapTuple procTup, Oid fn_oid, bool is_trigger);
 static bool PLy_procedure_argument_valid(PLyTypeInfo* arg);
@@ -39,7 +35,7 @@ void init_procedure_caches(void)
     hash_ctl.keysize = sizeof(PLyProcedureKey);
     hash_ctl.entrysize = sizeof(PLyProcedureEntry);
     hash_ctl.hash = tag_hash;
-    plpy_t_context.PLy_procedure_cache =
+    g_plpy_t_context.PLy_procedure_cache =
         hash_create("PL/Python procedures", 32, &hash_ctl, HASH_ELEM | HASH_FUNCTION);
 }
 
@@ -52,8 +48,9 @@ void init_procedure_caches(void)
  */
 char* PLy_procedure_name(PLyProcedure* proc)
 {
-    if (proc == NULL)
+    if (proc == NULL) {
         return "<unknown procedure>";
+    }
     return proc->proname;
 }
 
@@ -79,8 +76,9 @@ PLyProcedure* PLy_procedure_get(Oid fn_oid, Oid fn_rel, bool is_trigger)
     bool found = false;
 
     procTup = SearchSysCache1(PROCOID, ObjectIdGetDatum(fn_oid));
-    if (!HeapTupleIsValid(procTup))
+    if (!HeapTupleIsValid(procTup)) {
         elog(ERROR, "cache lookup failed for function %u", fn_oid);
+    }
 
     /*
      * Look for the function in the cache, unless we don't have the necessary
@@ -90,7 +88,7 @@ PLyProcedure* PLy_procedure_get(Oid fn_oid, Oid fn_rel, bool is_trigger)
     if (use_cache) {
         key.fn_oid = fn_oid;
         key.fn_rel = fn_rel;
-        entry = (PLyProcedureEntry*)hash_search(plpy_t_context.PLy_procedure_cache, &key, HASH_ENTER, &found);
+        entry = (PLyProcedureEntry*)hash_search(g_plpy_t_context.PLy_procedure_cache, &key, HASH_ENTER, &found);
         proc = entry->proc;
     }
 
@@ -99,8 +97,9 @@ PLyProcedure* PLy_procedure_get(Oid fn_oid, Oid fn_rel, bool is_trigger)
         if (!found) {
             /* Haven't found it, create a new procedure */
             proc = PLy_procedure_create(procTup, fn_oid, is_trigger);
-            if (use_cache)
+            if (use_cache) {
                 entry->proc = proc;
+            }
         } else if (!PLy_procedure_valid(proc, procTup)) {
             /* Found it, but it's invalid, free and reuse the cache entry */
             PLy_procedure_delete(proc);
@@ -113,8 +112,9 @@ PLyProcedure* PLy_procedure_get(Oid fn_oid, Oid fn_rel, bool is_trigger)
     PG_CATCH();
     {
         /* Do not leave an uninitialised entry in the cache */
-        if (use_cache)
-            hash_search(plpy_t_context.PLy_procedure_cache, &key, HASH_REMOVE, NULL);
+        if (use_cache) {
+            hash_search(g_plpy_t_context.PLy_procedure_cache, &key, HASH_REMOVE, NULL);
+        }
         PG_RE_THROW();
     }
     PG_END_TRY();
@@ -144,13 +144,15 @@ static PLyProcedure* PLy_procedure_create(HeapTuple procTup, Oid fn_oid, bool is
         "__plpython_procedure_%s_%u",
         NameStr(procStruct->proname),
         fn_oid);
-    if (rv >= (int)sizeof(procName) || rv < 0)
+    if (rv >= (int)sizeof(procName) || rv < 0) {
         elog(ERROR, "procedure name would overrun buffer");
+    }
 
     /* Replace any not-legal-in-Python-names characters with '_' */
     for (char* ptr = procName; *ptr; ptr++) {
-        if (!((*ptr >= 'A' && *ptr <= 'Z') || (*ptr >= 'a' && *ptr <= 'z') || (*ptr >= '0' && *ptr <= '9')))
+        if (!((*ptr >= 'A' && *ptr <= 'Z') || (*ptr >= 'a' && *ptr <= 'z') || (*ptr >= '0' && *ptr <= '9'))) {
             *ptr = '_';
+        }
     }
 
     proc = (PLyProcedure*)PLy_malloc(sizeof(PLyProcedure));
@@ -161,8 +163,9 @@ static PLyProcedure* PLy_procedure_create(HeapTuple procTup, Oid fn_oid, bool is
     /* Remember if function is STABLE/IMMUTABLE */
     proc->fn_readonly = (procStruct->provolatile != PROVOLATILE_VOLATILE);
     PLy_typeinfo_init(&proc->result);
-    for (i = 0; i < FUNC_MAX_ARGS; i++)
+    for (i = 0; i < FUNC_MAX_ARGS; i++) {
         PLy_typeinfo_init(&proc->args[i]);
+    }
     proc->nargs = 0;
     proc->code = proc->statics = NULL;
     proc->globals = NULL;
@@ -182,20 +185,22 @@ static PLyProcedure* PLy_procedure_create(HeapTuple procTup, Oid fn_oid, bool is
             Form_pg_type rvTypeStruct;
 
             rvTypeTup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(procStruct->prorettype));
-            if (!HeapTupleIsValid(rvTypeTup))
+            if (!HeapTupleIsValid(rvTypeTup)) {
                 elog(ERROR, "cache lookup failed for type %u", procStruct->prorettype);
+            }
             rvTypeStruct = (Form_pg_type)GETSTRUCT(rvTypeTup);
             /* Disallow pseudotype result, except for void or record */
             if (rvTypeStruct->typtype == TYPTYPE_PSEUDO) {
-                if (procStruct->prorettype == TRIGGEROID)
+                if (procStruct->prorettype == TRIGGEROID) {
                     ereport(ERROR,
                         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                             errmsg("trigger functions can only be called as triggers")));
-                else if (procStruct->prorettype != VOIDOID && procStruct->prorettype != RECORDOID)
+                } else if (procStruct->prorettype != VOIDOID && procStruct->prorettype != RECORDOID) {
                     ereport(ERROR,
                         (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                             errmsg(
                                 "PL/Python functions cannot return type %s", format_type_be(procStruct->prorettype))));
+                }
             }
 
             if (rvTypeStruct->typtype == TYPTYPE_COMPOSITE || procStruct->prorettype == RECORDOID) {
@@ -230,13 +235,14 @@ static PLyProcedure* PLy_procedure_create(HeapTuple procTup, Oid fn_oid, bool is
             total = get_func_arg_info(procTup, &types, &names, &modes);
 
             /* count number of in+inout args into proc->nargs */
-            if (modes == NULL)
+            if (modes == NULL) {
                 proc->nargs = total;
-            else {
+            } else {
                 /* proc->nargs was initialized to 0 above */
                 for (i = 0; i < total; i++) {
-                    if (modes[i] != PROARGMODE_OUT && modes[i] != PROARGMODE_TABLE)
+                    if (modes[i] != PROARGMODE_OUT && modes[i] != PROARGMODE_TABLE) {
                         (proc->nargs)++;
+                    }
                 }
             }
 
@@ -245,14 +251,16 @@ static PLyProcedure* PLy_procedure_create(HeapTuple procTup, Oid fn_oid, bool is
                 HeapTuple argTypeTup;
                 Form_pg_type argTypeStruct;
 
-                if (modes && (modes[i] == PROARGMODE_OUT || modes[i] == PROARGMODE_TABLE))
+                if (modes && (modes[i] == PROARGMODE_OUT || modes[i] == PROARGMODE_TABLE)) {
                     continue; /* skip OUT arguments */
+                }
 
                 Assert(types[i] == procStruct->proargtypes.values[pos]);
 
                 argTypeTup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(types[i]));
-                if (!HeapTupleIsValid(argTypeTup))
+                if (!HeapTupleIsValid(argTypeTup)) {
                     elog(ERROR, "cache lookup failed for type %u", types[i]);
+                }
                 argTypeStruct = (Form_pg_type)GETSTRUCT(argTypeTup);
 
                 /* check argument type is OK, set up I/O function info */
@@ -285,8 +293,9 @@ static PLyProcedure* PLy_procedure_create(HeapTuple procTup, Oid fn_oid, bool is
          * get the text of the function.
          */
         prosrcdatum = SysCacheGetAttr(PROCOID, procTup, Anum_pg_proc_prosrc, &isnull);
-        if (isnull)
+        if (isnull) {
             elog(ERROR, "null prosrc");
+        }
         procSource = TextDatumGetCString(prosrcdatum);
 
         PLy_procedure_compile(proc, procSource);
@@ -297,8 +306,9 @@ static PLyProcedure* PLy_procedure_create(HeapTuple procTup, Oid fn_oid, bool is
     PG_CATCH();
     {
         PLy_procedure_delete(proc);
-        if (procSource != NULL)
+        if (procSource != NULL) {
             pfree(procSource);
+        }
 
         PG_RE_THROW();
     }
@@ -315,7 +325,7 @@ void PLy_procedure_compile(PLyProcedure* proc, const char* src)
     PyObject* crv = NULL;
     char* msrc = NULL;
 
-    proc->globals = PyDict_Copy(plpy_t_context.PLy_interp_globals);
+    proc->globals = PyDict_Copy(g_plpy_t_context.PLy_interp_globals);
 
     /*
      * SD is private preserved data between calls. GD is global data shared by
@@ -343,17 +353,20 @@ void PLy_procedure_compile(PLyProcedure* proc, const char* src)
          * compile a call to the function
          */
         clen = snprintf_s(call, sizeof(call), sizeof(call) - 1, "%s()", proc->pyname);
-        if (clen < 0 || clen >= (int)sizeof(call))
+        if (clen < 0 || clen >= (int)sizeof(call)) {
             elog(ERROR, "string would overflow buffer");
+        }
         proc->code = Py_CompileString(call, "<string>", Py_eval_input);
-        if (proc->code != NULL)
+        if (proc->code != NULL) {
             return;
+        }
     }
 
-    if (proc->proname != NULL)
+    if (proc->proname != NULL) {
         PLy_elog(ERROR, "could not compile PL/Python function \"%s\"", proc->proname);
-    else
+    } else {
         PLy_elog(ERROR, "could not compile anonymous PL/Python code block");
+    }
 }
 
 void PLy_procedure_delete(PLyProcedure* proc)
@@ -363,24 +376,31 @@ void PLy_procedure_delete(PLyProcedure* proc)
     Py_XDECREF(proc->code);
     Py_XDECREF(proc->statics);
     Py_XDECREF(proc->globals);
-    if (proc->proname != NULL)
+    if (proc->proname != NULL) {
         PLy_free(proc->proname);
-    if (proc->pyname)
+    }
+    if (proc->pyname) {
         PLy_free(proc->pyname);
+    }
     for (i = 0; i < proc->nargs; i++) {
         if (proc->args[i].is_rowtype == 1) {
-            if (proc->args[i].in.r.atts)
+            if (proc->args[i].in.r.atts) {
                 PLy_free(proc->args[i].in.r.atts);
-            if (proc->args[i].out.r.atts)
+            }
+            if (proc->args[i].out.r.atts) {
                 PLy_free(proc->args[i].out.r.atts);
+            }
         }
-        if (proc->argnames && proc->argnames[i])
+        if (proc->argnames && proc->argnames[i]) {
             PLy_free(proc->argnames[i]);
+        }
     }
-    if (proc->src)
+    if (proc->src) {
         PLy_free(proc->src);
-    if (proc->argnames)
+    }
+    if (proc->argnames) {
         PLy_free(proc->argnames);
+    }
 }
 
 /*
@@ -392,15 +412,17 @@ static bool PLy_procedure_argument_valid(PLyTypeInfo* arg)
     bool valid = false;
 
     /* Nothing to cache unless type is composite */
-    if (arg->is_rowtype != 1)
+    if (arg->is_rowtype != 1) {
         return true;
+    }
 
     /*
      * Zero typ_relid means that we got called on an output argument of a
      * function returning a unnamed record type; the info for it can't change.
      */
-    if (!OidIsValid(arg->typ_relid))
+    if (!OidIsValid(arg->typ_relid)) {
         return true;
+    }
 
     /* Else we should have some cached data */
     Assert(TransactionIdIsValid(arg->typrel_xmin));
@@ -408,8 +430,9 @@ static bool PLy_procedure_argument_valid(PLyTypeInfo* arg)
 
     /* Get the pg_class tuple for the data type */
     relTup = SearchSysCache1(RELOID, ObjectIdGetDatum(arg->typ_relid));
-    if (!HeapTupleIsValid(relTup))
+    if (!HeapTupleIsValid(relTup)) {
         elog(ERROR, "cache lookup failed for relation %u", arg->typ_relid);
+    }
 
     /* If it has changed, the cached data is not valid */
     valid = (arg->typrel_xmin == HeapTupleGetRawXmin(relTup) && ItemPointerEquals(&arg->typrel_tid, &relTup->t_self));
@@ -430,21 +453,24 @@ static bool PLy_procedure_valid(PLyProcedure* proc, HeapTuple procTup)
     Assert(proc != NULL);
 
     /* If the pg_proc tuple has changed, it's not valid */
-    if (!(proc->fn_xmin == HeapTupleGetRawXmin(procTup) && ItemPointerEquals(&proc->fn_tid, &procTup->t_self)))
+    if (!(proc->fn_xmin == HeapTupleGetRawXmin(procTup) && ItemPointerEquals(&proc->fn_tid, &procTup->t_self))) {
         return false;
+    }
 
     /* Else check the input argument datatypes */
     valid = true;
     for (i = 0; i < proc->nargs; i++) {
         valid = PLy_procedure_argument_valid(&proc->args[i]);
         /* Short-circuit on first changed argument */
-        if (!valid)
+        if (!valid) {
             break;
+        }
     }
 
     /* if the output type is composite, it might have changed */
-    if (valid)
+    if (valid) {
         valid = PLy_procedure_argument_valid(&proc->result);
+    }
 
     return valid;
 }
@@ -486,8 +512,9 @@ static char* PLy_procedure_munge_source(const char* name, const char* src)
     *mp++ = '\n';
     *mp = '\0';
 
-    if (mp > (mrc + mlen))
+    if (mp > (mrc + mlen)) {
         elog(FATAL, "buffer overrun in PLy_munge_source");
+    }
 
     return mrc;
 }

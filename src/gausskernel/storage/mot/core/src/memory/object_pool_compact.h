@@ -26,7 +26,7 @@
 #define OBJECT_POOL_COMPACT_H
 
 #include <unordered_map>
-#include "object_pool.h"
+#include "object_pool_impl.h"
 
 namespace MOT {
 #define PTR_MASK (((uint64_t)-1) << 10)

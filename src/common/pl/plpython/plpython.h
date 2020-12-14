@@ -5,7 +5,7 @@
  * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
- * src/pl/plpython/plpython.h
+ * src/common/pl/plpython/plpython.h
  *
  * -------------------------------------------------------------------------
  */
@@ -136,7 +136,7 @@ typedef struct plpy_t_context_struct {
     int Ply_LockLevel;
 } plpy_t_context_struct;
 
-extern THR_LOCAL plpy_t_context_struct plpy_t_context;
+extern THR_LOCAL plpy_t_context_struct g_plpy_t_context;
 
 #include <compile.h>
 #include <eval.h>

@@ -14,203 +14,226 @@ See the Mulan PSL v2 for more details.
 """
 
 import argparse
+import configparser
+import json
+import os
+import sys
+import logging
 from getpass import getpass
 
-import benchmark
-import knobs
-from algorithms.pso import Pso
-from db_env import DB_Env
-from utils import SysLogger, Recorder
+from tuner.exceptions import OptionError
+from tuner.xtuner import procedure_main
 
-__version__ = '1.0.1'
-
-"""The following are preset parameters, 
-and it is not recommended to modify for green hands unless you have any special purpose."""
-STEPS = 100
-TEST_EPISODES = 1
-NB_MAX_EPISODE_STEPS = 10
-LOGFILE = 'log/opengauss_tuner.log'
-RECORDER_FILE = 'log/recorder.log'
-
-
-def main():
-    # fetch arguments
-    args = parse_args()
-    # initialize logger
-    logger = SysLogger(LOGFILE)
-    recorder = Recorder(RECORDER_FILE)
-    logger.info('starting...')
-    rl_knobs = knobs.get_rl_knobs(args.scenario)
-    pso_knobs = knobs.get_pso_knobs(args.scenario)
-    bm = benchmark.get_benchmark_instance(args.benchmark)
-    env = DB_Env(db_info=args.db_info, benchmark=bm, recorder=recorder)
-
-    if len(rl_knobs) == 0 and args.is_train:
-        print(SysLogger)
-        logger.print('current mode is training, so you must set reinforcement learning knobs.',
-                     fd=SysLogger.stderr)
-        return -1
-
-    # reinforcement learning
-    if len(rl_knobs) > 0:
-        env.set_tuning_knobs(rl_knobs)
-        # lazy loading. Because loading tensorflow has to cost too much time.
-        from algorithms.rl_agent import RLAgent
-        rl = RLAgent(env, agent='ddpg')
-
-        if args.is_train:
-            rl.fit(STEPS, nb_max_episode_steps=NB_MAX_EPISODE_STEPS)
-            rl.save(args.model_path)
-            logger.print('saved model at %s' % args.model_path)
-            return 0  # training mode stop here.
-        if not args.model_path:
-             from sys import stderr
-             print('have no model path, you can use --model-path argument.', file=stderr, flush=True)
-             exit(-1)
-        rl.load(args.model_path)
-        rl.test(TEST_EPISODES, nb_max_episode_steps=NB_MAX_EPISODE_STEPS)
-
-        recorder.write_best_val('reward')
-    # heuristic algorithm
-    if len(pso_knobs) > 0:
-        env.set_tuning_knobs(pso_knobs)
-
-        def heuristic_callback(v):
-            s, r, d, _ = env.step(v, False)
-            return -r  # - reward
-
-        pso = Pso(
-            func=heuristic_callback,
-            dim=len(pso_knobs),
-            particle_nums=3, max_iteration=100, x_min=0, x_max=1, max_vel=0.5
-        )
-        pso.update()
-
-    # if you have other approaches, you can code here.
-
-        recorder.write_best_val('reward')
-    logger.print('please see result at logfile: %s.' % RECORDER_FILE)
+__version__ = '2.0.0'
+__description__ = 'X-Tuner: a self-tuning tool integrated by openGauss.'
 
 
 def check_port(port):
     return 0 < port <= 65535
 
 
-def check_path_valid(obtainpath):
-    """
-    function: check path valid
-    input : envValue
-    output: NA
-    """
-    PATH_CHECK_LIST = [" ", "|", ";", "&", "$", "<", ">", "`", "\\", "'", "\"", "{", "}", "(", ")", "[", "]", "~", "*",
-                       "?", "!", "\n"]
-    if obtainpath.strip() == "":
-        return
-    for rac in PATH_CHECK_LIST:
-        flag = obtainpath.find(rac)
-        if flag >= 0:
+def check_path_valid(path):
+    path_check_list = [' ', '|', ';', '&', '$', '<', '>', '`', '\\',
+                       '\'', '"', '{', '}', '(', ')', '[', ']', '~',
+                       '*', '?', '!', '\n']
+
+    if path.strip() == '':
+        return True
+
+    for char in path_check_list:
+        if path.find(char) >= 0:
             return False
+
     return True
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description='X-Tuner: a self-tuning toolkit for OpenGauss.')
-    parser.add_argument('-m', '--mode', required=True, choices=['train', 'tune'], help='train a reinforcement learning model or '
-                                                                        'tune by your trained model.')
-    parser.add_argument('-f', '--config-file', help='you can pass a config file path or you should manually '
-                                                    'set database information.')
-    parser.add_argument('--db-name', help='database name.')
-    parser.add_argument('--db-user', help='database user name.')
-    parser.add_argument('--port', type=int, help='database connection port.')
-    parser.add_argument('--host', help='where did your database install on?')
-    parser.add_argument('--host-user', help='user name of the host where your database installed on.')
-    parser.add_argument('--host-ssh-port', default=22, help='host ssh port.')
-    parser.add_argument('--scenario', required=True, choices=['ap', 'tp', 'htap'], default='htap')
-    parser.add_argument('--benchmark', required=True, default='tpcc')
-    parser.add_argument('--model-path', help='the place where you want to save model weights to or load model weights '
-                                             'from.')
-    parser.add_argument('-v', '--version', action='version', help='show version.')
+def build_db_info(args):
+    if args.db_config_file:
+        if not check_path_valid(args.db_config_file):
+            print('FATAL: Detected illegal json path.', file=sys.stderr, flush=True)
+            return
+
+        with open(args.db_config_file, mode='r', errors='ignore') as fd:
+            db_info = json.load(fd)
+            if not {'db_name', 'db_user', 'host', 'host_user',
+                    'port', 'ssh_port'}.issubset(db_info):
+                print('ERROR: Lack of information in json file, please refer to the file share/client.json.template.',
+                      file=sys.stderr, flush=True)
+                return
+    else:
+        db_info = {
+            'db_name': args.db_name,
+            'db_user': args.db_user,
+            'host': args.host,
+            'host_user': args.host_user,
+            'port': args.port,
+            'ssh_port': args.host_ssh_port
+        }
+
+    # Requires users to enter password information.
+    db_user_pwd = getpass("Please input the password of database: ")
+    host_user_pwd = getpass("Please input the password of host: ")
+    db_info['db_user_pwd'] = db_user_pwd
+    db_info['host_user_pwd'] = host_user_pwd
+
+    # Check the validation of each field.
+    for option, value in db_info.items():
+        if not value:
+            print('ERROR: Need database information for %s.' % option, file=sys.stderr, flush=True)
+            return
+        else:
+            if option in ('db_name', 'db_user', 'host_user'):
+                if not check_path_valid(value):
+                    print('FATAL: Detected illegal input for %s.' % option, file=sys.stderr, flush=True)
+                    return
+
+            if option in ('port', 'ssh_port'):
+                if not check_port(value):
+                    print('FATAL: Detect illegal port for %s.' % option, file=sys.stderr, flush=True)
+                    return
+
+    return db_info
+
+
+def get_argv_parser():
+    tuner_config_file = os.path.join(os.path.dirname(__file__), 'xtuner.conf')
+
+    parser = argparse.ArgumentParser(description=__description__)
+    parser.add_argument('mode', choices=['train', 'tune', 'recommend'],
+                        help='Train a reinforcement learning model or tune database by model. And also can recommend'
+                             ' best_knobs according to your workload.')
+
+    db_info_group = parser.add_argument_group('Database Connection Information')
+    db_info_group.add_argument('--db-name', help='The name of database where your workload running on.')
+    db_info_group.add_argument('--db-user', help='Use this user to login your database. Note that the user must have '
+                                                 'sufficient permissions.')
+    db_info_group.add_argument('--port', type=int, help='Use this port to connect with the database.')
+    db_info_group.add_argument('--host', help='The IP address of your database installation host.')
+    db_info_group.add_argument('--host-user', help='The login user of your database installation host.')
+    db_info_group.add_argument('--host-ssh-port', default=22, type=int,
+                               help='The SSH port of your database installation host.')
+
+    parser.add_argument('-f', '--db-config-file',
+                        help='You can pass a path of configuration file otherwise you should '
+                             'enter database information by command arguments manually. '
+                             'Please see the template file share/client.json.template.')
+    parser.add_argument('-x', '--tuner-config-file', default=tuner_config_file,
+                        help='This is the path of the core configuration file of the X-Tuner. '
+                             'You can specify the path of the new configuration file. '
+                             'The default path is %s. '
+                             'You can modify the configuration file to control the tuning process.' % tuner_config_file)
+
+    parser.add_argument('-v', '--version', action='version')
 
     parser.version = __version__
-    
-    class ParsedArgs:
-        def __init__(self, args):
-            self.print_warn()
-            self.db_info = None
-            self.is_train = False
-            self.scenario = None
-            self.model_path = None
-            self.benchmark = None
 
-            if args.config_file:
-                if not check_path_valid(args.config_file):
-                    from sys import stderr
-                    print('detect illegal json_path.', file=stderr, flush=True)
-                    exit(-1)
-                from json import load
-                with open(args.config_file, mode='r', errors='ignore') as fd:
-                    self.db_info = load(fd)
-                    if not set(self.db_info.keys()) == set(['db_name', 'db_user', 'db_user_pwd', 'host', \
-                                                            'host_user', 'host_user_pwd', 'port']):
-                        from sys import stderr
-                        print('lack of information in json file.', file=stderr, flush=True)
-                        exit(-1)
-            else:
-                db_user_pwd = getpass("please input the password of database: ")
-                host_user_pwd = getpass("please input the password of host: ")
-                self.db_info = {
-                    'db_name': args.db_name,
-                    'db_user': args.db_user,
-                    'db_user_pwd': db_user_pwd,
-                    'host': args.host,
-                    'host_user': args.host_user,
-                    'host_user_pwd': host_user_pwd,
-                    'port': args.port,
-                    'ssh_port': args.host_ssh_port
-                }
-            self.is_train = args.mode == 'train'
-            self.scenario = args.scenario
-            self.model_path = args.model_path
-            self.benchmark = args.benchmark
-            
-            for k, v in self.db_info.items():
-                if not v:
-                    from sys import stderr
-                    print('need database authorization information.', file=stderr, flush=True)
-                    parser.print_usage()
-                    exit(-1)
-                else:
-                    if k in ['db_name', 'db_user', 'host_user']:
-                        if not check_path_valid(v):
-                            from sys import stderr
-                            print('detect illegal input.', file=stderr, flush=True)
-                            exit(-1)
-                    if k in ['port', 'ssh_port']:
-                        if not check_port(v):
-                            from sys import stderr
-                            print('detect illegal port.', file=stderr, flush=True)
-                            exit(-1)
-                            
-            if self.is_train and not self.model_path:
-                from sys import stderr
-                print('have no model filepath input, you can use --model-path argument.', file=stderr, flush=True)
-                exit(-1) 
- 
-        @staticmethod
-        def print_warn():
-            hint = '\033[32;1mwarning: Database may reboot several times during Tuning, continue or not [yes|no]:\033[0m '
-            run_tuner = input(hint)
-            while True:
-                if run_tuner.lower() == 'no':
-                    exit(0)
-                elif run_tuner.lower() == 'yes':
-                    return
-                else:
-                    run_tuner = input('\033[32;1mplease input yes or no:\033[0m ')
+    return parser
 
-    return ParsedArgs(parser.parse_args())
+
+def get_config(filepath):
+    if not os.path.exists(filepath):
+        print("FATAL: Not found the configuration file %s." % filepath, file=sys.stderr)
+        return
+
+    if not os.access(filepath, os.R_OK):
+        print("FATAL: Not have permission to read the configuration file %s." % filepath, file=sys.stderr)
+        return
+
+    cp = configparser.ConfigParser(inline_comment_prefixes=('#', ';', "'"))
+    cp.read(filepath)
+
+    config = dict()
+    for section in cp.sections():
+        for option, value in cp.items(section):
+            config.setdefault(option, value)
+
+    # Check configs.
+    null_error_msg = 'The configuration option %s is null. Please set a specific value.'
+    invalid_opt_msg = 'The configuration option %s is invalid. Please set one of %s.'
+
+    # Section Master:
+    for name in ('logfile', 'recorder_file', 'tune_strategy'):
+        if cp['Master'].get(name, '').strip() == '':
+            raise OptionError(null_error_msg % name)
+
+    tune_strategy_opts = ['rl', 'gop', 'auto']
+    tune_strategy = cp['Master'].get('tune_strategy')
+    if tune_strategy not in tune_strategy_opts:
+        raise OptionError(invalid_opt_msg % ('tune_strategy', tune_strategy_opts))
+
+    config['verbose'] = cp['Master'].getboolean('verbose', fallback=True)
+    config['drop_cache'] = cp['Master'].getboolean('drop_cache', fallback=False)
+    config['used_mem_penalty_term'] = cp['Master'].getfloat('used_mem_penalty_term')
+
+    # Section Benchmark:
+    benchmarks = []
+    benchmark_dir = os.path.join(os.path.dirname(__file__), 'benchmark')
+    for root_dir, sub_dir, files in os.walk(benchmark_dir):
+        if os.path.basename(root_dir) == 'benchmark':
+            benchmarks = files
+            break
+
+    benchmark_script = cp['Benchmark'].get('benchmark_script', '')
+    if benchmark_script.rstrip('.py') + '.py' not in benchmarks:
+        raise OptionError(invalid_opt_msg % ('benchmark_script', benchmarks))
+    config['benchmark_path'] = cp['Benchmark'].get('benchmark_path', '')
+    config['benchmark_cmd'] = cp['Benchmark'].get('benchmark_cmd', '')
+
+    # Section Knobs
+    scenario_opts = ['auto', 'ap', 'tp', 'htap']
+    if cp['Knobs'].get('scenario', '') not in scenario_opts:
+        raise OptionError(invalid_opt_msg % ('scenario', scenario_opts))
+
+    # Section RL and GOP
+    if tune_strategy in ('auto', 'rl'):
+        for name in cp['Reinforcement Learning']:
+            if name.strip() == '':
+                raise OptionError(null_error_msg % name)
+        if cp['Reinforcement Learning'].get('rl_algorithm', '') != 'ddpg':
+            raise OptionError(invalid_opt_msg % ('rl_algorithm', 'ddpg'))
+
+        config['rl_steps'] = cp['Reinforcement Learning'].getint('rl_steps')
+        config['max_episode_steps'] = cp['Reinforcement Learning'].getint('max_episode_steps')
+        config['test_episode'] = cp['Reinforcement Learning'].getint('test_episode')
+
+    if tune_strategy in ('auto', 'gop'):
+        for name in cp['Gloabal Optimization Algorithm']:
+            if name.strip() == '':
+                raise OptionError(null_error_msg % name)
+
+        gop_algorithm_opts = ['bayes', 'pso']
+        if cp['Gloabal Optimization Algorithm'].get('gop_algorithm', '') not in gop_algorithm_opts:
+            raise OptionError(invalid_opt_msg % ('gop_algorithm', gop_algorithm_opts))
+
+        config['max_iterations'] = cp['Gloabal Optimization Algorithm'].getint('max_iterations')
+        config['particle_nums'] = cp['Gloabal Optimization Algorithm'].getint('particle_nums')
+
+    return config
+
+
+def main():
+    parser = get_argv_parser()
+    args = parser.parse_args()
+    mode = args.mode
+    db_info = build_db_info(args)
+    if not db_info:
+        parser.print_usage()
+        return -1
+
+    config = get_config(args.tuner_config_file)
+    if not config:
+        return -1
+
+    try:
+        return procedure_main(mode, db_info, config)
+    except Exception as e:
+        logging.exception(e)
+        print('FATAL: An exception occurs during program running. '
+              'The exception information is "%s". '
+              'For details about the error cause, please see %s.' % (e, config['logfile']),
+              file=sys.stderr, flush=True)
+        return -1
 
 
 if __name__ == '__main__':
     main()
-

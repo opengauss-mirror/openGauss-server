@@ -1194,6 +1194,15 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count, bool part
 
     if (partial_path) {
         /*
+        * For index only scans compute workers based on number of index pages
+        * fetched; the number of heap pages we fetch might be so small as
+        * to effectively rule out parallelism, which we don't want to do.
+        */
+        if (indexonly) {
+            rand_heap_pages = -1;
+        }
+
+        /*
          * Estimate the number of parallel workers required to scan index. Use
          * the number of heap pages computed considering heap fetches won't be
          * sequential as for parallel scans the pages are accessed in random
@@ -1251,6 +1260,8 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count, bool part
 
     cpu_run_cost += cpu_per_tuple * tuples_fetched;
 
+    run_cost += cpu_run_cost;
+
     /* Adjust costing for parallelism, if used. */
     if (path->path.parallel_workers > 0) {
         double parallel_divisor = get_parallel_divisor(&path->path);
@@ -1258,10 +1269,8 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count, bool part
         path->path.rows = clamp_row_est(path->path.rows / parallel_divisor);
 
         /* The CPU cost is divided among all the workers. */
-        cpu_run_cost /= parallel_divisor;
+        run_cost /= parallel_divisor;
     }
-
-    run_cost += cpu_run_cost;
 
     path->path.startup_cost = startup_cost;
     path->path.total_cost = startup_cost + run_cost;
@@ -1435,10 +1444,10 @@ void cost_bitmap_heap_scan(
     Cost startup_cost = 0;
     Cost run_cost = 0;
     Cost indexTotalCost;
-    Selectivity indexSelectivity;
     QualCost qpqual_cost;
     Cost cpu_per_tuple = 0.0;
     Cost cost_per_page;
+    Cost cpu_run_cost;
     double tuples_fetched;
     double pages_fetched;
     double spc_seq_page_cost, spc_random_page_cost;
@@ -1484,51 +1493,14 @@ void cost_bitmap_heap_scan(
         startup_cost += g_instance.cost_cxt.disable_cost;
     }
 
-    /*
-     * Fetch total cost of obtaining the bitmap, as well as its total
-     * selectivity.
-     */
-    cost_bitmap_tree_node(bitmapqual, &indexTotalCost, &indexSelectivity);
+    pages_fetched = compute_bitmap_pages(root, baserel, bitmapqual, loop_count,
+        &indexTotalCost, &tuples_fetched, ispartitionedindex);
 
     startup_cost += indexTotalCost;
 
     /* Fetch estimated page costs for tablespace containing table. */
     get_tablespace_page_costs(baserel->reltablespace, &spc_random_page_cost, &spc_seq_page_cost);
-
-    /*
-     * Estimate number of main-table pages fetched.
-     */
-    tuples_fetched = clamp_row_est(indexSelectivity * RELOPTINFO_LOCAL_FIELD(root, baserel, tuples));
-
     T = (baserel->pages > 1) ? (double)baserel->pages : 1.0;
-
-    if (loop_count > 1) {
-        /*
-         * For repeated bitmap scans, scale up the number of tuples fetched in
-         * the Mackert and Lohman formula by the number of scans, so that we
-         * estimate the number of pages fetched by all the scans. Then
-         * pro-rate for one scan.
-         */
-        pages_fetched = index_pages_fetched(tuples_fetched * loop_count,
-            (BlockNumber)baserel->pages,
-            get_indexpath_pages(bitmapqual),
-            root,
-            ispartitionedindex);
-
-        pages_fetched /= loop_count;
-    } else {
-        /*
-         * For a single scan, the number of heap pages that need to be fetched
-         * is the same as the Mackert and Lohman formula for the case T <= b
-         * (ie, no re-reads needed).
-         */
-        pages_fetched = (2.0 * T * tuples_fetched) / (2.0 * T + tuples_fetched);
-    }
-    if (pages_fetched >= T) {
-        pages_fetched = T;
-    } else {
-        pages_fetched = ceil(pages_fetched);
-    }
 
     /*
      * For small numbers of pages we should charge spc_random_page_cost
@@ -1557,8 +1529,19 @@ void cost_bitmap_heap_scan(
 
     startup_cost += qpqual_cost.startup;
     cpu_per_tuple = u_sess->attr.attr_sql.cpu_tuple_cost + qpqual_cost.per_tuple;
+    cpu_run_cost = cpu_per_tuple * tuples_fetched;
 
-    run_cost += cpu_per_tuple * tuples_fetched;
+    run_cost += cpu_run_cost;
+
+    /* Adjust costing for parallelism, if used. */
+    if (path->parallel_workers > 0) {
+        double parallel_divisor = get_parallel_divisor(path);
+
+        /* The CPU cost is divided among all the workers. */
+        run_cost /= parallel_divisor;
+
+        path->rows = clamp_row_est(path->rows / parallel_divisor);
+    }
 
     path->startup_cost = startup_cost;
     path->total_cost = startup_cost + run_cost;
@@ -2970,6 +2953,12 @@ void final_cost_nestloop(PlannerInfo* root, NestPath* path, JoinCostWorkspace* w
     /* Mark the path with the correct row estimate */
     set_rel_path_rows(&path->path, path->path.parent, path->path.param_info);
 
+    /* For partial paths, scale row estimate. */
+    if (path->path.parallel_workers > 0) {
+        double parallel_divisor = get_parallel_divisor(&path->path);
+        path->path.rows = clamp_row_est(path->path.rows / parallel_divisor);
+    }
+
     /*
      * If inner_path or outer_path is EC functioinScan without stream,
      * we should set the multiple particularly.
@@ -3336,6 +3325,12 @@ void final_cost_mergejoin(
     /* Mark the path with the correct row estimate */
     set_rel_path_rows(&path->jpath.path, path->jpath.path.parent, path->jpath.path.param_info);
 
+    /* For partial paths, scale row estimate. */
+    if (path->jpath.path.parallel_workers > 0) {
+        double parallel_divisor = get_parallel_divisor(&path->jpath.path);
+        path->jpath.path.rows = clamp_row_est(path->jpath.path.rows / parallel_divisor);
+    }
+
     /*
      * If inner_path or outer_path is EC functioinScan without stream,
      * we should set the multiple particularly.
@@ -3602,12 +3597,14 @@ MergeScanSelCache* cached_scansel(PlannerInfo* root, RestrictInfo* rinfo, PathKe
  * 'semifactors' contains valid data if jointype is SEMI or ANTI
  */
 void initial_cost_hashjoin(PlannerInfo* root, JoinCostWorkspace* workspace, JoinType jointype, List* hashclauses,
-    Path* outer_path, Path* inner_path, SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, int dop)
+    Path* outer_path, Path* inner_path, SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, int dop,
+    bool parallel_hash)
 {
     Cost startup_cost = 0;
     Cost run_cost = 0;
     double outer_path_rows = PATH_LOCAL_ROWS(outer_path) / dop;
     double inner_path_rows = PATH_LOCAL_ROWS(inner_path) / dop;
+    double inner_path_rows_total = inner_path_rows;
     int num_hashclauses = list_length(hashclauses);
     int numbuckets;
     int numbatches;
@@ -3616,6 +3613,7 @@ void initial_cost_hashjoin(PlannerInfo* root, JoinCostWorkspace* workspace, Join
     int outer_width; /* width of outer rel */
     double outerpages;
     double innerpages;
+    size_t space_allowed; /* unused */
 
     errno_t rc = 0;
 
@@ -3630,6 +3628,16 @@ void initial_cost_hashjoin(PlannerInfo* root, JoinCostWorkspace* workspace, Join
     /* cost of source data */
     startup_cost += outer_path->startup_cost;
     run_cost += outer_path->total_cost - outer_path->startup_cost;
+
+    /*
+     * If this is a parallel hash build, then the value we have for
+     * inner_rows_total currently refers only to the rows returned by each
+     * participant.  For shared hash table size estimation, we need the total
+     * number, so we need to undo the division.
+     */
+    if (u_sess->attr.attr_sql.enable_parallel_hash) {
+        inner_path_rows_total *= get_parallel_divisor(inner_path);
+    }
     /*
      * Sometimes, we suffers the case that small table with large cost join
      * with a large table. In such case, the cost mainly comes from large cost
@@ -3690,9 +3698,12 @@ void initial_cost_hashjoin(PlannerInfo* root, JoinCostWorkspace* workspace, Join
      */
     inner_width = get_path_actual_total_width(inner_path, root->glob->vectorized, OP_HASHJOIN, newcolnum);
     outer_width = get_path_actual_total_width(outer_path, root->glob->vectorized, OP_HASHJOIN);
-    ExecChooseHashTableSize(inner_path_rows,
+    ExecChooseHashTableSize(inner_path_rows_total,
         inner_width,
         true,
+        parallel_hash, /* try_combined_work_mem */
+        outer_path->parallel_workers,
+        &space_allowed,
         &numbuckets,
         &numbatches,
         &num_skew_mcvs,
@@ -3759,6 +3770,7 @@ void initial_cost_hashjoin(PlannerInfo* root, JoinCostWorkspace* workspace, Join
     workspace->run_cost = run_cost;
     workspace->numbuckets = numbuckets;
     workspace->numbatches = numbatches;
+    workspace->inner_rows_total = inner_path_rows_total;
 
     ereport(DEBUG1,
         (errmodule(MOD_OPT_JOIN),
@@ -3872,6 +3884,7 @@ void final_cost_hashjoin(PlannerInfo* root, HashPath* path, JoinCostWorkspace* w
     Path* inner_path = path->jpath.innerjoinpath;
     double outer_path_rows = PATH_LOCAL_ROWS(outer_path) / dop;
     double inner_path_rows = PATH_LOCAL_ROWS(inner_path) / dop;
+    double inner_path_rows_total = workspace->inner_rows_total;
     List* hashclauses = path->path_hashclauses;
     Cost startup_cost = workspace->startup_cost;
     Cost run_cost = workspace->run_cost;
@@ -3895,6 +3908,12 @@ void final_cost_hashjoin(PlannerInfo* root, HashPath* path, JoinCostWorkspace* w
     /* Mark the path with the correct row estimate */
     set_rel_path_rows(&path->jpath.path, path->jpath.path.parent, path->jpath.path.param_info);
 
+    /* For partial paths, scale row estimate. */
+    if (path->jpath.path.parallel_workers > 0) {
+        double parallel_divisor = get_parallel_divisor(&path->jpath.path);
+        path->jpath.path.rows = clamp_row_est(path->jpath.path.rows / parallel_divisor);
+    }
+
     /*
      * If inner_path or outer_path is EC functioinScan without stream,
      * we should set the multiple particularly.
@@ -3911,6 +3930,9 @@ void final_cost_hashjoin(PlannerInfo* root, HashPath* path, JoinCostWorkspace* w
 
     /* mark the path with estimated # of batches */
     path->num_batches = numbatches;
+
+    /* store the total number of tuples (sum of partial row estimates) */
+    path->inner_rows_total = inner_path_rows_total;
 
     /* and compute the number of "virtual" buckets in the whole join */
     virtualbuckets = (double)numbuckets * (double)numbatches;
@@ -5902,6 +5924,66 @@ static double get_parallel_divisor(Path* path)
     return parallel_divisor;
 }
 
+/*
+ * compute_bitmap_pages
+ *
+ * compute number of pages fetched from heap in bitmap heap scan.
+ */
+double compute_bitmap_pages(PlannerInfo *root, RelOptInfo *baserel, Path *bitmapqual,
+    double loop_count, Cost *cost, double *tuple, bool ispartitionedindex)
+{
+    Cost indexTotalCost;
+    Selectivity indexSelectivity;
+    double pages_fetched;
+    double T = (baserel->pages > 1) ? (double)baserel->pages : 1.0;
+
+    /*
+     * Fetch total cost of obtaining the bitmap, as well as its total
+     * selectivity.
+     */
+    cost_bitmap_tree_node(bitmapqual, &indexTotalCost, &indexSelectivity);
+    /*
+     * Estimate number of main-table pages fetched.
+     */
+    double tuples_fetched = clamp_row_est(indexSelectivity * RELOPTINFO_LOCAL_FIELD(root, baserel, tuples));
+
+    if (loop_count > 1) {
+        /*
+         * For repeated bitmap scans, scale up the number of tuples fetched in
+         * the Mackert and Lohman formula by the number of scans, so that we
+         * estimate the number of pages fetched by all the scans. Then
+         * pro-rate for one scan.
+         */
+        pages_fetched = index_pages_fetched(tuples_fetched * loop_count,
+            (BlockNumber)baserel->pages,
+            get_indexpath_pages(bitmapqual),
+            root,
+            ispartitionedindex);
+
+        pages_fetched /= loop_count;
+    } else {
+        /*
+         * For a single scan, the number of heap pages that need to be fetched
+         * is the same as the Mackert and Lohman formula for the case T <= b
+         * (ie, no re-reads needed).
+         */
+        pages_fetched = (2.0 * T * tuples_fetched) / (2.0 * T + tuples_fetched);
+    }
+    if (pages_fetched >= T) {
+        pages_fetched = T;
+    } else {
+        pages_fetched = ceil(pages_fetched);
+    }
+
+    if (cost != NULL) {
+        *cost = indexTotalCost;
+    }
+    if (tuple != NULL) {
+        *tuple = tuples_fetched;
+    }
+
+    return pages_fetched;
+}
 /* it used to compute page_size in createplan.cpp */
 double cost_page_size(double tuples, int width)
 {

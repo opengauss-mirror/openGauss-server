@@ -91,7 +91,7 @@ PyObject* PLy_cursor(PyObject* self, PyObject* args)
         return PLy_cursor_plan(plan, planargs);
     }
 
-    PLy_exception_set(plpy_t_context.PLy_exc_error, "plpy.cursor expected a query or a plan");
+    PLy_exception_set(g_plpy_t_context.PLy_exc_error, "plpy.cursor expected a query or a plan");
     return NULL;
 }
 
@@ -333,8 +333,9 @@ static PyObject* PLy_cursor_iternext(PyObject* self)
             PyErr_SetNone(PyExc_StopIteration);
             ret = NULL;
         } else {
-            if (cursor->result.is_rowtype != 1)
+            if (cursor->result.is_rowtype != 1) {
                 PLy_input_tuple_funcs(&cursor->result, SPI_tuptable->tupdesc);
+            }
 
             ret = PLyDict_FromTuple(&cursor->result, SPI_tuptable->vals[0], SPI_tuptable->tupdesc);
         }
@@ -438,6 +439,7 @@ static PyObject* PLy_cursor_close(PyObject* self, PyObject* unused)
 
     if (!cursor->closed) {
         Portal portal = GetPortalByName(cursor->portalname);
+
         if (!PortalIsValid(portal)) {
             PLy_exception_set(PyExc_ValueError, "closing a cursor in an aborted subtransaction");
             return NULL;

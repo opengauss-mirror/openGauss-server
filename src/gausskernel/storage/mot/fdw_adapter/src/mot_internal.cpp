@@ -71,18 +71,6 @@
         oid == FLOAT8OID || oid == INT1OID || oid == DATEOID || oid == TIMEOID || oid == TIMESTAMPOID ||           \
         oid == TIMESTAMPTZOID)
 
-#define FILL_KEY_NULL(toid, buf, len)                \
-    {                                                \
-        errno_t erc = memset_s(buf, len, 0x00, len); \
-        securec_check(erc, "\0", "\0");              \
-    }
-
-#define FILL_KEY_MAX(toid, buf, len)                 \
-    {                                                \
-        errno_t erc = memset_s(buf, len, 0xff, len); \
-        securec_check(erc, "\0", "\0");              \
-    }
-
 MOT::MOTEngine* MOTAdaptor::m_engine = nullptr;
 static XLOGLogger xlogger;
 
@@ -240,227 +228,6 @@ static void CancelSessionCleanup()
 }
 
 static GaussdbConfigLoader* gaussdbConfigLoader = nullptr;
-
-// Error code mapping array from MOT to PG
-static const MotErrToPGErrSt MM_ERRCODE_TO_PG[] = {
-    // RC_OK
-    {ERRCODE_SUCCESSFUL_COMPLETION, "Success", nullptr},
-    // RC_ERROR
-    {ERRCODE_FDW_ERROR, "Unknown error has occurred", nullptr},
-    // RC_ABORT
-    {ERRCODE_FDW_ERROR, "Unknown error has occurred", nullptr},
-    // RC_UNSUPPORTED_COL_TYPE
-    {ERRCODE_INVALID_COLUMN_DEFINITION,
-        "Column definition of %s is not supported",
-        "Column type %s is not supported yet"},
-    // RC_UNSUPPORTED_COL_TYPE_ARR
-    {ERRCODE_INVALID_COLUMN_DEFINITION,
-        "Column definition of %s is not supported",
-        "Column type Array of %s is not supported yet"},
-    // RC_EXCEEDS_MAX_ROW_SIZE
-    {ERRCODE_FEATURE_NOT_SUPPORTED,
-        "Column definition of %s is not supported",
-        "Column size %d exceeds max tuple size %u"},
-    // RC_COL_NAME_EXCEEDS_MAX_SIZE
-    {ERRCODE_INVALID_COLUMN_DEFINITION,
-        "Column definition of %s is not supported",
-        "Column name %s exceeds max name size %u"},
-    // RC_COL_SIZE_INVLALID
-    {ERRCODE_INVALID_COLUMN_DEFINITION,
-        "Column definition of %s is not supported",
-        "Column size %d exceeds max size %u"},
-    // RC_TABLE_EXCEEDS_MAX_DECLARED_COLS
-    {ERRCODE_FEATURE_NOT_SUPPORTED, "Can't create table", "Can't add column %s, number of declared columns is less"},
-    // RC_INDEX_EXCEEDS_MAX_SIZE
-    {ERRCODE_FDW_KEY_SIZE_EXCEEDS_MAX_ALLOWED,
-        "Can't create index",
-        "Total columns size is greater than maximum index size %u"},
-    // RC_TABLE_EXCEEDS_MAX_INDEXES,
-    {ERRCODE_FDW_TOO_MANY_INDEXES,
-        "Can't create index",
-        "Total number of indexes for table %s is greater than the maximum number if indexes allowed %u"},
-    // RC_TXN_EXCEEDS_MAX_DDLS,
-    {ERRCODE_FDW_TOO_MANY_DDL_CHANGES_IN_TRANSACTION_NOT_ALLOWED,
-        "Cannot execute statement",
-        "Maximum number of DDLs per transactions reached the maximum %u"},
-    // RC_UNIQUE_VIOLATION
-    {ERRCODE_UNIQUE_VIOLATION, "duplicate key value violates unique constraint \"%s\"", "Key %s already exists."},
-    // RC_TABLE_NOT_FOUND
-    {ERRCODE_UNDEFINED_TABLE, "Table \"%s\" doesn't exist", nullptr},
-    // RC_INDEX_NOT_FOUND
-    {ERRCODE_UNDEFINED_TABLE, "Index \"%s\" doesn't exist", nullptr},
-    // RC_LOCAL_ROW_FOUND
-    {ERRCODE_FDW_ERROR, "Unknown error has occurred", nullptr},
-    // RC_LOCAL_ROW_NOT_FOUND
-    {ERRCODE_FDW_ERROR, "Unknown error has occurred", nullptr},
-    // RC_LOCAL_ROW_DELETED
-    {ERRCODE_FDW_ERROR, "Unknown error has occurred", nullptr},
-    // RC_INSERT_ON_EXIST
-    {ERRCODE_FDW_ERROR, "Unknown error has occurred", nullptr},
-    // RC_INDEX_RETRY_INSERT
-    {ERRCODE_FDW_ERROR, "Unknown error has occurred", nullptr},
-    // RC_INDEX_DELETE
-    {ERRCODE_FDW_ERROR, "Unknown error has occurred", nullptr},
-    // RC_LOCAL_ROW_NOT_VISIBLE
-    {ERRCODE_FDW_ERROR, "Unknown error has occurred", nullptr},
-    // RC_MEMORY_ALLOCATION_ERROR
-    {ERRCODE_OUT_OF_LOGICAL_MEMORY, "Memory is temporarily unavailable", nullptr},
-    // RC_ILLEGAL_ROW_STATE
-    {ERRCODE_FDW_ERROR, "Unknown error has occurred", nullptr},
-    // RC_NULL_VOILATION
-    {ERRCODE_FDW_ERROR,
-        "Null constraint violated",
-        "NULL value cannot be inserted into non-null column %s at table %s"},
-    // RC_PANIC
-    {ERRCODE_FDW_ERROR, "Critical error", "Critical error: %s"},
-    // RC_NA
-    {ERRCODE_FDW_OPERATION_NOT_SUPPORTED, "A checkpoint is in progress - cannot truncate table.", nullptr},
-    // RC_MAX_VALUE
-    {ERRCODE_FDW_ERROR, "Unknown error has occurred", nullptr}};
-
-static_assert(sizeof(MM_ERRCODE_TO_PG) / sizeof(MotErrToPGErrSt) == MOT::RC_MAX_VALUE + 1,
-    "Not all MOT engine error codes (RC) is mapped to PG error codes");
-
-void report_pg_error(MOT::RC rc, MOT::TxnManager* txn, void* arg1, void* arg2, void* arg3, void* arg4, void* arg5)
-{
-    const MotErrToPGErrSt* err = &MM_ERRCODE_TO_PG[rc];
-
-    switch (rc) {
-        case MOT::RC_OK:
-            break;
-        case MOT::RC_ERROR:
-            ereport(ERROR, (errmodule(MOD_MOT), errcode(err->m_pgErr), errmsg("%s", err->m_msg)));
-            break;
-        case MOT::RC_ABORT:
-            ereport(ERROR, (errmodule(MOD_MOT), errcode(err->m_pgErr), errmsg("%s", err->m_msg)));
-            break;
-        case MOT::RC_UNSUPPORTED_COL_TYPE: {
-            ColumnDef* col = (ColumnDef*)arg1;
-            ereport(ERROR,
-                (errmodule(MOD_MOT),
-                    errcode(err->m_pgErr),
-                    errmsg(err->m_msg, col->colname),
-                    errdetail(err->m_detail, NameListToString(col->typname->names))));
-            break;
-        }
-        case MOT::RC_UNSUPPORTED_COL_TYPE_ARR: {
-            ColumnDef* col = (ColumnDef*)arg1;
-            ereport(ERROR,
-                (errmodule(MOD_MOT),
-                    errcode(err->m_pgErr),
-                    errmsg(err->m_msg, col->colname),
-                    errdetail(err->m_detail, strVal(llast(col->typname->names)))));
-            break;
-        }
-        case MOT::RC_COL_NAME_EXCEEDS_MAX_SIZE: {
-            ColumnDef* col = (ColumnDef*)arg1;
-            ereport(ERROR,
-                (errmodule(MOD_MOT),
-                    errcode(err->m_pgErr),
-                    errmsg(err->m_msg, col->colname),
-                    errdetail(err->m_detail, col->colname, (uint32_t)MOT::Column::MAX_COLUMN_NAME_LEN)));
-            break;
-        }
-        case MOT::RC_COL_SIZE_INVLALID: {
-            ColumnDef* col = (ColumnDef*)arg1;
-            ereport(ERROR,
-                (errmodule(MOD_MOT),
-                    errcode(err->m_pgErr),
-                    errmsg(err->m_msg, col->colname),
-                    errdetail(err->m_detail, (uint32_t)(uint64_t)arg2, (uint32_t)MAX_VARCHAR_LEN)));
-            break;
-        }
-        case MOT::RC_EXCEEDS_MAX_ROW_SIZE: {
-            ColumnDef* col = (ColumnDef*)arg1;
-            ereport(ERROR,
-                (errmodule(MOD_MOT),
-                    errcode(err->m_pgErr),
-                    errmsg(err->m_msg, col->colname),
-                    errdetail(err->m_detail, (uint32_t)(uint64_t)arg2, (uint32_t)MAX_TUPLE_SIZE)));
-            break;
-        }
-        case MOT::RC_TABLE_EXCEEDS_MAX_DECLARED_COLS: {
-            ColumnDef* col = (ColumnDef*)arg1;
-            ereport(ERROR,
-                (errmodule(MOD_MOT),
-                    errcode(err->m_pgErr),
-                    errmsg("%s", err->m_msg),
-                    errdetail(err->m_detail, col->colname)));
-            break;
-        }
-        case MOT::RC_INDEX_EXCEEDS_MAX_SIZE:
-            ereport(ERROR,
-                (errmodule(MOD_MOT),
-                    errcode(err->m_pgErr),
-                    errmsg("%s", err->m_msg),
-                    errdetail(err->m_detail, MAX_KEY_SIZE)));
-            break;
-        case MOT::RC_TABLE_EXCEEDS_MAX_INDEXES:
-            ereport(ERROR,
-                (errmodule(MOD_MOT),
-                    errcode(err->m_pgErr),
-                    errmsg("%s", err->m_msg),
-                    errdetail(err->m_detail, ((MOT::Table*)arg1)->GetTableName(), MAX_NUM_INDEXES)));
-            break;
-        case MOT::RC_TXN_EXCEEDS_MAX_DDLS:
-            ereport(ERROR,
-                (errmodule(MOD_MOT),
-                    errcode(err->m_pgErr),
-                    errmsg("%s", err->m_msg),
-                    errdetail(err->m_detail, MAX_DDL_ACCESS_SIZE)));
-            break;
-        case MOT::RC_UNIQUE_VIOLATION:
-            ereport(ERROR,
-                (errmodule(MOD_MOT),
-                    errcode(err->m_pgErr),
-                    errmsg(err->m_msg, (char*)arg1),
-                    errdetail(err->m_detail, (char*)arg2)));
-            break;
-
-        case MOT::RC_TABLE_NOT_FOUND:
-        case MOT::RC_INDEX_NOT_FOUND:
-            ereport(ERROR, (errmodule(MOD_MOT), errcode(err->m_pgErr), errmsg(err->m_msg, (char*)arg1)));
-            break;
-
-            // following errors are internal and should not get to an upper layer
-        case MOT::RC_LOCAL_ROW_FOUND:
-        case MOT::RC_LOCAL_ROW_NOT_FOUND:
-        case MOT::RC_LOCAL_ROW_DELETED:
-        case MOT::RC_INSERT_ON_EXIST:
-        case MOT::RC_INDEX_RETRY_INSERT:
-        case MOT::RC_INDEX_DELETE:
-        case MOT::RC_LOCAL_ROW_NOT_VISIBLE:
-        case MOT::RC_ILLEGAL_ROW_STATE:
-            ereport(ERROR, (errmodule(MOD_MOT), errcode(err->m_pgErr), errmsg("%s", err->m_msg)));
-            break;
-        case MOT::RC_MEMORY_ALLOCATION_ERROR:
-            ereport(ERROR, (errmodule(MOD_MOT), errcode(err->m_pgErr), errmsg("%s", err->m_msg)));
-            break;
-        case MOT::RC_NULL_VIOLATION: {
-            ColumnDef* col = (ColumnDef*)arg1;
-            MOT::Table* table = (MOT::Table*)arg2;
-            ereport(ERROR,
-                (errmodule(MOD_MOT),
-                    errcode(err->m_pgErr),
-                    errmsg("%s", err->m_msg),
-                    errdetail(err->m_detail, col->colname, table->GetLongTableName().c_str())));
-            break;
-        }
-        case MOT::RC_PANIC: {
-            char* msg = (char*)arg1;
-            ereport(PANIC,
-                (errmodule(MOD_MOT), errcode(err->m_pgErr), errmsg("%s", err->m_msg), errdetail(err->m_detail, msg)));
-            break;
-        }
-        case MOT::RC_NA:
-            ereport(ERROR, (errmodule(MOD_MOT), errcode(err->m_pgErr), errmsg("%s", err->m_msg)));
-            break;
-        case MOT::RC_MAX_VALUE:
-        default:
-            ereport(ERROR, (errmodule(MOD_MOT), errcode(err->m_pgErr), errmsg("%s", err->m_msg)));
-            break;
-    }
-}
 
 bool MOTAdaptor::m_initialized = false;
 bool MOTAdaptor::m_callbacks_initialized = false;
@@ -1059,7 +826,8 @@ void MOTAdaptor::OpenCursor(Relation rel, MOTFdwStateSt* festate)
 
             festate->m_stateKey[bIx].InitKey(keyLength);
             buf = festate->m_stateKey[bIx].GetKeyBuf();
-            FILL_KEY_MAX(INT8OID, buf, keyLength);
+            errno_t erc = memset_s(buf, keyLength, 0xff, keyLength);
+            securec_check(erc, "\0", "\0");
             festate->m_cursor[bIx] =
                 ix->Search(&festate->m_stateKey[bIx], false, false, festate->m_currTxn->GetThdId(), found);
             break;
@@ -1074,7 +842,8 @@ void MOTAdaptor::OpenCursor(Relation rel, MOTFdwStateSt* festate)
 
                     festate->m_stateKey[1].InitKey(keyLength);
                     buf = festate->m_stateKey[1].GetKeyBuf();
-                    FILL_KEY_MAX(INT8OID, buf, keyLength);
+                    errno_t erc = memset_s(buf, keyLength, 0xff, keyLength);
+                    securec_check(erc, "\0", "\0");
                     festate->m_cursor[1] =
                         ix->Search(&festate->m_stateKey[1], false, false, festate->m_currTxn->GetThdId(), found);
                 } else {
@@ -1174,7 +943,7 @@ static MOT::RC TableFieldType(const ColumnDef* colDef, MOT::MOT_CATALOG_FIELD_TY
                     *typeLen = colLen = MAX_VARCHAR_LEN;
 #endif
                 if (colLen > MAX_VARCHAR_LEN || colLen < 0) {
-                    res = MOT::RC_COL_SIZE_INVLALID;
+                    res = MOT::RC_COL_SIZE_INVALID;
                 } else {
                     isBlob = true;
                 }
@@ -1328,7 +1097,7 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* index, ::TransactionId tid)
 
     ix = MOT::IndexFactory::CreateIndex(index_order, indexing_method, flavor);
     if (ix == nullptr) {
-        report_pg_error(MOT::RC_ABORT, txn);
+        report_pg_error(MOT::RC_ABORT);
         return MOT::RC_ABORT;
     }
     ix->SetExtId(index->indexOid);
@@ -1392,7 +1161,7 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* index, ::TransactionId tid)
 
     if ((res = ix->IndexInit(keyLength, index->unique, index->idxname, nullptr)) != MOT::RC_OK) {
         delete ix;
-        report_pg_error(res, txn);
+        report_pg_error(res);
         return res;
     }
 
@@ -1406,7 +1175,7 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* index, ::TransactionId tid)
                     errmsg("Can not create index, max number of indexes %u reached", MAX_NUM_INDEXES)));
             return MOT::RC_TABLE_EXCEEDS_MAX_INDEXES;
         } else {
-            report_pg_error(txn->m_err, txn, index->idxname, txn->m_errMsgBuf);
+            report_pg_error(txn->m_err, index->idxname, txn->m_errMsgBuf);
             return MOT::RC_UNIQUE_VIOLATION;
         }
     }
@@ -1464,7 +1233,7 @@ MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* table, ::TransactionId t
                 table->base.relation->relname, tname.c_str(), columnCount, table->base.relation->foreignOid)) {
             delete currentTable;
             currentTable = nullptr;
-            report_pg_error(MOT::RC_MEMORY_ALLOCATION_ERROR, txn);
+            report_pg_error(MOT::RC_MEMORY_ALLOCATION_ERROR);
             break;
         }
 
@@ -1474,12 +1243,11 @@ MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* table, ::TransactionId t
         if (res != MOT::RC_OK) {
             delete currentTable;
             currentTable = nullptr;
-            report_pg_error(MOT::RC_MEMORY_ALLOCATION_ERROR, txn);
+            report_pg_error(MOT::RC_MEMORY_ALLOCATION_ERROR);
             break;
         }
 
-        ListCell* cell;
-
+        ListCell* cell = nullptr;
         foreach (cell, table->base.tableElts) {
             int16 typeLen = 0;
             bool isBlob = false;
@@ -1501,7 +1269,7 @@ MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* table, ::TransactionId t
             if (res != MOT::RC_OK) {
                 delete currentTable;
                 currentTable = nullptr;
-                report_pg_error(res, txn, colDef, (void*)(int64)typeLen);
+                report_pg_error(res, colDef, (void*)(int64)typeLen);
                 break;
             }
             hasBlob |= isBlob;
@@ -1555,7 +1323,7 @@ MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* table, ::TransactionId t
             if (res != MOT::RC_OK) {
                 delete currentTable;
                 currentTable = nullptr;
-                report_pg_error(res, txn, colDef, (void*)(int64)typeLen);
+                report_pg_error(res, colDef, (void*)(int64)typeLen);
                 break;
             }
         }
@@ -1583,7 +1351,7 @@ MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* table, ::TransactionId t
         if (!currentTable->InitRowPool()) {
             delete currentTable;
             currentTable = nullptr;
-            report_pg_error(MOT::RC_MEMORY_ALLOCATION_ERROR, txn);
+            report_pg_error(MOT::RC_MEMORY_ALLOCATION_ERROR);
             break;
         }
 
@@ -1598,7 +1366,7 @@ MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* table, ::TransactionId t
         if (res != MOT::RC_OK) {
             delete currentTable;
             currentTable = nullptr;
-            report_pg_error(res, txn);
+            report_pg_error(res);
             break;
         }
 
@@ -1613,7 +1381,7 @@ MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* table, ::TransactionId t
         if (rc != MOT::RC_OK) {
             delete currentTable;
             currentTable = nullptr;
-            report_pg_error(rc, txn);
+            report_pg_error(rc);
             break;
         }
         primaryIdx->SetExtId(table->base.relation->foreignOid + 1);
@@ -1913,7 +1681,8 @@ void MOTAdaptor::CreateKeyBuffer(Relation rel, MOTFdwStateSt* festate, int start
             Datum val = ExecEvalExpr((ExprState*)(expr), festate->m_econtext, &is_null, nullptr);
             if (is_null) {
                 MOT_ASSERT((offset + fieldLengths[i]) <= keyLength);
-                FILL_KEY_NULL(desc->attrs[orgCols[i] - 1]->atttypid, buf + offset, fieldLengths[i]);
+                errno_t erc = memset_s(buf + offset, fieldLengths[i], 0x00, fieldLengths[i]);
+                securec_check(erc, "\0", "\0");
             } else {
                 MOT::Column* col = festate->m_table->GetField(orgCols[i]);
                 uint8_t fill = 0x00;
@@ -2168,6 +1937,137 @@ void MOTAdaptor::DatumToMOT(MOT::Column* col, Datum datum, Oid type, uint8_t* da
     }
 }
 
+inline void MOTAdaptor::VarcharToMOTKey(
+    MOT::Column* col, ExprState* expr, Datum datum, Oid type, uint8_t* data, size_t len, KEY_OPER oper, uint8_t fill)
+{
+    if (expr != nullptr) {  // LLVM passes nullptr for expr parameter
+        bool noValue = false;
+        switch (expr->resultType) {
+            case BYTEAOID:
+            case TEXTOID:
+            case VARCHAROID:
+            case CLOBOID:
+            case BPCHAROID:
+                break;
+            default:
+                noValue = true;
+                errno_t erc = memset_s(data, len, 0x00, len);
+                securec_check(erc, "\0", "\0");
+                break;
+        }
+        if (noValue) {
+            return;
+        }
+    }
+
+    bytea* txt = DatumGetByteaP(datum);
+    size_t size = VARSIZE(txt);  // includes header len VARHDRSZ
+    char* src = VARDATA(txt);
+
+    if (size > len) {
+        size = len;
+    }
+
+    size -= VARHDRSZ;
+    if (oper == KEY_OPER::READ_KEY_LIKE) {
+        if (src[size - 1] == '%') {
+            size -= 1;
+        } else {
+            // switch to equal
+            if (type == BPCHAROID) {
+                fill = 0x20;  // space ' ' == 0x20
+            } else {
+                fill = 0x00;
+            }
+        }
+    } else if (type == BPCHAROID) {  // handle padding for blank-padded type
+        fill = 0x20;
+    }
+    col->PackKey(data, (uintptr_t)src, size, fill);
+
+    if ((char*)datum != (char*)txt) {
+        pfree(txt);
+    }
+}
+
+inline void MOTAdaptor::FloatToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, uint8_t* data)
+{
+    if (expr != nullptr) {  // LLVM passes nullptr for expr parameter
+        if (expr->resultType == FLOAT8OID) {
+            MOT::DoubleConvT dc;
+            MOT::FloatConvT fc;
+            dc.m_r = (uint64_t)datum;
+            fc.m_v = (float)dc.m_v;
+            uint64_t u = (uint64_t)fc.m_r;
+            col->PackKey(data, u, col->m_size);
+        } else {
+            col->PackKey(data, datum, col->m_size);
+        }
+    } else {
+        col->PackKey(data, datum, col->m_size);
+    }
+}
+
+inline void MOTAdaptor::NumericToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, uint8_t* data)
+{
+    Numeric n = DatumGetNumeric(datum);
+    char buf[DECIMAL_MAX_SIZE];
+    MOT::DecimalSt* d = (MOT::DecimalSt*)buf;
+    PGNumericToMOT(n, *d);
+    col->PackKey(data, (uintptr_t)d, DECIMAL_SIZE(d));
+}
+
+inline void MOTAdaptor::TimestampToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, uint8_t* data)
+{
+    if (expr != nullptr) {
+        if (expr->resultType == TIMESTAMPTZOID) {
+            Timestamp result = DatumGetTimestamp(DirectFunctionCall1(timestamptz_timestamp, datum));
+            col->PackKey(data, result, col->m_size);
+        } else if (expr->resultType == DATEOID) {
+            Timestamp result = DatumGetTimestamp(DirectFunctionCall1(date_timestamp, datum));
+            col->PackKey(data, result, col->m_size);
+        } else {
+            col->PackKey(data, datum, col->m_size);
+        }
+    } else {
+        col->PackKey(data, datum, col->m_size);
+    }
+}
+
+inline void MOTAdaptor::TimestampTzToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, uint8_t* data)
+{
+    if (expr != nullptr) {
+        if (expr->resultType == TIMESTAMPOID) {
+            TimestampTz result = DatumGetTimestampTz(DirectFunctionCall1(timestamp_timestamptz, datum));
+            col->PackKey(data, result, col->m_size);
+        } else if (expr->resultType == DATEOID) {
+            TimestampTz result = DatumGetTimestampTz(DirectFunctionCall1(date_timestamptz, datum));
+            col->PackKey(data, result, col->m_size);
+        } else {
+            col->PackKey(data, datum, col->m_size);
+        }
+    } else {
+        col->PackKey(data, datum, col->m_size);
+    }
+}
+
+inline void MOTAdaptor::DateToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, uint8_t* data)
+{
+    if (expr != nullptr) {
+        if (expr->resultType == TIMESTAMPOID) {
+            DateADT result = DatumGetDateADT(DirectFunctionCall1(timestamp_date, datum));
+            col->PackKey(data, result, col->m_size);
+        } else if (expr->resultType == TIMESTAMPTZOID) {
+            DateADT result = DatumGetDateADT(DirectFunctionCall1(timestamptz_date, datum));
+            col->PackKey(data, result, col->m_size);
+        } else {
+            col->PackKey(data, datum, col->m_size);
+        }
+    } else {
+        col->PackKey(data, datum, col->m_size);
+    }
+}
+
 void MOTAdaptor::DatumToMOTKey(
     MOT::Column* col, ExprState* expr, Datum datum, Oid type, uint8_t* data, size_t len, KEY_OPER oper, uint8_t fill)
 {
@@ -2177,132 +2077,135 @@ void MOTAdaptor::DatumToMOTKey(
         case TEXTOID:
         case VARCHAROID:
         case CLOBOID:
-        case BPCHAROID: {
-            if (expr != nullptr) {  // LLVM passes nullptr for expr parameter
-                bool noValue = false;
-                switch (expr->resultType) {
-                    case BYTEAOID:
-                    case TEXTOID:
-                    case VARCHAROID:
-                    case CLOBOID:
-                    case BPCHAROID:
-                        break;
-                    default:
-                        noValue = true;
-                        errno_t erc = memset_s(data, len, 0x00, len);
-                        securec_check(erc, "\0", "\0");
-                        break;
-                }
-                if (noValue) {
-                    break;
-                }
-            }
-            bytea* txt = DatumGetByteaP(datum);
-            size_t size = VARSIZE(txt);  // includes header len VARHDRSZ
-            char* src = VARDATA(txt);
-
-            if (size > len)
-                size = len;
-
-            size -= VARHDRSZ;
-            if (oper == KEY_OPER::READ_KEY_LIKE) {
-                if (src[size - 1] == '%') {
-                    size -= 1;
-                } else {
-                    // switch to equal
-                    if (type == BPCHAROID) {
-                        fill = 0x20;  // space ' ' == 0x20
-                    } else {
-                        fill = 0x00;
-                    }
-                }
-            } else if (type == BPCHAROID) {  // handle padding for blank-padded type
-                fill = 0x20;
-            }
-            col->PackKey(data, (uintptr_t)src, size, fill);
-
-            if ((char*)datum != (char*)txt) {
-                pfree(txt);
-            }
-
+        case BPCHAROID:
+            VarcharToMOTKey(col, expr, datum, type, data, len, oper, fill);
             break;
-        }
-        case FLOAT4OID: {
-            if (expr != nullptr) {  // LLVM passes nullptr for expr parameter
-                if (expr->resultType == FLOAT8OID) {
-                    MOT::DoubleConvT dc;
-                    MOT::FloatConvT fc;
-                    dc.m_r = (uint64_t)datum;
-                    fc.m_v = (float)dc.m_v;
-                    uint64_t u = (uint64_t)fc.m_r;
-                    col->PackKey(data, u, col->m_size);
-                } else {
-                    col->PackKey(data, datum, col->m_size);
-                }
-            } else {
-                col->PackKey(data, datum, col->m_size);
-            }
+        case FLOAT4OID:
+            FloatToMOTKey(col, expr, datum, data);
             break;
-        }
-        case NUMERICOID: {
-            Numeric n = DatumGetNumeric(datum);
-            char buf[DECIMAL_MAX_SIZE];
-            MOT::DecimalSt* d = (MOT::DecimalSt*)buf;
-            PGNumericToMOT(n, *d);
-            col->PackKey(data, (uintptr_t)d, DECIMAL_SIZE(d));
-
+        case NUMERICOID:
+            NumericToMOTKey(col, expr, datum, data);
             break;
-        }
-        case TIMESTAMPOID: {
-            if (expr != nullptr) {
-                if (expr->resultType == TIMESTAMPTZOID) {
-                    Timestamp result = DatumGetTimestamp(DirectFunctionCall1(timestamptz_timestamp, datum));
-                    col->PackKey(data, result, col->m_size);
-                } else if (expr->resultType == DATEOID) {
-                    Timestamp result = DatumGetTimestamp(DirectFunctionCall1(date_timestamp, datum));
-                    col->PackKey(data, result, col->m_size);
-                } else {
-                    col->PackKey(data, datum, col->m_size);
-                }
-            } else {
-                col->PackKey(data, datum, col->m_size);
-            }
+        case TIMESTAMPOID:
+            TimestampToMOTKey(col, expr, datum, data);
             break;
-        }
-        case TIMESTAMPTZOID: {
-            if (expr != nullptr) {
-                if (expr->resultType == TIMESTAMPOID) {
-                    TimestampTz result = DatumGetTimestampTz(DirectFunctionCall1(timestamp_timestamptz, datum));
-                    col->PackKey(data, result, col->m_size);
-                } else if (expr->resultType == DATEOID) {
-                    TimestampTz result = DatumGetTimestampTz(DirectFunctionCall1(date_timestamptz, datum));
-                    col->PackKey(data, result, col->m_size);
-                } else {
-                    col->PackKey(data, datum, col->m_size);
-                }
-            } else {
-                col->PackKey(data, datum, col->m_size);
-            }
+        case TIMESTAMPTZOID:
+            TimestampTzToMOTKey(col, expr, datum, data);
             break;
-        }
-        case DATEOID: {
-            if (expr != nullptr) {
-                if (expr->resultType == TIMESTAMPOID) {
-                    DateADT result = DatumGetDateADT(DirectFunctionCall1(timestamp_date, datum));
-                    col->PackKey(data, result, col->m_size);
-                } else if (expr->resultType == TIMESTAMPTZOID) {
-                    DateADT result = DatumGetDateADT(DirectFunctionCall1(timestamptz_date, datum));
-                    col->PackKey(data, result, col->m_size);
-                } else {
-                    col->PackKey(data, datum, col->m_size);
-                }
-            } else {
-                col->PackKey(data, datum, col->m_size);
-            }
+        case DATEOID:
+            DateToMOTKey(col, expr, datum, data);
             break;
-        }
         default:
             col->PackKey(data, datum, col->m_size);
             break;
     }
+}
+
+MOTFdwStateSt* InitializeFdwState(void* fdwState, List** fdwExpr, uint64_t exTableID)
+{
+    MOTFdwStateSt* state = (MOTFdwStateSt*)palloc0(sizeof(MOTFdwStateSt));
+    List* values = (List*)fdwState;
+
+    state->m_allocInScan = true;
+    state->m_foreignTableId = exTableID;
+    if (list_length(values) > 0) {
+        ListCell* cell = list_head(values);
+        int type = ((Const*)lfirst(cell))->constvalue;
+        if (type != FDW_LIST_STATE) {
+            return state;
+        }
+        cell = lnext(cell);
+        state->m_cmdOper = (CmdType)((Const*)lfirst(cell))->constvalue;
+        cell = lnext(cell);
+        state->m_order = (SORTDIR_ENUM)((Const*)lfirst(cell))->constvalue;
+        cell = lnext(cell);
+        state->m_hasForUpdate = (bool)((Const*)lfirst(cell))->constvalue;
+        cell = lnext(cell);
+        state->m_foreignTableId = ((Const*)lfirst(cell))->constvalue;
+        cell = lnext(cell);
+        state->m_numAttrs = ((Const*)lfirst(cell))->constvalue;
+        cell = lnext(cell);
+        state->m_ctidNum = ((Const*)lfirst(cell))->constvalue;
+        cell = lnext(cell);
+        state->m_numExpr = ((Const*)lfirst(cell))->constvalue;
+        cell = lnext(cell);
+
+        int len = BITMAP_GETLEN(state->m_numAttrs);
+        state->m_attrsUsed = (uint8_t*)palloc0(len);
+        state->m_attrsModified = (uint8_t*)palloc0(len);
+        BitmapDeSerialize(state->m_attrsUsed, len, &cell);
+
+        if (cell != NULL) {
+            state->m_bestIx = &state->m_bestIxBuf;
+            state->m_bestIx->Deserialize(cell, exTableID);
+        }
+
+        if (fdwExpr != NULL && *fdwExpr != NULL) {
+            ListCell* c = NULL;
+            int i = 0;
+
+            // divide fdw expr to param list and original expr
+            state->m_remoteCondsOrig = NULL;
+
+            foreach (c, *fdwExpr) {
+                if (i < state->m_numExpr) {
+                    i++;
+                    continue;
+                } else {
+                    state->m_remoteCondsOrig = lappend(state->m_remoteCondsOrig, lfirst(c));
+                }
+            }
+
+            *fdwExpr = list_truncate(*fdwExpr, state->m_numExpr);
+        }
+    }
+    return state;
+}
+
+void* SerializeFdwState(MOTFdwStateSt* state)
+{
+    List* result = NULL;
+
+    // set list type to FDW_LIST_STATE
+    result = lappend(result, makeConst(INT4OID, -1, InvalidOid, 4, FDW_LIST_STATE, false, true));
+    result = lappend(result, makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum(state->m_cmdOper), false, true));
+    result = lappend(result, makeConst(INT1OID, -1, InvalidOid, 4, Int8GetDatum(state->m_order), false, true));
+    result = lappend(result, makeConst(BOOLOID, -1, InvalidOid, 1, BoolGetDatum(state->m_hasForUpdate), false, true));
+    result =
+        lappend(result, makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum(state->m_foreignTableId), false, true));
+    result = lappend(result, makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum(state->m_numAttrs), false, true));
+    result = lappend(result, makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum(state->m_ctidNum), false, true));
+    result = lappend(result, makeConst(INT2OID, -1, InvalidOid, 2, Int16GetDatum(state->m_numExpr), false, true));
+    int len = BITMAP_GETLEN(state->m_numAttrs);
+    result = BitmapSerialize(result, state->m_attrsUsed, len);
+
+    if (state->m_bestIx != nullptr) {
+        state->m_bestIx->Serialize(&result);
+    }
+    ReleaseFdwState(state);
+    return result;
+}
+
+void ReleaseFdwState(MOTFdwStateSt* state)
+{
+    CleanCursors(state);
+
+    if (state->m_currTxn) {
+        state->m_currTxn->m_queryState.erase((uint64_t)state);
+    }
+
+    if (state->m_bestIx && state->m_bestIx != &state->m_bestIxBuf)
+        pfree(state->m_bestIx);
+
+    if (state->m_remoteCondsOrig != nullptr)
+        list_free(state->m_remoteCondsOrig);
+
+    if (state->m_attrsUsed != NULL)
+        pfree(state->m_attrsUsed);
+
+    if (state->m_attrsModified != NULL)
+        pfree(state->m_attrsModified);
+
+    state->m_table = NULL;
+    pfree(state);
 }

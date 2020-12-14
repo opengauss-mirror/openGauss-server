@@ -6386,7 +6386,7 @@ CreateForeignTableStmt:
 					n->base.inhRelations = NIL;
 					n->base.if_not_exists = true;
 					/* FDW-specific data */
-					n->servername = pstrdup("mot_server");;
+					n->servername = pstrdup("mot_server");
 					n->options = $9;
 
 					n->write_only = $10;

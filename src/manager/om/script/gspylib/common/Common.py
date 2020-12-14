@@ -310,6 +310,7 @@ class DefaultValue():
     RESIZE_LOG_FILE = "gs_resize.log"
     HOTPATCH_LOG_FILE = "gs_hotpatch.log"
     EXPANSION_LOG_FILE = "gs_expansion.log"
+    DROPNODE_LOG_FILE = "gs_dropnode.log"
     # hotpatch action
     HOTPATCH_ACTION_LIST = ["load", "unload", "active", "deactive",
                             "info", "list"]

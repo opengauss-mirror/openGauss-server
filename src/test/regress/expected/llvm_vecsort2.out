@@ -307,7 +307,7 @@ explain (analyze on, costs off, timing off) select * from llvm_vecsort_table_03 
  Row Adapter (actual rows=5001 loops=1)
    ->  Vector Sort (actual rows=5001 loops=1)
          Sort Key: l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipinstruct, l_shipmode, l_comment
-         Sort Method: external sort  Memory: 1056kB
+         Sort Method: external sort  Disk: 1056kB
          ->  CStore Scan on llvm_vecsort_table_03 (actual rows=5001 loops=1)
 --? Total runtime: .*
 (6 rows)

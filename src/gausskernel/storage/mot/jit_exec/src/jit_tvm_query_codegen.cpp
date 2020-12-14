@@ -22,12 +22,17 @@
  * -------------------------------------------------------------------------
  */
 
-// Be sure to include jit_tvm_query.h before anything else because of global.h.
-// See jit_tvm_query.h for more details.
+/*
+ * ATTENTION: Be sure to include jit_tvm_query.h before anything else because of libintl.h
+ * See jit_tvm_query.h for more details.
+ */
 #include "jit_tvm_query.h"
 #include "jit_tvm_query_codegen.h"
 #include "jit_tvm_funcs.h"
 #include "jit_tvm_blocks.h"
+#include "storage/mot/jit_exec.h"
+#include "jit_tvm_util.h"
+#include "jit_util.h"
 
 using namespace tvm;
 

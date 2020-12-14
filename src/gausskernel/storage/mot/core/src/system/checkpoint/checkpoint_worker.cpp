@@ -124,7 +124,7 @@ bool CheckpointWorkerPool::Write(Buffer* buffer, Row* row, int fd)
     return true;
 }
 
-int CheckpointWorkerPool::Checkpoint(Buffer* buffer, Sentinel* sentinel, int fd, int tid, bool& isDeleted)
+int CheckpointWorkerPool::Checkpoint(Buffer* buffer, Sentinel* sentinel, int fd, uint16_t threadId, bool& isDeleted)
 {
     Row* mainRow = sentinel->GetData();
     Row* stableRow = nullptr;
@@ -132,14 +132,13 @@ int CheckpointWorkerPool::Checkpoint(Buffer* buffer, Sentinel* sentinel, int fd,
     isDeleted = false;
 
     if (mainRow != nullptr) {
-        bool headerLocked = sentinel->TryLock(tid);
-
+        bool headerLocked = sentinel->TryLock(threadId);
         if (headerLocked == false) {
             if (mainRow->GetTwoPhaseMode() == true) {
                 MOT_LOG_DEBUG("checkpoint: row %p is 2pc", mainRow);
                 return wrote;
             }
-            sentinel->Lock(tid);
+            sentinel->Lock(threadId);
         }
         stableRow = sentinel->GetStable();
         if (mainRow->IsRowDeleted()) {
@@ -209,8 +208,9 @@ int CheckpointWorkerPool::Checkpoint(Buffer* buffer, Sentinel* sentinel, int fd,
         sentinel->SetStable(nullptr);
     }
 
-    if (mainRow != nullptr)
+    if (mainRow != nullptr) {
         sentinel->Release();
+    }
     return wrote;
 }
 
@@ -244,34 +244,36 @@ void CheckpointWorkerPool::ExecuteMicroGcTransaction(
 void CheckpointWorkerPool::WorkerFunc()
 {
     MOT_DECLARE_NON_KERNEL_THREAD();
-    MOT_LOG_DEBUG("CheckpointWorkerPool::workerFunc");
+    MOT_LOG_DEBUG("CheckpointWorkerPool::WorkerFunc");
+
     Buffer buffer;
     if (!buffer.Initialize()) {
-        MOT_LOG_ERROR("CheckpointWorkerPool::workerFunc: Failed to initialize buffer");
+        MOT_LOG_ERROR("CheckpointWorkerPool::WorkerFunc: Failed to initialize buffer");
         m_cpManager.OnError(ErrCodes::MEMORY, "Memory allocation failure");
         MOT::MOTEngine::GetInstance()->OnCurrentThreadEnding();
         MOT_LOG_DEBUG("thread exiting");
         return;
     }
+
     SessionContext* sessionContext = GetSessionManager()->CreateSessionContext();
     if (sessionContext == nullptr) {
-        MOT_LOG_ERROR("CheckpointWorkerPool::workerFunc: Failed to initialize Session Context");
+        MOT_LOG_ERROR("CheckpointWorkerPool::WorkerFunc: Failed to initialize Session Context");
         m_cpManager.OnError(ErrCodes::MEMORY, "Memory allocation failure");
         MOT::MOTEngine::GetInstance()->OnCurrentThreadEnding();
         MOT_LOG_DEBUG("thread exiting");
         return;
     }
+
     GcManager* gcSession = sessionContext->GetTxnManager()->GetGcSession();
     gcSession->SetGcType(GcManager::GC_CHECKPOINT);
-    int threadId = MOTCurrThreadId;
+    uint16_t threadId = MOTCurrThreadId;
     if (GetGlobalConfiguration().m_enableNuma && !GetTaskAffinity().SetAffinity(threadId)) {
         MOT_LOG_WARN("Failed to set affinity for checkpoint worker, checkpoint performance may be affected");
     }
 
     Sentinel** deletedList = new (nothrow) Sentinel*[DELETE_LIST_SIZE];
-    uint16_t deletedListLocation = 0;
     if (!deletedList) {
-        MOT_LOG_ERROR("CheckpointWorkerPool::workerFunc: Failed to initialize buffer");
+        MOT_LOG_ERROR("CheckpointWorkerPool::WorkerFunc: Failed to allocate memory for deleted sentinel list");
         m_cpManager.OnError(ErrCodes::MEMORY, "Memory allocation failure");
         GetSessionManager()->DestroySessionContext(sessionContext);
         MOT::MOTEngine::GetInstance()->OnCurrentThreadEnding();
@@ -282,192 +284,38 @@ void CheckpointWorkerPool::WorkerFunc()
     while (true) {
         uint32_t tableId = 0;
         uint64_t exId = 0;
-        uint32_t curSegLen = 0;
-        uint32_t seg = 0;
+        uint32_t maxSegId = 0;
         bool taskSucceeded = false;
-        Table* table = nullptr;
 
         if (m_cpManager.ShouldStop()) {
             break;
         }
 
-        table = GetTask();
+        Table* table = GetTask();
         if (table != nullptr) {
-            int fd = -1;
-
             do {
-                uint32_t overallOps = 0;
                 tableId = table->GetTableId();
                 exId = table->GetTableExId();
-                size_t tableSize = table->SerializeSize();
-                char* tableBuf = new (std::nothrow) char[tableSize];
-                if (tableBuf == nullptr) {
-                    MOT_LOG_ERROR("CheckpointWorkerPool::workerFunc: Failed to allocate buffer for table %u", tableId);
+
+                ErrCodes errCode = WriteTableMetadataFile(table);
+                if (errCode != ErrCodes::SUCCESS) {
+                    MOT_LOG_ERROR(
+                        "CheckpointWorkerPool::WorkerFunc: failed to write table metadata file for table %u", tableId);
                     m_cpManager.OnError(
-                        ErrCodes::MEMORY, "Memory allocation failure for table", std::to_string(tableId).c_str());
-                    break;
-                }
-
-                table->Serialize(tableBuf);
-
-                std::string fileName;
-                CheckpointUtils::MakeMdFilename(tableId, fileName, m_workingDir);
-
-                if (!CheckpointUtils::OpenFileWrite(fileName, fd)) {
-                    MOT_LOG_ERROR("CheckpointWorkerPool::workerFunc: failed to create file: %s", fileName.c_str());
-                    delete[] tableBuf;
-                    m_cpManager.OnError(ErrCodes::FILE_IO, "Failed to open md file", fileName.c_str());
-                    break;
-                }
-
-                CheckpointUtils::MetaFileHeader mFileHeader;
-                mFileHeader.m_fileHeader.m_magic = CP_MGR_MAGIC;
-                mFileHeader.m_fileHeader.m_tableId = tableId;
-                mFileHeader.m_fileHeader.m_exId = exId;
-                mFileHeader.m_entryHeader.m_dataLen = tableSize;
-                if (CheckpointUtils::WriteFile(fd, (char*)&mFileHeader, sizeof(CheckpointUtils::MetaFileHeader)) !=
-                    sizeof(CheckpointUtils::MetaFileHeader)) {
-                    delete[] tableBuf;
-                    m_cpManager.OnError(ErrCodes::FILE_IO, "Failed to write to md file", fileName.c_str());
-                    break;
-                }
-
-                if (CheckpointUtils::WriteFile(fd, tableBuf, tableSize) != tableSize) {
-                    delete[] tableBuf;
-                    m_cpManager.OnError(ErrCodes::FILE_IO, "Failed to write to md file", fileName.c_str());
-                    break;
-                }
-
-                if (CheckpointUtils::FlushFile(fd)) {
-                    delete[] tableBuf;
-                    m_cpManager.OnError(ErrCodes::FILE_IO, "Failed to flush md file", fileName.c_str());
-                    break;
-                }
-                if (CheckpointUtils::CloseFile(fd)) {
-                    delete[] tableBuf;
-                    m_cpManager.OnError(ErrCodes::FILE_IO, "Failed to close md file", fileName.c_str());
-                    break;
-                }
-
-                delete[] tableBuf;
-                tableBuf = nullptr;
-                fd = -1;
-
-                if (!BeginFile(fd, tableId, seg, exId)) {
-                    MOT_LOG_ERROR("CheckpointWorkerPool::workerFunc: failed to create file: %s", fileName.c_str());
-                    m_cpManager.OnError(ErrCodes::FILE_IO, "Failed to create data file", fileName.c_str());
-                    break;
-                }
-
-                Index* index = table->GetPrimaryIndex();
-                if (index == nullptr) {
-                    MOT_LOG_ERROR("CheckpointWorkerPool::workerFunc: failed to get index for table: %u", tableId);
-                    m_cpManager.OnError(ErrCodes::INDEX,
-                        "Failed to obtain primary index for table - ",
-                        std::to_string(tableId).c_str());
+                        errCode, "Failed to write table metadata file for table - ", std::to_string(tableId).c_str());
                     break;
                 }
 
                 struct timespec start, end;
                 uint64_t numOps = 0;
                 clock_gettime(CLOCK_MONOTONIC, &start);
-                IndexIterator* it = index->Begin(0);
-                if (it == nullptr) {
+
+                errCode = WriteTableDataFile(table, &buffer, deletedList, gcSession, threadId, maxSegId, numOps);
+                if (errCode != ErrCodes::SUCCESS) {
                     MOT_LOG_ERROR(
-                        "CheckpointWorkerPool::workerFunc: failed to get iterator for primary index on table: %u",
-                        tableId);
-                    m_cpManager.OnError(ErrCodes::INDEX,
-                        "Failed to obtain primary index iterator for table - ",
-                        std::to_string(tableId).c_str());
-                    break;
-                }
-
-                bool iterationSucceeded = true;
-                bool isDeleted = false;
-                while (it->IsValid()) {
-                    MOT::Sentinel* Sentinel = it->GetPrimarySentinel();
-                    MOT_ASSERT(Sentinel);
-                    if (Sentinel == nullptr) {
-                        MOT_LOG_ERROR("CheckpointWorkerPool::workerFunc: encountered a null sentinel");
-                        it->Next();
-                        continue;
-                    }
-                    int ckptStatus = Checkpoint(&buffer, Sentinel, fd, threadId, isDeleted);
-                    if (isDeleted) {
-                        deletedList[deletedListLocation++] = Sentinel;
-                        ExecuteMicroGcTransaction(deletedList, gcSession, table, deletedListLocation, DELETE_LIST_SIZE);
-                    }
-                    if (ckptStatus == 1) {
-                        numOps++;
-                        curSegLen += table->GetTupleSize() + sizeof(CheckpointUtils::EntryHeader);
-                        if (m_checkpointSegsize > 0 && curSegLen >= m_checkpointSegsize) {
-                            if (buffer.Size() > 0) {  // there is data in the buffer that needs to be written
-                                if (CheckpointUtils::WriteFile(fd, (char*)buffer.Data(), buffer.Size()) !=
-                                    buffer.Size()) {
-                                    MOT_LOG_ERROR("CheckpointWorkerPool::workerFunc: failed to write to file: %s",
-                                        fileName.c_str());
-                                    m_cpManager.OnError(
-                                        ErrCodes::FILE_IO, "Failed to write to file - ", fileName.c_str());
-                                    iterationSucceeded = false;
-                                    break;
-                                }
-                                buffer.Reset();
-                            }
-
-                            seg++;
-
-                            /* FinishFile will reset the fd to -1 on success. */
-                            if (!FinishFile(fd, tableId, numOps, exId)) {
-                                MOT_LOG_ERROR(
-                                    "CheckpointWorkerPool::workerFunc: failed to close file: %s", fileName.c_str());
-                                m_cpManager.OnError(ErrCodes::FILE_IO, "Failed to close file - ", fileName.c_str());
-                                iterationSucceeded = false;
-                                break;
-                            }
-
-                            if (!BeginFile(fd, tableId, seg, exId)) {
-                                MOT_LOG_ERROR(
-                                    "CheckpointWorkerPool::workerFunc: failed to create file: %s", fileName.c_str());
-                                m_cpManager.OnError(ErrCodes::FILE_IO, "Failed to create file - ", fileName.c_str());
-                                iterationSucceeded = false;
-                                break;
-                            }
-                            overallOps += numOps;
-                            numOps = 0;
-                            curSegLen = 0;
-                        }
-                    } else if (ckptStatus < 0) {
-                        m_cpManager.OnError(
-                            ErrCodes::CALC, "Checkpoint failed for table - ", std::to_string(tableId).c_str());
-                        iterationSucceeded = false;
-                        break;
-                    }
-                    it->Next();
-                }
-
-                if (it != nullptr) {
-                    delete it;
-                    it = nullptr;
-                }
-
-                if (!iterationSucceeded)
-                    break;
-
-                overallOps += numOps;
-                if (buffer.Size() > 0) {  // there is data in the buffer that needs to be written
-                    if (CheckpointUtils::WriteFile(fd, (char*)buffer.Data(), buffer.Size()) != buffer.Size()) {
-                        m_cpManager.OnError(ErrCodes::FILE_IO,
-                            "Failed to write remaining data for table - ",
-                            std::to_string(tableId).c_str());
-                        break;
-                    }
-                    buffer.Reset();
-                }
-
-                /* FinishFile will reset the fd to -1 on success. */
-                if (!FinishFile(fd, tableId, numOps, exId)) {
-                    MOT_LOG_ERROR("CheckpointWorkerPool::workerFunc: failed to close file: %s", fileName.c_str());
-                    m_cpManager.OnError(ErrCodes::FILE_IO, "Failed to close file - ", fileName.c_str());
+                        "CheckpointWorkerPool::WorkerFunc: failed to write table data file for table %u", tableId);
+                    m_cpManager.OnError(
+                        errCode, "Failed to write table data file for table - ", std::to_string(tableId).c_str());
                     break;
                 }
 
@@ -479,27 +327,13 @@ void CheckpointWorkerPool::WorkerFunc()
                  */
                 uint64_t deltaUs = (end.tv_sec - start.tv_sec) * 1000000 + (end.tv_nsec - start.tv_nsec) / 1000;
                 MOT_LOG_DEBUG(
-                    "CheckpointWorkerPool::workerFunc: checkpoint of table %u completed in %luus, (%lu elements)",
+                    "CheckpointWorkerPool::WorkerFunc: checkpoint of table %u completed in %luus, (%lu elements)",
                     tableId,
                     deltaUs,
-                    overallOps);
+                    numOps);
             } while (0);
 
-            if (fd != -1) {
-                /* Error case, OnError is done already and taskSucceeded is false. */
-                if (CheckpointUtils::CloseFile(fd)) {
-                    MOT_LOG_ERROR("CheckpointWorkerPool::finishFile: failed to close file (id: %u)", tableId);
-                }
-            }
-            if (deletedListLocation > 0) {
-                MOT_LOG_DEBUG("Checkpoint worker Clean Leftovers Table %c deletedListLocation = %u\n",
-                    table->GetTableName().c_str(),
-                    deletedListLocation);
-                ExecuteMicroGcTransaction(deletedList, gcSession, table, deletedListLocation, deletedListLocation);
-            }
-            table->ClearThreadMemoryCache();
-
-            m_cpManager.TaskDone(table, seg, taskSucceeded);
+            m_cpManager.TaskDone(table, maxSegId, taskSucceeded);
 
             if (!taskSucceeded) {
                 break;
@@ -519,14 +353,14 @@ bool CheckpointWorkerPool::BeginFile(int& fd, uint32_t tableId, int seg, uint64_
     std::string fileName;
     CheckpointUtils::MakeCpFilename(tableId, fileName, m_workingDir, seg);
     if (!CheckpointUtils::OpenFileWrite(fileName, fd)) {
-        MOT_LOG_ERROR("CheckpointWorkerPool::beginFile: failed to create file: %s", fileName.c_str());
+        MOT_LOG_ERROR("CheckpointWorkerPool::BeginFile: failed to create file: %s", fileName.c_str());
         return false;
     }
     MOT_LOG_DEBUG("CheckpointWorkerPool::beginFile: %s", fileName.c_str());
     CheckpointUtils::FileHeader fileHeader{CP_MGR_MAGIC, tableId, exId, 0};
     if (CheckpointUtils::WriteFile(fd, (char*)&fileHeader, sizeof(CheckpointUtils::FileHeader)) !=
         sizeof(CheckpointUtils::FileHeader)) {
-        MOT_LOG_ERROR("CheckpointWorkerPool::beginFile: failed to write file header: %s", fileName.c_str());
+        MOT_LOG_ERROR("CheckpointWorkerPool::BeginFile: failed to write file header: %s", fileName.c_str());
         CheckpointUtils::CloseFile(fd);
         fd = -1;
         return false;
@@ -539,21 +373,21 @@ bool CheckpointWorkerPool::FinishFile(int& fd, uint32_t tableId, uint64_t numOps
     bool ret = false;
     do {
         if (!CheckpointUtils::SeekFile(fd, 0)) {
-            MOT_LOG_ERROR("CheckpointWorkerPool::finishFile: failed to seek in file (id: %u)", tableId);
+            MOT_LOG_ERROR("CheckpointWorkerPool::FinishFile: failed to seek in file (id: %u)", tableId);
             break;
         }
         CheckpointUtils::FileHeader fileHeader{CP_MGR_MAGIC, tableId, exId, numOps};
         if (CheckpointUtils::WriteFile(fd, (char*)&fileHeader, sizeof(CheckpointUtils::FileHeader)) !=
             sizeof(CheckpointUtils::FileHeader)) {
-            MOT_LOG_ERROR("CheckpointWorkerPool::finishFile: failed to write to file (id: %u)", tableId);
+            MOT_LOG_ERROR("CheckpointWorkerPool::FinishFile: failed to write to file (id: %u)", tableId);
             break;
         }
         if (CheckpointUtils::FlushFile(fd)) {
-            MOT_LOG_ERROR("CheckpointWorkerPool::finishFile: failed to flush file (id: %u)", tableId);
+            MOT_LOG_ERROR("CheckpointWorkerPool::FinishFile: failed to flush file (id: %u)", tableId);
             break;
         }
         if (CheckpointUtils::CloseFile(fd)) {
-            MOT_LOG_ERROR("CheckpointWorkerPool::finishFile: failed to close file (id: %u)", tableId);
+            MOT_LOG_ERROR("CheckpointWorkerPool::FinishFile: failed to close file (id: %u)", tableId);
             break;
         }
         fd = -1;
@@ -569,5 +403,199 @@ bool CheckpointWorkerPool::SetCheckpointId()
         return false;
     MOT_LOG_DEBUG("CheckpointId is %lu", m_checkpointId);
     return true;
+}
+
+CheckpointWorkerPool::ErrCodes CheckpointWorkerPool::WriteTableMetadataFile(Table* table)
+{
+    uint32_t tableId = table->GetTableId();
+    uint64_t exId = table->GetTableExId();
+    int fd = -1;
+
+    size_t tableSize = table->SerializeSize();
+    char* tableBuf = new (std::nothrow) char[tableSize];
+    if (tableBuf == nullptr) {
+        MOT_LOG_ERROR("CheckpointWorkerPool::WriteTableMetadata: Failed to allocate buffer for table %u", tableId);
+        return ErrCodes::MEMORY;
+    }
+
+    table->Serialize(tableBuf);
+
+    std::string fileName;
+    CheckpointUtils::MakeMdFilename(tableId, fileName, m_workingDir);
+
+    if (!CheckpointUtils::OpenFileWrite(fileName, fd)) {
+        MOT_LOG_ERROR("CheckpointWorkerPool::WriteTableMetadata: failed to create md file: %s", fileName.c_str());
+        delete[] tableBuf;
+        return ErrCodes::FILE_IO;
+    }
+
+    CheckpointUtils::MetaFileHeader mFileHeader;
+    mFileHeader.m_fileHeader.m_magic = CP_MGR_MAGIC;
+    mFileHeader.m_fileHeader.m_tableId = tableId;
+    mFileHeader.m_fileHeader.m_exId = exId;
+    mFileHeader.m_entryHeader.m_dataLen = tableSize;
+
+    if (CheckpointUtils::WriteFile(fd, (char*)&mFileHeader, sizeof(CheckpointUtils::MetaFileHeader)) !=
+        sizeof(CheckpointUtils::MetaFileHeader)) {
+        MOT_LOG_ERROR("CheckpointWorkerPool::WriteTableMetadata: failed to write to md file: %s", fileName.c_str());
+        delete[] tableBuf;
+        return ErrCodes::FILE_IO;
+    }
+
+    if (CheckpointUtils::WriteFile(fd, tableBuf, tableSize) != tableSize) {
+        MOT_LOG_ERROR("CheckpointWorkerPool::WriteTableMetadata: failed to write to md file: %s", fileName.c_str());
+        delete[] tableBuf;
+        return ErrCodes::FILE_IO;
+    }
+
+    if (CheckpointUtils::FlushFile(fd)) {
+        MOT_LOG_ERROR("CheckpointWorkerPool::WriteTableMetadata: failed to flush md file: %s", fileName.c_str());
+        delete[] tableBuf;
+        return ErrCodes::FILE_IO;
+    }
+
+    if (CheckpointUtils::CloseFile(fd)) {
+        MOT_LOG_ERROR("CheckpointWorkerPool::WriteTableMetadata: failed to close md file: %s", fileName.c_str());
+        delete[] tableBuf;
+        return ErrCodes::FILE_IO;
+    }
+
+    delete[] tableBuf;
+    return ErrCodes::SUCCESS;
+}
+
+CheckpointWorkerPool::ErrCodes CheckpointWorkerPool::WriteTableDataFile(Table* table, Buffer* buffer,
+    Sentinel** deletedList, GcManager* gcSession, uint16_t threadId, uint32_t& maxSegId, uint64_t& numOps)
+{
+    uint32_t tableId = table->GetTableId();
+    uint64_t exId = table->GetTableExId();
+    int fd = -1;
+    uint16_t deletedListLocation = 0;
+    uint64_t currFileOps = 0;
+    uint32_t curSegLen = 0;
+
+    maxSegId = 0;
+    numOps = 0;
+    Index* index = table->GetPrimaryIndex();
+    if (index == nullptr) {
+        MOT_LOG_ERROR("CheckpointWorkerPool::WriteTableDataFile: failed to get primary index for table %u", tableId);
+        return ErrCodes::INDEX;
+    }
+
+    IndexIterator* it = index->Begin(threadId);
+    if (it == nullptr) {
+        MOT_LOG_ERROR(
+            "CheckpointWorkerPool::WriteTableDataFile: failed to get iterator for primary index on table %u", tableId);
+        return ErrCodes::INDEX;
+    }
+
+    if (!BeginFile(fd, tableId, maxSegId, exId)) {
+        MOT_LOG_ERROR(
+            "CheckpointWorkerPool::WriteTableDataFile: failed to create data file %u for table %u", maxSegId, tableId);
+        delete it;
+        return ErrCodes::FILE_IO;
+    }
+
+    ErrCodes errCode = ErrCodes::SUCCESS;
+    bool isDeleted = false;
+    while (it->IsValid()) {
+        MOT::Sentinel* sentinel = it->GetPrimarySentinel();
+        MOT_ASSERT(sentinel);
+        if (sentinel == nullptr) {
+            MOT_LOG_ERROR("CheckpointWorkerPool::WriteTableDataFile: encountered a null sentinel");
+            it->Next();
+            continue;
+        }
+        int ckptStatus = Checkpoint(buffer, sentinel, fd, threadId, isDeleted);
+        if (isDeleted) {
+            deletedList[deletedListLocation++] = sentinel;
+            ExecuteMicroGcTransaction(deletedList, gcSession, table, deletedListLocation, DELETE_LIST_SIZE);
+        }
+        if (ckptStatus == 1) {
+            currFileOps++;
+            curSegLen += table->GetTupleSize() + sizeof(CheckpointUtils::EntryHeader);
+            if (m_checkpointSegsize > 0 && curSegLen >= m_checkpointSegsize) {
+                if (buffer->Size() > 0) {  // there is data in the buffer that needs to be written
+                    if (CheckpointUtils::WriteFile(fd, (char*)buffer->Data(), buffer->Size()) != buffer->Size()) {
+                        MOT_LOG_ERROR(
+                            "CheckpointWorkerPool::WriteTableDataFile: failed to write data file %u for table %u",
+                            maxSegId,
+                            tableId);
+                        errCode = ErrCodes::FILE_IO;
+                        break;
+                    }
+                    buffer->Reset();
+                }
+
+                /* FinishFile will reset the fd to -1 on success. */
+                if (!FinishFile(fd, tableId, currFileOps, exId)) {
+                    MOT_LOG_ERROR("CheckpointWorkerPool::WriteTableDataFile: failed to close data file %u for table %u",
+                        maxSegId,
+                        tableId);
+                    errCode = ErrCodes::FILE_IO;
+                    break;
+                }
+
+                maxSegId++;
+                numOps += currFileOps;
+
+                if (!BeginFile(fd, tableId, maxSegId, exId)) {
+                    MOT_LOG_ERROR(
+                        "CheckpointWorkerPool::WriteTableDataFile: failed to create data file %u for table %u",
+                        maxSegId,
+                        tableId);
+                    break;
+                }
+
+                currFileOps = 0;
+                curSegLen = 0;
+            }
+        } else if (ckptStatus < 0) {
+            errCode = ErrCodes::CALC;
+            break;
+        }
+        it->Next();
+    }
+
+    delete it;
+    it = nullptr;
+
+    if (deletedListLocation > 0) {
+        MOT_LOG_DEBUG("Checkpoint worker clean leftovers, Table %s deletedListLocation = %u\n",
+            table->GetTableName().c_str(),
+            deletedListLocation);
+        ExecuteMicroGcTransaction(deletedList, gcSession, table, deletedListLocation, deletedListLocation);
+    }
+    table->ClearThreadMemoryCache();
+
+    if (errCode != ErrCodes::SUCCESS) {
+        if (fd != -1) {
+            (void)CheckpointUtils::CloseFile(fd);
+        }
+        return errCode;
+    }
+
+    if (buffer->Size() > 0) {  // there is data in the buffer that needs to be written
+        if (CheckpointUtils::WriteFile(fd, (char*)buffer->Data(), buffer->Size()) != buffer->Size()) {
+            MOT_LOG_ERROR(
+                "CheckpointWorkerPool::WriteTableDataFile: failed to write (remaining) data file %u for table %u",
+                maxSegId,
+                tableId);
+            (void)CheckpointUtils::CloseFile(fd);
+            return ErrCodes::FILE_IO;
+        }
+        buffer->Reset();
+    }
+
+    /* FinishFile will reset the fd to -1 on success. */
+    if (!FinishFile(fd, tableId, currFileOps, exId)) {
+        MOT_LOG_ERROR(
+            "CheckpointWorkerPool::WriteTableDataFile: failed to close data file %u for table %u", maxSegId, tableId);
+        (void)CheckpointUtils::CloseFile(fd);
+        return ErrCodes::FILE_IO;
+    }
+
+    numOps += currFileOps;
+    return ErrCodes::SUCCESS;
 }
 }  // namespace MOT

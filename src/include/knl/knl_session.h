@@ -1229,6 +1229,10 @@ typedef struct knl_u_postgres_context {
     bool ignore_till_sync;
 } knl_u_postgres_context;
 
+typedef struct knl_u_deepsql_context {
+    bool enable_ai_env;
+} knl_u_deepsql_context;
+
 typedef struct knl_u_stat_context {
     char* pgstat_stat_filename;
     char* pgstat_stat_tmpname;
@@ -1687,7 +1691,21 @@ typedef struct knl_u_unique_sql_context {
      * - is_top_unique_sql to false
      */
     bool is_top_unique_sql;
+
+    /* sort and hash instrment states */
+    struct unique_sql_instr* unique_sql_sort_instr;
+    struct unique_sql_instr* unique_sql_hash_instr;
 } knl_u_unique_sql_context;
+
+typedef struct unique_sql_instr {
+    bool has_sorthash;       /* true if query contains sort/hash operation */
+    uint64 counts;           /* # of operation during unique sql */
+    int64 used_work_mem;         /* space of used work mem by kbs */
+    TimestampTz enter_time;  /* time stamp at the start point */
+    TimestampTz total_time;  /* execution time */
+    uint64 spill_counts;     /* # of spill times during the operation */
+    uint64 spill_size;       /* spill size for temp table by kbs */
+} unique_sql_instr;
 
 typedef struct knl_u_percentile_context {
     struct SqlRTInfo* LocalsqlRT;
@@ -2039,22 +2057,31 @@ typedef struct ParallelAppendState ParallelAppendState;
 /* Info need to pass from leader to worker */
 struct ParallelHeapScanDescData;
 struct ParallelIndexScanDescData;
+struct ParallelHashJoinState;
+struct SharedHashInfo;
+struct ParallelBitmapHeapState;
 typedef uint64 XLogRecPtr;
 typedef struct ParallelQueryInfo {
-    struct SharedExecutorInstrumentation *instrumentation;
-    BufferUsage *bufUsage;
-    char *tupleQueue;
-    char *pstmt_space;
-    char *param_space;
+    struct SharedExecutorInstrumentation* instrumentation;
+    BufferUsage* bufUsage;
+    char* tupleQueue;
+    char* pstmt_space;
+    char* param_space;
     Size param_len;
     int64 tuples_needed; /* tuple bound, see ExecSetTupleBound */
     int eflags;
     int pscan_num;
-    ParallelHeapScanDescData **pscan;
-    int pappend_num;
-    ParallelAppendState **pappend;
+    ParallelHeapScanDescData** pscan;
     int piscan_num;
-    ParallelIndexScanDescData **piscan;
+    ParallelIndexScanDescData** piscan;
+    int pappend_num;
+    ParallelAppendState** pappend;
+    int jstate_num;
+    ParallelHashJoinState** jstate;
+    int hash_num;
+    SharedHashInfo** shared_info;
+    int bmscan_num;
+    ParallelBitmapHeapState **bmscan;
 } ParallelQueryInfo;
 
 struct BTShared;
@@ -2223,6 +2250,9 @@ typedef struct knl_session_context {
     knl_u_unique_sql_context unique_sql_cxt;
     knl_u_user_login_context user_login_cxt;
     knl_u_percentile_context percentile_cxt;
+
+    /* AI deepsql */
+    knl_u_deepsql_context deepsql_cxt;
 
     /* GTT */
     knl_u_gtt_context gtt_ctx;

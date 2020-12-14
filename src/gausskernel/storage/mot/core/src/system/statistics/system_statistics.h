@@ -53,6 +53,9 @@ public:
      */
     static SystemStatisticsProvider& GetInstance();
 
+    /** @brief Takes an initial snapshot of monitored system metrics. */
+    bool SnapshotInitialMetrics();
+
     /**
      * @brief Derives classes should react to a notification that configuration changed. New
      * configuration is accessible via the ConfigManager.

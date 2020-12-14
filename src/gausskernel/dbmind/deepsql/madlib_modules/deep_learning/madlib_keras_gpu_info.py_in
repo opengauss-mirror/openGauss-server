@@ -1,0 +1,256 @@
+# coding=utf-8
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+"""
+@file madlib_keras_gpu_info.py_in
+
+@brief GPU configuration helper function
+
+@namespace madlib_keras_gpu_info
+"""
+
+import os
+import subprocess
+
+import plpy
+from utilities.utilities import is_platform_pg
+from utilities.utilities import unique_string
+from utilities.validate_args import output_tbl_valid
+
+class OutputInfoSchema:
+    TEMP_INFO_TABLE = unique_string(desp='gpu_info')
+    SEG_ID_COL = 'gp_seg_id'
+    GPU_DESCR_COL = 'gpu_descr'
+
+
+class Source:
+    NVIDIA = 'nvidia'
+    TENSORFLOW = 'tensorflow'
+
+
+class GPUInfoFunctions:
+    @staticmethod
+    def get_gpu_info_from_nvidia():
+        """
+        This function will run only on segment(s). Make sure not to run any non
+        select plpy execute.
+        :return: list of gpu descriptions as returned by nvidia-smi -L.
+        """
+        try:
+            return subprocess.check_output(["nvidia-smi", "-L"]).splitlines()
+        except Exception:  # Handle case when nvidia-smi -L fails
+            return []
+
+    @staticmethod
+    def get_gpu_info_from_tensorflow():
+        """
+        This function will run only on segment(s). Make sure not to run any non
+        select plpy execute.
+        :return: list of gpu descriptions as returned by tensorflow
+        """
+        current_working_dir = os.path.dirname(os.path.realpath(__file__))
+        gpus = subprocess.check_output(["python", "gpu_info_from_tf.py"],
+                                       cwd=current_working_dir).splitlines()
+        return gpus
+
+
+def gpu_configuration(schema_madlib, output_table, source):
+    """
+    :return: List of gpus along with their hostname in the format
+        GPDB
+        gpu_descr         |       hostname
+        ------------------+--------------------------
+        NVIDIA Tesla P100 | host1
+        NVIDIA Tesla P100 | host1
+        Super Duper GPU   | host2
+        Super Duper GPU   | host2
+        1. We use gp_dist_random to run either the nvidia smi UDF or the tensorflow UDF
+            on all the hosts. (see gpu_info_nvidia/gpu_info_tensorflow)
+        2. Also we do not need to run the tf/nvidia UDF on all the segments,
+            just one segment per host. That's why we group the output of
+            gp_segment_configuration by hostname and get the min segment from
+            each host.
+        3. To get the hostname along with the gpu description, we have to join
+            the output of nvidia/tf UDF with gp_segment_configuration and filter
+            out the following
+            * master
+            * mirror segments
+            * empty/null gpu description
+        Workflow for gpdb
+        1. Run query to get min seg ids on each host. This is so that we can run
+        the gpu UDF on just one segment per host.
+        2. Create a table by running the tf/nvidia UDF on the segment ids returned
+        from the previous step. Note that this table will only contain the output
+        of the UDF and the segment id itself. This table does not contain hostnames
+        3. To get the hostname associated with the segment id, we need to join the
+        table created in step with gp_segment_configuration.
+        It's important to note that we can merge all these 3 queries into one but
+        the problem with that is that a redistribution happens before running the UDF
+        which means the UDF does not run on the segments that we pass in to the query.
+        To avoid this, we broke down the query into 3 parts so that the UDF is always
+        run on the intended segments.
+
+        POSTGRES
+        gpu_descr         |       hostname
+        ------------------+--------------------------
+        NVIDIA Tesla P100 | localhost
+    """
+    module_name = 'madlib_keras_gpu_info'
+    output_tbl_valid(output_table, module_name)
+
+    if not source:
+        source = Source.TENSORFLOW
+    source = source.lower()
+    if source != Source.TENSORFLOW and source != Source.NVIDIA:
+        plpy.error("DL: source has to be one of {0} or {1}".format(
+            Source.TENSORFLOW, Source.NVIDIA))
+
+    gpu_fn_name = 'gpu_info_{0}'.format(source)
+    if is_platform_pg():
+        gpu_for_postgres(schema_madlib, output_table, gpu_fn_name)
+    else:
+        gpu_for_gpdb(schema_madlib, output_table, gpu_fn_name)
+
+
+def gpu_for_postgres(schema_madlib, output_table, gpu_fn_name):
+    gpu_info_query = """
+    CREATE TABLE {0} AS
+    SELECT 'localhost' as hostname, {1} from (SELECT unnest({2}.{3}()) AS {1}) s1
+    where {1} is NOT NULL AND {1} != ''
+        """.format(output_table, OutputInfoSchema.GPU_DESCR_COL,
+                   schema_madlib, gpu_fn_name)
+    plpy.execute(gpu_info_query)
+
+
+def gpu_for_gpdb(schema_madlib, output_table, gpu_fn_name):
+    min_seg_on_each_host = get_min_seg_ids_on_each_host()
+
+    create_gpu_info_table_without_hostname(schema_madlib, gpu_fn_name,
+                                           min_seg_on_each_host)
+
+    create_gpu_info_table_with_hostname(output_table)
+
+    plpy.execute("DROP TABLE IF EXISTS {0}".format(OutputInfoSchema.TEMP_INFO_TABLE))
+
+
+def get_min_seg_ids_on_each_host():
+    """
+    Run query to get min seg ids on each host. This is so that we can run
+    the gpu UDF on just one segment per host.
+    :return: List of min seg id per host
+    """
+    min_seg_id_alias = 'min_seg_id'
+    min_seg_query = """
+    SELECT {min_seg_id_alias} FROM 
+    (select hostname, min(content) AS {min_seg_id_alias} 
+    FROM gp_segment_configuration WHERE content != -1 AND role='p' 
+    GROUP BY hostname) min_seg_id_subquery
+    """.format(**locals())
+    min_seg_on_each_host = plpy.execute(min_seg_query)
+
+    min_seg_on_each_host = ','.join([str(seg[min_seg_id_alias])
+                                     for seg in min_seg_on_each_host])
+    return min_seg_on_each_host
+
+
+def create_gpu_info_table_without_hostname(schema_madlib, gpu_fn_name,
+                                           min_seg_on_each_host):
+    """ output_table,
+    Create a table by running the tf/nvidia UDF on the segment ids returned
+    from the previous step. Note that this table will only contain the output
+    of the UDF and the segment id itself. This table does not contain hostnames
+    :param schema_madlib:
+    :param gpu_fn_name:
+    :param min_seg_on_each_host:
+    """
+    gpu_info_per_host_query = """
+    CREATE TABLE {0} AS SELECT gp_segment_id AS {1}, {2}.{3}()
+    AS {4} FROM gp_dist_random('gp_id') WHERE gp_segment_id IN ({5})
+    """.format(OutputInfoSchema.TEMP_INFO_TABLE,
+               OutputInfoSchema.SEG_ID_COL,
+               schema_madlib, gpu_fn_name,
+               OutputInfoSchema.GPU_DESCR_COL,
+               min_seg_on_each_host)
+    plpy.execute(gpu_info_per_host_query)
+
+
+def create_gpu_info_table_with_hostname(output_table):
+    """
+    Create the final output table that contains the hostname and the gpu description.
+    To create this table, we need to join the table created in
+    create_gpu_info_table_without_hostname with gp_segment_configuration.
+    """
+    final_join_query = """
+    CREATE TABLE {0} AS
+    SELECT hostname, {1} FROM
+    (
+    SELECT hostname, unnest({1}) AS {1} FROM {2}
+    JOIN
+    gp_segment_configuration ON {3}=content WHERE content != -1 AND role='p'
+    ) s1
+    WHERE {1} != '' AND {1} is NOT NULL ORDER BY 1,2;
+    """.format(output_table, OutputInfoSchema.GPU_DESCR_COL,
+               OutputInfoSchema.TEMP_INFO_TABLE,
+               OutputInfoSchema.SEG_ID_COL)
+    plpy.execute(final_join_query)
+
+
+def gpu_configuration_help(schema_madlib):
+    """
+        Help function for gpu configuration
+
+        Args:
+            @param schema_madlib
+
+        Returns:
+            String. Help/usage information
+        """
+
+    help_string = """
+    Utility function to report number and type of GPUs on the database cluster.
+    -----------------------------------------------------------------------
+                                USAGE
+    -----------------------------------------------------------------------
+     SELECT {schema_madlib}.gpu_configuration(
+        output_table,            -- Name of the output table to write out the 
+                                    GPU information.  
+        source                   -- Default: 'tensorflow'. Source for determining
+                                    GPU configuration.
+                                    Using 'tensorflow' returns a description based
+                                    on what TensorFlow reports.
+                                    Using 'nvidia' returns a description based 
+                                    on what the Nvidia Systems Management Interface
+                                    (nvidia-smi) reports [1].  
+                                    Note that MADlib and Keras will use the TensorFlow
+                                    information; the lower level nvidia-smi info 
+                                    is provided for convenience.
+        )
+    );
+
+    -----------------------------------------------------------------------
+                                OUTPUT
+    -----------------------------------------------------------------------
+    The output table ('output_table' above) contains the following columns:
+
+    hostname:   Name of the host machine in the cluster.
+                Does not include master or mirrors.  For PostgreSQL this will
+                always return 'localhost'.
+    gpu_descr:  String reported by TensorFlow or nvidia-smi.
+    """
+
+    return help_string.format(schema_madlib=schema_madlib)

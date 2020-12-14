@@ -1,0 +1,306 @@
+# -*- coding:utf-8 -*-
+# Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+#
+# openGauss is licensed under Mulan PSL v2.
+# You can use this software according to the terms
+# and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS,
+# WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# See the Mulan PSL v2 for more details.
+# ----------------------------------------------------------------------------
+
+import numpy as np
+import plpy
+from math import sqrt, ceil
+
+from utilities.control import MinWarning
+from utilities.utilities import _assert
+from utilities.utilities import extract_keyvalue_params
+from utilities.validate_args import get_expr_type
+
+from recursive_partitioning.decision_tree import _tree_train_using_bins
+from recursive_partitioning.decision_tree import _get_features_to_use
+from recursive_partitioning.decision_tree import _classify_features
+from recursive_partitioning.decision_tree import _get_filter_str
+from recursive_partitioning.decision_tree import _get_bins
+from recursive_partitioning.decision_tree import get_feature_str
+
+
+
+def gdbt_mean_square_error(y_pred, y):
+    y_pred = np.reshape(y_pred,[-1])
+    y = np.reshape(y,[-1])
+    return 0.5 * np.square(y_pred - y) / y.shape[0]
+
+def create_model_table(schema_madlib,output_table_name,tree_state, bins, tree_iter):
+    head = ''
+    if tree_iter == 0:
+        head = """CREATE TABLE {output_table_name} AS""".format(output_table_name = output_table_name)
+    else:
+        head = "INSERT INTO " + output_table_name
+
+    depth = (tree_state['pruned_depth'] if 'pruned_depth' in tree_state
+             else tree_state['tree_depth'])
+
+    sql = head + """ SELECT {tree_iter} as iteration, 
+            $1 AS tree,
+            $2 as cat_levels_in_text,
+            $3 as cat_n_levels,
+            {depth} as tree_depth
+            """.format(tree_iter = tree_iter, depth=depth)
+
+    sql_plan = plpy.prepare(sql, ['{0}.bytea8'.format(schema_madlib), 'text[]','integer[]'])
+    plpy.execute(sql_plan,[tree_state['tree_state'],bins['cat_origin'],bins['cat_n']])
+    return None
+
+def create_summary_table(output_table, null_proxy, cat_f, con_f, learning_rate, is_classification, predict_dt_prob, num_trees, source_table):
+    summary_table_name = output_table + '_summary'
+    null_proxy_str="NULL" if null_proxy is None else "'{0}'".format(null_proxy)
+    cat_f = ','.join(cat_f)
+    con_f = ','.join(con_f)
+    create_sql = """CREATE TABLE {summary_table_name} AS SELECT 
+                    'GBDT'::TEXT as method,
+                    '{cat_f}'::text     AS cat_features,
+                    '{con_f}'::text     AS con_features,
+                    '{source_table}'::text AS source_table,
+                    '{output_table}'::text AS model_table,
+                    {null_proxy_str}::text AS null_proxy,
+                    {learning_rate}::double precision AS learning_rate,
+                    {is_classification}::BOOLEAN AS is_classification,
+                    '{predict_dt_prob}'::text  AS predict_dt_prob,
+                    {num_trees}::INTEGER AS num_trees
+                """.format(**locals())
+    plpy.execute(create_sql)
+
+def create_test_table(test_result_table, id, y_pred):
+    plpy.execute( """CREATE TABLE {test_result_table} AS SELECT 
+            unnest(ARRAY{id}) as id,
+            unnest(ARRAY{y_pred}) as test_prediction
+        """.format(**locals()))
+
+def tree_fit(schema_madlib, bins, training_table_name, cat_features, con_features,
+                boolean_cats, num_bins,weights,
+                dep, min_split, min_bucket,
+                max_tree_depth, filter_null, dep_n_levels,
+                split_criterion,
+                num_random_features,
+                max_n_surr,null_proxy,verbose_mode=False,**kwargs):
+
+    msg_level = "notice" if verbose_mode else "warning"
+
+    with MinWarning(msg_level):
+        tree = _tree_train_using_bins(
+            schema_madlib, bins, training_table_name, cat_features, con_features,
+            boolean_cats, num_bins, weights, dep, min_split,
+            min_bucket, max_tree_depth, filter_null, dep_n_levels,
+            False, split_criterion, True,
+            num_random_features, max_n_surr, null_proxy)
+
+        tree['grp_key'] = ' '
+    return tree
+        
+def tree_gradient_predict(schema_madlib, model_table,iteration, id_col_name, cat_features_str,
+                            con_features_str, is_classification, predict_dt_prob, source_table):
+    id = []
+    res = []
+
+    if not is_classification or (predict_dt_prob == "response"):
+        sql = """ SELECT 
+                {id_col_name} as id,
+                {schema_madlib}._predict_dt_response(
+                tree, 
+                {cat_features_str}::INTEGER[],
+                {con_features_str}::DOUBLE PRECISION[]) as gradient_prediction
+            FROM (
+                SELECT * FROM {model_table} 
+                WHERE iteration = {iteration}) as m,
+                {source_table}""".format(**locals())
+    else :
+        sql = """ SELECT 
+                {id_col_name} as id,
+                {schema_madlib}._predict_dt_prob(
+                tree, 
+                {cat_features_str}::INTEGER[],
+                {con_features_str}::DOUBLE PRECISION[]) as gradient_prediction
+            FROM (
+                SELECT * FROM {model_table} 
+                WHERE iteration = {iteration}) as m,
+                {source_table}""".format(**locals())
+    rows = plpy.execute(sql)
+    for r in rows:
+        id.append(r['id'])
+        res.append(r['gradient_prediction'])   
+    return id , res
+
+def _get_gradient(y, y_pred, id, iteration, y_table_name):
+    # 1.calculate the loss
+    compute_loss = gdbt_mean_square_error(y_pred, y)
+
+    # 2.calculate the gradient
+    cal_gradient = (np.gradient(compute_loss)).tolist()
+
+    # 3.add column called gradient to source_table
+    if iteration == 1:
+        addCol_sql = """alter table {y_table_name} add gradient double precision""".format(**locals())
+        plpy.execute(addCol_sql)
+    
+    update_sql = """UPDATE {y_table_name} SET gradient = temp_gradient FROM (SELECT unnest(ARRAY{cal_gradient}) as temp_gradient,
+                    unnest(ARRAY{id}) as temp_id)q WHERE  id = temp_id""".format(**locals())
+    plpy.execute(update_sql)
+    return cal_gradient
+
+def gbdt_fit(schema_madlib,training_table_name, output_table_name,
+        id_col_name, dependent_variable, list_of_features,
+        list_of_features_to_exclude, weights,
+        num_trees, num_random_features,
+        max_tree_depth, min_split, min_bucket, num_bins,
+        null_handling_params, is_classification,
+        predict_dt_prob = None, learning_rate = None, 
+        verbose=False, **kwargs):
+
+    # 1. default paremeters
+    num_trees = 100 if num_trees is None else num_trees
+    weights = '1' if not weights or not weights.strip() else weights.strip()
+    max_tree_depth = 10 if max_tree_depth is None else max_tree_depth
+    min_split = 20 if min_split is None and min_bucket is None else min_split
+    min_bucket = min_split // 3 if not min_bucket else min_bucket
+    min_split = min_bucket * 3 if not min_split else min_split
+    num_bins = 100 if num_bins is None else num_bins
+    learning_rate = 0.01 if learning_rate is None else learning_rate
+    if predict_dt_prob not in ["response", "prob", None]:
+        plpy.error("""
+                invalid choice: '{predict_dt_prob}' (choose from 'response', 'prob')
+                """.format(predict_dt_prob= predict_dt_prob))
+    predict_dt_prob = "response" if predict_dt_prob is None else predict_dt_prob
+
+    null_handling_dict = extract_keyvalue_params(
+        null_handling_params,
+        dict(max_surrogates=int, null_as_category=bool),
+        dict(max_surrogates=0, null_as_category=False))
+    max_n_surr = null_handling_dict['max_surrogates']
+    null_as_category = null_handling_dict['null_as_category']
+    null_proxy = "__NULL__" if null_as_category else None
+    if null_as_category:
+        # can't have two ways of handling tuples with NULL values
+        max_n_surr = 0
+    _assert(max_n_surr >= 0,
+            "Maximum number of surrogates ({0}) should be non-negative".
+            format(max_n_surr))
+
+    # preprocess arguments
+    # expand "*" syntax and exclude some features
+    features = _get_features_to_use(schema_madlib,
+            training_table_name, list_of_features, list_of_features_to_exclude,
+            id_col_name, '1', dependent_variable, None)
+            
+    split_criterion = 'mse'
+    if num_random_features is None:
+        n_all_features = len(features)
+        num_random_features = int(sqrt(n_all_features) if is_classification else ceil(float(n_all_features) / 3))
+
+    _assert(0 < num_random_features <= len(features),
+        "GBDT error: Number of features to be selected "
+        "is more than the actual number of features.")
+
+    all_cols_types = dict([(f, get_expr_type(f, training_table_name))
+                    for f in features])
+    cat_features, ordered_cat_features, boolean_cats, con_features = \
+        _classify_features(all_cols_types, features)
+
+    
+    filter_null = _get_filter_str(dependent_variable, None)
+
+    n_rows = plpy.execute("SELECT count(*) FROM {0} WHERE {1}".format(training_table_name, filter_null))[0]['count']
+    dep_n_levels = 1
+
+    bins = _get_bins(schema_madlib, training_table_name,
+            cat_features, ordered_cat_features,
+            con_features, num_bins, dependent_variable,
+            boolean_cats, n_rows, False,
+            dep_n_levels, filter_null, null_proxy)
+    bins['grp_key_cat'] = ['']
+    cat_features = bins['cat_features']
+
+    tree = tree_fit(schema_madlib, bins, training_table_name, cat_features, con_features,
+                boolean_cats, num_bins,weights,
+                dependent_variable, min_split, min_bucket,
+                max_tree_depth, filter_null, dep_n_levels,
+                split_criterion,
+                num_random_features,
+                max_n_surr,null_proxy)
+    create_model_table(schema_madlib, output_table_name,tree, bins, 0)
+
+    cat_features_str, con_features_str = get_feature_str(schema_madlib,
+                                                         training_table_name,
+                                                         cat_features,
+                                                         con_features,
+                                                         "m.cat_levels_in_text", "m.cat_n_levels",
+                                                         null_proxy)
+
+    id, y_pred = tree_gradient_predict(schema_madlib,output_table_name,0, id_col_name, cat_features_str,
+    con_features_str,is_classification,predict_dt_prob, training_table_name)
+
+    y_res = plpy.execute("""SELECT {dependent_variable} AS y FROM {training_table_name}""".format(**locals()))
+    y = []
+    for row in y_res:
+        y.append(row['y'])
+
+    for sample_id in range(1, num_trees):
+        gradient = _get_gradient(y , y_pred, id, sample_id, training_table_name)
+        
+        tree = tree_fit (schema_madlib, bins, training_table_name, cat_features, con_features,
+                boolean_cats, num_bins, weights, 
+                'gradient', min_split, min_bucket,
+                max_tree_depth, filter_null, dep_n_levels,
+                split_criterion,
+                num_random_features,
+                max_n_surr,null_proxy)
+
+        create_model_table(schema_madlib, output_table_name,tree, bins, sample_id)
+        id, y_temp = tree_gradient_predict(schema_madlib,output_table_name,sample_id, id_col_name, cat_features_str,
+        con_features_str,is_classification, predict_dt_prob,training_table_name)
+        y_pred -= np.multiply(learning_rate, y_temp)
+    
+    plpy.execute("""ALTER TABLE {training_table_name} DROP COLUMN IF EXISTS gradient CASCADE
+                """.format(training_table_name=training_table_name))
+                            
+    create_summary_table(output_table_name, null_proxy, bins['cat_features'], 
+                        bins['con_features'], learning_rate, is_classification, predict_dt_prob, 
+                        num_trees, training_table_name)
+
+
+
+def gbdt_predict(schema_madlib, test_table_name, model_table_name, output_table_name, id_col_name, **kwargs):
+
+    num_tree = plpy.execute("""SELECT COUNT(*) AS count FROM {model_table_name}""".format(**locals()))[0]['count']
+    if num_tree == 0:
+        plpy.error("The GBDT-method has no trees")
+    
+
+    elements = plpy.execute("""SELECT * FROM {model_table_name}_summary""".format(**locals()))[0]
+    cat_features = [] if not elements['cat_features'] else elements['cat_features'].split(',')
+    con_features = [] if not elements['con_features'] else elements['con_features'].split(',')
+    null_proxy = elements['null_proxy']
+    learning_rate = elements['learning_rate']
+    is_classification = elements['is_classification']
+    predict_dt_prob = elements['predict_dt_prob']
+
+    cat_features_str, con_features_str = get_feature_str(
+        schema_madlib, test_table_name, cat_features, con_features, "m.cat_levels_in_text", "m.cat_n_levels", null_proxy)
+    
+    id, y_pred = tree_gradient_predict(schema_madlib,model_table_name ,0, id_col_name, cat_features_str,
+        con_features_str,is_classification,predict_dt_prob,test_table_name)
+
+    for i in range(1, num_tree):
+        _, gradient = tree_gradient_predict(schema_madlib,model_table_name , i, id_col_name, cat_features_str,
+        con_features_str,is_classification,predict_dt_prob,test_table_name)
+        y_pred -= np.multiply(learning_rate, gradient)
+    if is_classification:
+        y_pred = np.around(y_pred)
+    create_test_table(output_table_name, id, y_pred.tolist())

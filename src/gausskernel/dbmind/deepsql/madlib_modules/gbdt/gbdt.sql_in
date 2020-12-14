@@ -1,0 +1,332 @@
+/*
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ *
+ * openGauss is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ * See the Mulan PSL v2 for more details.
+ * -------------------------------------------------------------------------
+ */
+
+m4_include(`SQLCommon.m4')
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.gbdt_train(
+    training_table_name         TEXT,
+    output_table_name           TEXT,
+    id_col_name                 TEXT,
+    dependent_variable          TEXT,
+    list_of_features            TEXT,
+    list_of_features_to_exclude TEXT,
+    weights                     TEXT,
+    num_trees                   INTEGER,
+    num_random_features         INTEGER,
+    max_tree_depth              INTEGER,
+    min_split                   INTEGER,
+    min_bucket                  INTEGER,
+    num_bins                    INTEGER,
+    null_handling_params        TEXT,
+    is_classification           BOOLEAN,
+    predict_dt_prob             TEXT,
+    learning_rate               DOUBLE PRECISION,
+    verbose                     BOOLEAN,
+    sample_ratio                DOUBLE PRECISION
+)
+RETURNS VOID AS $$
+PythonFunction(gbdt, gbdt, gbdt_fit)
+$$ LANGUAGE plpythonu VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `CONTAINS SQL', `');
+
+
+
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.gbdt_train(
+    training_table_name         TEXT,
+    output_table_name           TEXT,
+    id_col_name                 TEXT,
+    dependent_variable          TEXT,
+    list_of_features            TEXT,
+    list_of_features_to_exclude TEXT,
+    weights                     TEXT,
+    num_trees                   INTEGER,
+    num_random_features         INTEGER,
+    max_tree_depth              INTEGER,
+    min_split                   INTEGER,
+    min_bucket                  INTEGER,
+    num_bins                    INTEGER,
+    null_handling_params        TEXT,
+    is_classification           BOOLEAN,
+    predict_dt_prob             TEXT,
+    learning_rate               DOUBLE PRECISION,
+    verbose                     BOOLEAN
+)
+RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.gbdt_train($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 
+                                        $11, $12, $13, $14, $15, $16, $17, $18, NULL);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `CONTAINS SQL', `');
+
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.gbdt_train(
+    training_table_name         TEXT,
+    output_table_name           TEXT,
+    id_col_name                 TEXT,
+    dependent_variable          TEXT,
+    list_of_features            TEXT,
+    list_of_features_to_exclude TEXT,
+    weights                     TEXT,
+    num_trees                   INTEGER,
+    num_random_features         INTEGER,
+    max_tree_depth              INTEGER,
+    min_split                   INTEGER,
+    min_bucket                  INTEGER,
+    num_bins                    INTEGER,
+    null_handling_params        TEXT,
+    is_classification           BOOLEAN,
+    predict_dt_prob             TEXT,
+    learning_rate               DOUBLE PRECISION
+)
+RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.gbdt_train($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 
+                                        $11, $12, $13, $14, $15, $16, $17, FALSE::BOOLEAN);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `CONTAINS SQL', `');
+
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.gbdt_train(
+    training_table_name         TEXT,
+    output_table_name           TEXT,
+    id_col_name                 TEXT,
+    dependent_variable          TEXT,
+    list_of_features            TEXT,
+    list_of_features_to_exclude TEXT,
+    weights                     TEXT,
+    num_trees                   INTEGER,
+    num_random_features         INTEGER,
+    max_tree_depth              INTEGER,
+    min_split                   INTEGER,
+    min_bucket                  INTEGER,
+    num_bins                    INTEGER,
+    null_handling_params        TEXT,
+    is_classification           BOOLEAN,
+    predict_dt_prob             TEXT
+)
+RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.gbdt_train($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 
+                                        $11, $12, $13, $14, $15, $16, NULL);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `CONTAINS SQL', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.gbdt_train(
+    training_table_name         TEXT,
+    output_table_name           TEXT,
+    id_col_name                 TEXT,
+    dependent_variable          TEXT,
+    list_of_features            TEXT,
+    list_of_features_to_exclude TEXT,
+    weights                     TEXT,
+    num_trees                   INTEGER,
+    num_random_features         INTEGER,
+    max_tree_depth              INTEGER,
+    min_split                   INTEGER,
+    min_bucket                  INTEGER,
+    num_bins                    INTEGER,
+    null_handling_params        TEXT,
+    is_classification           BOOLEAN
+)
+RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.gbdt_train($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 
+                                        $11, $12, $13, $14, $15, NULL);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `CONTAINS SQL', `');
+
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.gbdt_train(
+    training_table_name         TEXT,
+    output_table_name           TEXT,
+    id_col_name                 TEXT,
+    dependent_variable          TEXT,
+    list_of_features            TEXT,
+    list_of_features_to_exclude TEXT,
+    weights                     TEXT,
+    num_trees                   INTEGER,
+    num_random_features         INTEGER,
+    max_tree_depth              INTEGER,
+    min_split                   INTEGER,
+    min_bucket                  INTEGER,
+    num_bins                    INTEGER,
+    null_handling_params        TEXT
+)
+RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.gbdt_train($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 
+                                        $11, $12, $13, $14, FALSE);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `CONTAINS SQL', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.gbdt_train(
+    training_table_name         TEXT,
+    output_table_name           TEXT,
+    id_col_name                 TEXT,
+    dependent_variable          TEXT,
+    list_of_features            TEXT,
+    list_of_features_to_exclude TEXT,
+    weights                     TEXT,
+    num_trees                   INTEGER,
+    num_random_features         INTEGER,
+    max_tree_depth              INTEGER,
+    min_split                   INTEGER,
+    min_bucket                  INTEGER,
+    num_bins                    INTEGER
+)
+RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.gbdt_train($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 
+                                        $11, $12, $13, NULL::TEXT);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `CONTAINS SQL', `');
+
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.gbdt_train(
+    training_table_name         TEXT,
+    output_table_name           TEXT,
+    id_col_name                 TEXT,
+    dependent_variable          TEXT,
+    list_of_features            TEXT,
+    list_of_features_to_exclude TEXT,
+    weights                     TEXT,
+    num_trees                   INTEGER,
+    num_random_features         INTEGER,
+    max_tree_depth              INTEGER,
+    min_split                   INTEGER,
+    min_bucket                  INTEGER
+)
+RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.gbdt_train($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 
+                                        $11, $12, 100::INTEGER);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `CONTAINS SQL', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.gbdt_train(
+    training_table_name         TEXT,
+    output_table_name           TEXT,
+    id_col_name                 TEXT,
+    dependent_variable          TEXT,
+    list_of_features            TEXT,
+    list_of_features_to_exclude TEXT,
+    weights                     TEXT,
+    num_trees                   INTEGER,
+    num_random_features         INTEGER,
+    max_tree_depth              INTEGER,
+    min_split                   INTEGER
+)
+RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.gbdt_train($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 
+                                        $11, ($11/3)::INTEGER);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `CONTAINS SQL', `');
+
+
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.gbdt_train(
+    training_table_name         TEXT,
+    output_table_name           TEXT,
+    id_col_name                 TEXT,
+    dependent_variable          TEXT,
+    list_of_features            TEXT,
+    list_of_features_to_exclude TEXT,
+    weights                     TEXT,
+    num_trees                   INTEGER,
+    num_random_features         INTEGER,
+    max_tree_depth              INTEGER
+)
+RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.gbdt_train($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 
+                                        20::INTEGER);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `CONTAINS SQL', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.gbdt_train(
+    training_table_name         TEXT,
+    output_table_name           TEXT,
+    id_col_name                 TEXT,
+    dependent_variable          TEXT,
+    list_of_features            TEXT,
+    list_of_features_to_exclude TEXT,
+    weights                     TEXT,
+    num_trees                   INTEGER,
+    num_random_features         INTEGER
+)
+RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.gbdt_train($1, $2, $3, $4, $5, $6, $7, $8, $9, 1::INTEGER);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `CONTAINS SQL', `');
+
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.gbdt_train(
+    training_table_name         TEXT,
+    output_table_name           TEXT,
+    id_col_name                 TEXT,
+    dependent_variable          TEXT,
+    list_of_features            TEXT,
+    list_of_features_to_exclude TEXT,
+    weights                     TEXT,
+    num_trees                   INTEGER
+)
+RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.gbdt_train($1, $2, $3, $4, $5, $6, $7, $8, NULL::INTEGER);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `CONTAINS SQL', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.gbdt_train(
+    training_table_name         TEXT,
+    output_table_name           TEXT,
+    id_col_name                 TEXT,
+    dependent_variable          TEXT,
+    list_of_features            TEXT,
+    list_of_features_to_exclude TEXT,
+    weights                     TEXT
+)
+RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.gbdt_train($1, $2, $3, $4, $5, $6, $7, 30::INTEGER);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `CONTAINS SQL', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.gbdt_train(
+    training_table_name         TEXT,
+    output_table_name           TEXT,
+    id_col_name                 TEXT,
+    dependent_variable          TEXT,
+    list_of_features            TEXT,
+    list_of_features_to_exclude TEXT
+)
+RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.gbdt_train($1, $2, $3, $4, $5, $6, NULL::TEXT);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `CONTAINS SQL', `');
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.gbdt_train(
+    training_table_name         TEXT,
+    output_table_name           TEXT,
+    id_col_name                 TEXT,
+    dependent_variable          TEXT,
+    list_of_features            TEXT
+)
+RETURNS VOID AS $$
+    SELECT MADLIB_SCHEMA.gbdt_train($1, $2, $3, $4, $5, NULL::TEXT);
+$$ LANGUAGE sql VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `CONTAINS SQL', `');
+
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.gbdt_predict(
+    test_table_name        TEXT,
+    model_table_name       TEXT,
+    output_table_name      TEXT,
+    id_col_name            TEXT
+) RETURNS VOID AS $$
+PythonFunction(gbdt, gbdt, gbdt_predict)
+$$ LANGUAGE plpythonu VOLATILE
+m4_ifdef(`__HAS_FUNCTION_PROPERTIES__', `CONTAINS SQL', `');

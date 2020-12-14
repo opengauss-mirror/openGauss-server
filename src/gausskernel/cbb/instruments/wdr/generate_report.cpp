@@ -393,7 +393,7 @@ void GenReport::get_snapinfo_data(report_params* params)
     /* host version of host info */
     List* verList = NIL;
     resetStringInfo(&query);
-    appendStringInfo(&query, "select version() as \"GaussDB Version\";");
+    appendStringInfo(&query, "select version() as \"openGauss Version\";");
     GenReport::get_query_data(query.data, true, &verList, &dash->type);
     GenReport::TableTranspose(verList, &overturn_data);
     tmpList = list_concat(tmpList, overturn_data);
@@ -2233,7 +2233,7 @@ static void GetClusterSqlDetailData(report_params* params)
     }
 
     GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
-    dash->dashTitle = "SQL Dateil";
+    dash->dashTitle = "SQL Detail";
     dash->tableTitle = "SQL Text";
     desc = "unique sql text";
     dash->desc = lappend(dash->desc, desc);
@@ -2260,7 +2260,7 @@ static void GetNodeSqlDetailData(report_params* params)
         pfree(uniqueIDStr);
     }
     GenReport::get_query_data(query.data, true, &dash->table, &dash->type);
-    dash->dashTitle = "SQL Dateil";
+    dash->dashTitle = "SQL Detail";
     dash->tableTitle = "SQL Text";
     desc = "unique sql text";
     dash->desc = lappend(dash->desc, desc);
@@ -3080,7 +3080,7 @@ static void get_summary_load_profile_file_io(report_params* params, dashboard* d
     pfree(query.data);
 }
 
-/* load profile - logons */
+/* load profile - logins */
 static void get_summary_load_profile_logins(report_params* params, dashboard* dash)
 {
     if (!pre_check_load_profile(params, dash)) {
@@ -4014,8 +4014,9 @@ static void check_report_parameter(report_params* params)
      */
     if (!g_instance.attr.attr_common.PGXCNodeName || g_instance.attr.attr_common.PGXCNodeName[0] == '\0') {
         currentNodeName = "unknown name";
+    } else {
+        currentNodeName = g_instance.attr.attr_common.PGXCNodeName;
     }
-    currentNodeName = g_instance.attr.attr_common.PGXCNodeName;
 
     if ((strncmp(params->report_scope, g_nodeScope, strlen(g_nodeScope)) == 0) &&
         ((params->report_node == NULL) || 

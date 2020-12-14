@@ -25,9 +25,12 @@
 #ifndef JIT_TVM_FUNCS_H
 #define JIT_TVM_FUNCS_H
 
-// Be sure to include jit_tvm_query.h before anything else because of global.h.
-// See jit_tvm_query.h for more details.
+/*
+ * ATTENTION: Be sure to include jit_tvm_query.h before anything else because of libintl.h
+ * See jit_tvm_query.h for more details.
+ */
 #include "jit_tvm_query.h"
+#include "jit_plan_expr.h"
 #include "logger.h"
 
 namespace JitExec {
@@ -2359,7 +2362,9 @@ public:
 
     ~SaveAvgArrayInstruction() final
     {
-        _avg_array = nullptr;
+        if (_avg_array != nullptr) {
+            delete _avg_array;
+        }
     }
 
     uint64_t Exec(tvm::ExecContext* exec_context) final
@@ -2457,7 +2462,9 @@ public:
 
     ~SetAggValueInstruction() final
     {
-        _value = nullptr;
+        if (_value != nullptr) {
+            delete _value;
+        }
     }
 
     Datum Exec(tvm::ExecContext* exec_context) final

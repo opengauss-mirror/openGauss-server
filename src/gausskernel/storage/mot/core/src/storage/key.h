@@ -111,18 +111,12 @@ public:
         m_keyLen = newLen;
     }
 
-    inline bool CpKey(const uint8_t* buf, uint16_t len)
+    inline void CpKey(const uint8_t* buf, uint16_t len)
     {
-        if (unlikely(len > m_keyLen)) {
-            MOT_LOG_ERROR("Key length is too big");
-            return false;
-        } else {
-            errno_t erc = memcpy_s(const_cast<uint8_t*>(m_keyBuf), m_keyLen, buf, len);
-            securec_check(erc, "\0", "\0");
-        }
+        MOT_ASSERT(len <= m_keyLen);
+        errno_t erc = memcpy_s(const_cast<uint8_t*>(m_keyBuf), m_keyLen, buf, len);
+        securec_check(erc, "\0", "\0");
         m_keyLen = len;
-
-        return true;
     }
 
     /**
@@ -168,9 +162,9 @@ public:
         return true;
     }
 
-    inline bool CpKey(const Key& key)
+    inline void CpKey(const Key& key)
     {
-        return CpKey(key.GetKeyBuf(), key.GetKeyLength());
+        CpKey(key.GetKeyBuf(), key.GetKeyLength());
     }
 
     void PrintKey() const

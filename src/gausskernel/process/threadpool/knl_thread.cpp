@@ -1106,7 +1106,7 @@ static void knl_t_walreceiver_init(knl_t_walreceiver_context* walreceiver_cxt)
     rc = memset_s(walreceiver_cxt->gucconf_lock_file, MAXPGPATH, 0, MAXPGPATH);
     securec_check(rc, "\0", "\0");
     walreceiver_cxt->reserve_item = {0};
-    walreceiver_cxt->check_file_timeout = 60 * 60 * 1000;
+    walreceiver_cxt->check_file_timeout = g_instance.attr.attr_common.config_sync_interval;
     walreceiver_cxt->walRcvCtlBlock = NULL;
     walreceiver_cxt->reply_message = (StandbyReplyMessage*)palloc0(sizeof(StandbyReplyMessage));
     walreceiver_cxt->feedback_message = (StandbyHSFeedbackMessage*)palloc0(sizeof(StandbyHSFeedbackMessage));
@@ -1405,7 +1405,6 @@ static void knl_t_mot_init(knl_t_mot_context* mot_cxt)
     mot_cxt->log_line_overflow = false;
     mot_cxt->log_line_buf = NULL;
     mot_cxt->log_level = 3; // the equivalent of MOT::LogLevel::LL_INFO
-    mot_cxt->init_codegen_once = false;
 
     mot_cxt->currentThreadId = (uint16_t)-1;
     mot_cxt->currentNumaNodeId = (-2);
@@ -1432,6 +1431,7 @@ void knl_t_bgworker_init(knl_t_bgworker_context* bgworker_cxt)
     bgworker_cxt->pcxt_list = DLIST_STATIC_INIT(bgworker_cxt->pcxt_list);
     bgworker_cxt->save_pgBufferUsage = NULL;
     bgworker_cxt->hpm_context = NULL;
+    bgworker_cxt->memCxt = NULL;
 }
 
 void knl_t_msqueue_init(knl_t_msqueue_context* msqueue_cxt)
@@ -1540,15 +1540,27 @@ void knl_thread_init(knl_thread_role role)
     knl_t_msqueue_init(&t_thrd.msqueue_cxt);
 }
 
-void knl_thread_set_name(const char* name)
+void knl_thread_set_name(const char* name, bool isCommandTag)
 {
     t_thrd.proc_cxt.MyProgName = (char*)name;
     /*
      * The length of thread name is restricted to 16 characters,
      * including the terminating null byte ('\0').
      */
-    Assert(strlen(name) < MAX_THREAD_NAME_LENGTH);
-    pthread_setname_np(pthread_self(), name);
+    char dynamic_tag[MAX_THREAD_NAME_LENGTH];
+    int rc = 0;
+    if (isCommandTag) {
+        dynamic_tag[0] = '>';
+        /*
+         * MAX_THREAD_NAME_LENGTH - 1 means minus the length of '>'
+         * MAX_THREAD_NAME_LENGTH - 2 menas minus the length of '>'+'\0'
+        */
+        rc = strncpy_s(dynamic_tag + 1, MAX_THREAD_NAME_LENGTH - 1, name, MAX_THREAD_NAME_LENGTH - 2);
+    } else {
+        rc = strncpy_s(dynamic_tag, MAX_THREAD_NAME_LENGTH, name, MAX_THREAD_NAME_LENGTH - 1);
+    }
+    securec_check(rc, "\0", "\0");
+    pthread_setname_np(pthread_self(), dynamic_tag);
 }
 
 __attribute__ ((__used__)) knl_thrd_context *get_current_thread()

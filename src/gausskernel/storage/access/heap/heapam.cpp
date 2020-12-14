@@ -1759,20 +1759,6 @@ void heap_rescan(HeapScanDesc scan, ScanKey key)
      * reinitialize scan descriptor
      */
     initscan(scan, key, true);
-
-    /*
-     * reset parallel scan, if present
-     */
-    if (scan->rs_parallel != NULL) {
-        ParallelHeapScanDesc parallel_scan;
-
-        /*
-         * Caller is responsible for making sure that all workers have
-         * finished the scan before calling this.
-         */
-        parallel_scan = scan->rs_parallel;
-        pg_atomic_write_u64(&parallel_scan->phs_nallocated, 0);
-    }
 }
 
 /* ----------------
@@ -1871,6 +1857,15 @@ HeapTuple heapGetNextForVerify(HeapScanDesc scan, ScanDirection direction, bool&
     return &(scan->rs_ctup);
 }
 
+void heap_scan_update_snapshot(HeapScanDesc scan, Snapshot snapshot)
+{
+    Assert(IsMVCCSnapshot(snapshot));
+
+    RegisterSnapshot(snapshot);
+    scan->rs_snapshot = snapshot;
+    scan->rs_flags |= SO_TEMP_SNAPSHOT;
+}
+
 /* ----------------
  * 		heap_parallelscan_estimate - estimate storage for ParallelHeapScanDesc
  *
@@ -1911,6 +1906,18 @@ void heap_parallelscan_initialize(ParallelHeapScanDesc target, Size pscan_len, R
         Assert(snapshot == SnapshotAny);
         target->phs_snapshot_any = true;
     }
+}
+
+/* ----------------
+ *		heap_parallelscan_reinitialize - reset a parallel scan
+ *
+ *		Call this in the leader process.  Caller is responsible for
+ *		making sure that all workers have finished the scan beforehand.
+ * ----------------
+ */
+void heap_parallelscan_reinitialize(ParallelHeapScanDesc parallel_scan)
+{
+    pg_atomic_write_u64(&parallel_scan->phs_nallocated, 0);
 }
 
 /* ----------------

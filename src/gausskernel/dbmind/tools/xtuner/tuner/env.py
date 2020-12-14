@@ -11,11 +11,14 @@ THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
 MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 See the Mulan PSL v2 for more details.
+
+Classes in the file are intended to be compatible with gym.
 """
+
 import numpy as np
 
 
-class Box(object):
+class Box:
     def __init__(self, low, high, shape, dtype=np.float32):
         self.dtype = dtype
 
@@ -99,7 +102,7 @@ class Box(object):
                and np.allclose(self.high, other.high, equal_nan=True)
 
 
-class Env(object):
+class Env:
     reward_range = (-float('inf'), float('inf'))
     spec = None
 
@@ -134,4 +137,3 @@ class Env(object):
 
     def __exit__(self, *args):
         self.close()
-

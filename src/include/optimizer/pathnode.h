@@ -66,8 +66,8 @@ extern bool CheckBitmapHeapPathContainGlobalOrLocal(Path* bitmapqual);
 extern bool check_bitmap_heap_path_index_unusable(Path* bitmapqual, RelOptInfo* baserel);
 extern bool is_partitionIndex_Subpath(Path* subpath);
 extern bool is_pwj_path(Path* pwjpath);
-extern BitmapHeapPath* create_bitmap_heap_path(
-    PlannerInfo* root, RelOptInfo* rel, Path* bitmapqual, Relids required_outer, double loop_count);
+extern BitmapHeapPath *create_bitmap_heap_path(PlannerInfo *root, RelOptInfo *rel, Path *bitmapqual,
+    Relids required_outer, double loop_count, int parallel_degree);
 extern BitmapAndPath* create_bitmap_and_path(PlannerInfo* root, RelOptInfo* rel, List* bitmapquals);
 extern BitmapOrPath* create_bitmap_or_path(PlannerInfo* root, RelOptInfo* rel, List* bitmapquals);
 extern TidPath* create_tidscan_path(PlannerInfo* root, RelOptInfo* rel, List* tidquals);
@@ -99,7 +99,8 @@ extern MergePath* create_mergejoin_path(PlannerInfo* root, RelOptInfo* joinrel, 
 
 extern HashPath* create_hashjoin_path(PlannerInfo* root, RelOptInfo* joinrel, JoinType jointype,
     JoinCostWorkspace* workspace, SpecialJoinInfo* sjinfo, SemiAntiJoinFactors* semifactors, Path* outer_path,
-    Path* inner_path, List* restrict_clauses, Relids required_outer, List* hashclauses, int dop = 1);
+    Path* inner_path, bool parallel_hash, List* restrict_clauses, Relids required_outer, List* hashclauses,
+    int dop = 1);
 
 extern Path* reparameterize_path(PlannerInfo* root, Path* path, Relids required_outer, double loop_count);
 

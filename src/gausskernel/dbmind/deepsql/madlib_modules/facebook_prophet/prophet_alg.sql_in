@@ -1,0 +1,186 @@
+/*
+ * Portions Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ *
+ * openGauss is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ * See the Mulan PSL v2 for more details.
+ * -------------------------------------------------------------------------
+ */
+
+-------------------------------------------------------------------------------------------------------------------------------
+-- Build facebook Prophet models in-database - -
+-------------------------------------------------------------------------------------------------------------------------------
+--
+-----------
+-- Note: --
+-----------
+-- 1) Porphet uses facebook-API. However we're limited by the maximum
+--    field-size in Greenplum/Postgres which is currently 1 GB.
+-- 2) If your dataset is much larger (> 1 GB), it is strongly recommended that you use MADlib's models so that
+--    training & scoring will happen in-parallel on all nodes.
+-------------------------------------------------------------------------------------------------------------------------------
+
+m4_include(`SQLCommon.m4')
+
+----------------------------------------------------------------------------------------------
+------ Help messages
+----------------------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.prophet_fit(
+    message    TEXT
+) RETURNS TEXT AS $XX$
+    PythonFunction(facebook_prophet, prophet_alg, prophet_fit_help_message)
+$XX$ LANGUAGE plpythonu IMMUTABLE;
+-------------------------------------------------------------
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.prophet_fit()
+RETURNS TEXT AS $XX$
+    SELECT MADLIB_SCHEMA.prophet_fit(''::TEXT);
+$XX$
+LANGUAGE sql IMMUTABLE;
+
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.prophet_predict(
+    message    TEXT
+) RETURNS TEXT AS $XX$
+    PythonFunction(facebook_prophet, prophet_alg, prophet_predict_help_message)
+$XX$ LANGUAGE plpythonu IMMUTABLE;
+-------------------------------------------------------------
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.prophet_predict()
+RETURNS TEXT AS $XX$
+    SELECT MADLIB_SCHEMA.prophet_predict(''::TEXT);
+$XX$
+LANGUAGE sql IMMUTABLE;
+
+
+----------------------------------------------------------------------------------------------
+------ prophet fit
+----------------------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.prophet_fit(
+    input_table  TEXT,                -- in, dataset table
+    model_table  TEXT,                -- out, save model and features
+    column_map   TEXT,                -- map relation of column {'ds' 'y' 'floor' 'cap'}
+    params_str   TEXT,                -- prophet parameters
+    verbose      BOOLEAN
+)
+RETURNS TEXT AS $$
+PythonFunction(facebook_prophet, prophet_alg, prophet_fit)
+$$ LANGUAGE plpythonu;
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.prophet_fit(
+    input_table  TEXT,
+    model_table  TEXT,
+    column_map   TEXT,
+    params_str   TEXT
+)
+RETURNS TEXT AS $$
+    SELECT MADLIB_SCHEMA.prophet_fit($1, $2, $3, $4, False);
+$$ LANGUAGE sql;
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.prophet_fit(
+    input_table  TEXT,
+    model_table  TEXT,
+    column_map   TEXT
+
+)
+RETURNS TEXT AS $$
+    SELECT MADLIB_SCHEMA.prophet_fit($1, $2, $3, NULL);
+$$ LANGUAGE sql;
+
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.prophet_fit(
+    input_table  TEXT,
+    model_table  TEXT
+
+)
+RETURNS TEXT AS $$
+    SELECT MADLIB_SCHEMA.prophet_fit($1, $2, NULL);
+$$ LANGUAGE sql;
+
+
+--def prophet_predict(schema_madlib, model_table, output_table, periods, verbose, **kwargs):
+
+
+----------------------------------------------------------------------------------------------
+------ prophet predict
+----------------------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.prophet_predict(
+    model_table      TEXT,                -- in, dataset table
+    output_table     TEXT,                -- out, save model and features
+    periods          INTEGER,                 -- predict length
+    freq             TEXT,                -- frequency of input_dataset
+    cap              DOUBLE PRECISION,               -- max value of predict value(logistic)
+    floor            DOUBLE PRECISION,               -- min value of predict value(logistic)
+    include_history  BOOLEAN,                -- include history dataset in output_table
+    verbose          BOOLEAN                 -- log or not
+)
+RETURNS TEXT AS $$
+PythonFunction(facebook_prophet, prophet_alg, prophet_predict)
+$$ LANGUAGE plpythonu;
+
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.prophet_predict(
+    model_table      TEXT,                -- in, dataset table
+    output_table     TEXT,                -- out, save model and features
+    periods          INTEGER,                 -- predict length
+    freq             TEXT,                -- frequency of input_dataset
+    cap              DOUBLE PRECISION,               -- max value of predict value(logistic)
+    floor            DOUBLE PRECISION,               -- min value of predict value(logistic)
+    include_history  BOOLEAN                 -- include history dataset in output_table
+)
+RETURNS TEXT AS $$
+    SELECT MADLIB_SCHEMA.prophet_predict($1, $2, $3, $4, $5, $6, $7, False);
+$$ LANGUAGE sql;
+
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.prophet_predict(
+    model_table      TEXT,                -- in, dataset table
+    output_table     TEXT,                -- out, save model and features
+    periods          INTEGER,                 -- predict length
+    freq             TEXT,                 -- frequency of input_dataset
+    cap              DOUBLE PRECISION,                 -- max value of predict value(logistic)
+    floor            DOUBLE PRECISION                 -- min value of predict value(logistic)
+)
+RETURNS TEXT AS $$
+    SELECT MADLIB_SCHEMA.prophet_predict($1, $2, $3, $4, $5, $6, False);
+$$ LANGUAGE sql;
+
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.prophet_predict(
+    model_table      TEXT,                -- in, dataset table
+    output_table     TEXT,                -- out, save model and features
+    periods          INTEGER,                 -- predict length
+    freq             TEXT,                 -- frequency of input_dataset
+    cap              DOUBLE PRECISION                 -- max value of predict value(logistic)
+)
+RETURNS TEXT AS $$
+    SELECT MADLIB_SCHEMA.prophet_predict($1, $2, $3, $4, $5, NULL);
+$$ LANGUAGE sql;
+
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.prophet_predict(
+    model_table      TEXT,                -- in, dataset table
+    output_table     TEXT,                -- out, save model and features
+    periods          INTEGER,                 -- predict length
+    freq             TEXT                 -- frequency of input_dataset
+)
+RETURNS TEXT AS $$
+    SELECT MADLIB_SCHEMA.prophet_predict($1, $2, $3, $4, NULL);
+$$ LANGUAGE sql;
+
+
+CREATE OR REPLACE FUNCTION MADLIB_SCHEMA.prophet_predict(
+    model_table      TEXT,                -- in, dataset table
+    output_table     TEXT,                -- out, save model and features
+    periods          INTEGER                  -- predict length
+)
+RETURNS TEXT AS $$
+    SELECT MADLIB_SCHEMA.prophet_predict($1, $2, $3, NULL);
+$$ LANGUAGE sql;
+
+

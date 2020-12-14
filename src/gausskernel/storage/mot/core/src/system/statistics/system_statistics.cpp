@@ -40,10 +40,12 @@ TypedStatisticsGenerator<ThreadStatistics, EmptyGlobalStatistics> SystemStatisti
 SystemStatisticsProvider* SystemStatisticsProvider::m_provider = nullptr;
 
 SystemStatisticsProvider::SystemStatisticsProvider()
-    : StatisticsProvider("System", &m_generator, GetGlobalConfiguration().m_enableSystemStatistics, true)
-{
-    SnapshotCpuStats(m_lastTotalUser, m_lastTotalUserLow, m_lastTotalSys, m_lastTotalIdle);
-}
+    : StatisticsProvider("System", &m_generator, GetGlobalConfiguration().m_enableSystemStatistics, true),
+      m_lastTotalUser(0),
+      m_lastTotalUserLow(0),
+      m_lastTotalSys(0),
+      m_lastTotalIdle(0)
+{}
 
 void SystemStatisticsProvider::RegisterProvider()
 {
@@ -71,14 +73,22 @@ bool SystemStatisticsProvider::CreateInstance()
             MOT_REPORT_ERROR(
                 MOT_ERROR_OOM, "Load Statistics", "Failed to allocate memory for System Statistics Provider, aborting");
         } else {
-            result = m_provider->Initialize();
-            if (!result) {
+            if (!m_provider->Initialize()) {
                 MOT_REPORT_ERROR(
                     MOT_ERROR_INTERNAL, "Load Statistics", "Failed to initialize System Statistics Provider, aborting");
                 delete m_provider;
                 m_provider = nullptr;
             } else {
-                m_provider->RegisterProvider();
+                result = m_provider->SnapshotInitialMetrics();
+                if (!result) {
+                    MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
+                        "Load Statistics",
+                        "Failed to take initial metrics snapshot in System Statistics Provider, aborting");
+                    delete m_provider;
+                    m_provider = nullptr;
+                } else {
+                    m_provider->RegisterProvider();
+                }
             }
         }
     }
@@ -98,6 +108,11 @@ SystemStatisticsProvider& SystemStatisticsProvider::GetInstance()
 {
     MOT_ASSERT(m_provider != nullptr);
     return *m_provider;
+}
+
+bool SystemStatisticsProvider::SnapshotInitialMetrics()
+{
+    return SnapshotCpuStats(m_lastTotalUser, m_lastTotalUserLow, m_lastTotalSys, m_lastTotalIdle);
 }
 
 void SystemStatisticsProvider::OnConfigChange()

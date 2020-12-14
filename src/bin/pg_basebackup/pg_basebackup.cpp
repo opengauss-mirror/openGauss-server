@@ -38,6 +38,8 @@
 #include "bin/elog.h"
 #include "lib/string.h"
 
+#include "fetchmot.h"
+
 typedef struct TablespaceListCell {
     struct TablespaceListCell* next;
     char old_dir[MAXPGPATH];
@@ -106,8 +108,6 @@ static int GsTar(int argc, char** argv);
 static int GsBaseBackup(int argc, char** argv);
 
 static const char* get_tablespace_mapping(const char* dir);
-extern void FetchMotCheckpoint(const char* basedir, PGconn* fetchConn, const char* progname, bool verbose,
-    const char format = 'p', const int compresslevel = 0);
 
 /*
  * Split argument into old_dir and new_dir and append to tablespace mapping
@@ -1349,6 +1349,32 @@ static void BaseBackup(void)
         disconnect_and_exit(1);
     }
 
+    /*
+     * End of copy data. Final result is already checked inside the loop.
+     */
+    PQclear(res);
+
+    res = PQgetResult(conn);
+    if (res != NULL) {
+        /*
+         * We expect the result to be NULL, otherwise we received some unexpected result.
+         * We just expect a 'Z' message and PQgetResult should set conn->asyncStatus to PGASYNC_IDLE,
+         * otherwise we have problem! Report error and disconnect.
+         */
+        fprintf(stderr,
+            _("%s: unexpected result received after final result, status: %u\n"),
+            progname,
+            PQresultStatus(res));
+        free(sysidentifier);
+        disconnect_and_exit(1);
+    }
+
+    if (verbose) {
+        fprintf(stderr, "%s: fetching MOT checkpoint\n", progname);
+    }
+
+    FetchMotCheckpoint(basedir, conn, progname, (bool)verbose, format, compresslevel);
+
     if (bgchild > 0) {
 #ifndef WIN32
         int status;
@@ -1427,32 +1453,6 @@ static void BaseBackup(void)
         /* Exited normally, we're happy */
 #endif
     }
-
-    /*
-     * End of copy data. Final result is already checked inside the loop.
-     */
-    PQclear(res);
-
-    res = PQgetResult(conn);
-    if (res != NULL) {
-        /*
-         * We expect the result to be NULL, otherwise we received some unexpected result.
-         * We just expect a 'Z' message and PQgetResult should set conn->asyncStatus to PGASYNC_IDLE,
-         * otherwise we have problem! Report error and disconnect.
-         */
-        fprintf(stderr,
-            _("%s: unexpected result received after final result, status: %u\n"),
-            progname,
-            PQresultStatus(res));
-        free(sysidentifier);
-        disconnect_and_exit(1);
-    }
-
-    if (verbose) {
-        fprintf(stderr, "%s: fetching MOT checkpoint\n", progname);
-    }
-
-    FetchMotCheckpoint(basedir, conn, progname, (bool)verbose, format, compresslevel);
 
     PQfinish(conn);
     conn = NULL;

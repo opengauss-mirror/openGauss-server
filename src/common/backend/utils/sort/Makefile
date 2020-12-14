@@ -21,7 +21,7 @@ ifneq "$(MAKECMDGOALS)" "clean"
     endif
   endif
 endif
-OBJS = logtape.o sortsupport.o tuplesort.o tuplestore.o batchsort.o batchstore.o rowstore.o
+OBJS = logtape.o sharedtuplestore.o sortsupport.o tuplesort.o tuplestore.o batchsort.o batchstore.o rowstore.o
 
 tuplesort.o: qsort_tuple.cpp
 

@@ -25,42 +25,12 @@
 #ifndef JIT_TVM_QUERY_H
 #define JIT_TVM_QUERY_H
 
-// Be sure to include global.h before postgres.h to avoid conflict between libintl.h (included in global.h)
-// and c.h (included in postgres.h).
-#include "global.h"
-
-// be careful to include gscodegen.h before anything else to avoid clash with PM definition in datetime.h
-#include "codegen/gscodegen.h"
-#include "postgres.h"
-#include "catalog/pg_operator.h"
-#include "utils/fmgroids.h"
-#include "nodes/parsenodes.h"
-#include "storage/ipc.h"
-#include "nodes/pg_list.h"
-#include "utils/elog.h"
-#include "utils/numeric.h"
-#include "utils/numeric_gs.h"
-#include "catalog/pg_aggregate.h"
-
-#include "mot_internal.h"
-#include "storage/mot/jit_exec.h"
+/*
+ * ATTENTION: Be sure to include libintl.h before anything else to avoid problem with gettext.
+ */
+#include "libintl.h"
 #include "jit_common.h"
 #include "jit_tvm.h"
-#include "jit_tvm_util.h"
-#include "jit_util.h"
-#include "jit_plan.h"
-
-#include "mot_engine.h"
-#include "utilities.h"
-#include "mot_internal.h"
-#include "catalog_column_types.h"
-#include "mot_error.h"
-#include "utilities.h"
-#include "mm_session_api.h"
-
-#include <list>
-#include <string>
-#include <cassert>
 
 namespace JitExec {
 /** @struct Holds instructions that evaluate in runtime to begin and end iterators of a cursor. */

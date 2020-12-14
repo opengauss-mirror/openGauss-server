@@ -1,4 +1,5 @@
 tensorflow>=2.2.0
 keras-rl2
-keras>=2.4.0
 paramiko
+bayesian-optimization
+ptable

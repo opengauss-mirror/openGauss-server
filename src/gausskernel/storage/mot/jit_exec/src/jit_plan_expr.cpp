@@ -22,8 +22,10 @@
  * -------------------------------------------------------------------------
  */
 
-// Be sure to include global.h before postgres.h to avoid conflict between libintl.h (included in global.h)
-// and c.h (included in postgres.h).
+/*
+ * ATTENTION: Be sure to include global.h before postgres.h to avoid conflict between libintl.h (included in global.h)
+ * and c.h (included in postgres.h).
+ */
 #include "global.h"
 #include "jit_plan_expr.h"
 

@@ -39,14 +39,20 @@ extern bool analyze_requires_snapshot(Node* parseTree);
 extern void CheckSelectLocking(Query* qry);
 extern void applyLockingClause(Query* qry, Index rtindex, bool forUpdate, bool noWait, bool pushedDown);
 extern void CheckTablesStorageEngine(Query* qry, StorageEngineType* type);
-extern bool IsMOTIndexedColumnUpdate(Query* qry);
+extern bool CheckMotIndexedColumnUpdate(Query* qry);
 
 typedef struct RTEDetectorContext {
     bool isMotTable;
     bool isPageTable;
     List* queryNodes;
-    int sublevels_up;
+    int sublevelsUp;
 } RTEDetectorContext;
+
+typedef struct UpdateDetectorContext {
+    bool isIndexedColumnUpdate;
+    List* queryNodes;
+    int sublevelsUp;
+} UpdateDetectorContext;
 
 /* Record the rel name and corresponding columan name info */
 typedef struct RelColumnInfo {

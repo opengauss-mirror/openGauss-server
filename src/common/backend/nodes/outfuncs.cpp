@@ -873,7 +873,7 @@ static void _outBitmapOr(StringInfo str, BitmapOr* node)
     WRITE_NODE_TYPE("BITMAPOR");
 
     _outPlanInfo(str, (Plan*)node);
-
+    WRITE_BOOL_FIELD(isshared);
     WRITE_NODE_FIELD(bitmapplans);
 }
 static void _outCStoreIndexOr(StringInfo str, CStoreIndexOr* node)
@@ -908,6 +908,7 @@ static void _outGather(StringInfo str, Gather *node)
     _outPlanInfo(str, (Plan *)node);
 
     WRITE_INT_FIELD(num_workers);
+    WRITE_INT_FIELD(rescan_param);
     WRITE_BOOL_FIELD(single_copy);
 }
 
@@ -1175,6 +1176,7 @@ static void _outBitmapIndexScan(StringInfo str, BitmapIndexScan* node)
     _outScanInfo(str, (Scan*)node);
 
     WRITE_OID_FIELD(indexid);
+    WRITE_BOOL_FIELD(isshared);
     WRITE_NODE_FIELD(indexqual);
     WRITE_NODE_FIELD(indexqualorig);
 #ifdef STREAMPLAN
@@ -1737,6 +1739,7 @@ static void _outHash(StringInfo str, Hash* node)
 
     WRITE_INT_FIELD(skewColumn);
     WRITE_BOOL_FIELD(skewInherit);
+    WRITE_FLOAT_FIELD(rows_total, "%.0f");
     WRITE_OID_FIELD(skewColType);
     WRITE_INT_FIELD(skewColTypmod);
     WRITE_TYPEINFO_FIELD(skewColType);

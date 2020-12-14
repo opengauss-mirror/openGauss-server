@@ -7402,7 +7402,7 @@ void getThrdID(char* thrdid, pg_time_t startTime, ThreadId Threadid)
     securec_check_ss(rc, "\0", "\0");
 }
 
-MotSessionMemoryDetail* getMotSessionMemoryDetail(uint32* num)
+MotSessionMemoryDetail* GetMotSessionMemoryDetail(uint32* num)
 {
     MotSessionMemoryDetail* returnDetailArray = NULL;
     ForeignDataWrapper* fdw = NULL;
@@ -7421,7 +7421,7 @@ MotSessionMemoryDetail* getMotSessionMemoryDetail(uint32* num)
     return returnDetailArray;
 }
 
-MotMemoryDetail* getMotMemoryDetail(uint32* num, bool isGlobal)
+MotMemoryDetail* GetMotMemoryDetail(uint32* num, bool isGlobal)
 {
     MotMemoryDetail* returnDetailArray = NULL;
     ForeignDataWrapper* fdw = NULL;

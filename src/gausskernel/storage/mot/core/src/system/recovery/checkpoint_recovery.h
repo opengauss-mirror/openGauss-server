@@ -72,11 +72,11 @@ public:
      * segment file number.
      */
     struct Task {
-        explicit Task(uint32_t id = 0, uint32_t seg = 0) : m_id(id), m_seg(seg)
+        explicit Task(uint32_t tableId = 0, uint32_t segId = 0) : m_tableId(tableId), m_segId(segId)
         {}
 
-        uint32_t m_id;
-        uint32_t m_seg;
+        uint32_t m_tableId;
+        uint32_t m_segId;
     };
 
     /**

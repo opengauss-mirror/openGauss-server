@@ -1980,8 +1980,8 @@ typedef struct MotMemoryDetailPad {
     MotMemoryDetail* memoryDetail;
 } MotMemoryDetailPad;
 
-extern MotSessionMemoryDetail* getMotSessionMemoryDetail(uint32* num);
-extern MotMemoryDetail* getMotMemoryDetail(uint32* num, bool isGlobal);
+extern MotSessionMemoryDetail* GetMotSessionMemoryDetail(uint32* num);
+extern MotMemoryDetail* GetMotMemoryDetail(uint32* num, bool isGlobal);
 
 typedef struct ThreadMemoryDetail {
     char contextName[MEMORY_CONTEXT_NAME_LEN];

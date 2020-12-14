@@ -1,5 +1,5 @@
 /*
- * src/pl/plpython/plpy_exec.h
+ * src/common/pl/plpython/plpy_exec.h
  */
 
 #ifndef PLPY_EXEC_H

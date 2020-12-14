@@ -103,7 +103,6 @@
 extern void* internal_load_library(const char* libname);
 extern char* expand_dynamic_library_name(const char* name);
 extern bool PMstateIsRun(void);
-extern void PerformMotCheckpointFetch();
 
 /* Are we there yet? */
 static bool WalSndCaughtUp = false;
@@ -2907,7 +2906,7 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
             }
         }
 
-        if (sync_config_needed) {
+        if (sync_config_needed && g_instance.attr.attr_common.config_sync_interval > 0) {
             if (t_thrd.walsender_cxt.walsender_shutdown_requested) {
                 if (!AM_WAL_DB_SENDER && !SendConfigFile(t_thrd.walsender_cxt.gucconf_file))
                     ereport(LOG, (errmsg("failed to send config to the peer when walsender shutdown.")));

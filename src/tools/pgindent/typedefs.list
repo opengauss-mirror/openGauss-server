@@ -1558,6 +1558,8 @@ SharedInvalRelcacheMsg
 SharedInvalRelmapMsg
 SharedInvalSmgrMsg
 SharedInvalidationMessage
+SharedTuplestore
+SharedTuplestoreAccessor
 ShellTypeInfo
 ShmemIndexEnt
 ShutdownInformation

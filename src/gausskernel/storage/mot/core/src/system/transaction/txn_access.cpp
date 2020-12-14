@@ -24,7 +24,7 @@
 
 #include <map>
 
-#include "../storage/table.h"
+#include "table.h"
 #include "row.h"
 #include "txn.h"
 #include "txn_access.h"
@@ -151,7 +151,6 @@ bool TxnAccess::Init(TxnManager* manager)
     }
     m_initPhase = CreateRowSet;
 
-    m_initPhase = CreateInsertSet;
     m_insertManager = new (std::nothrow) TxnInsertAction();
     if (m_insertManager == nullptr) {
         MOT_REPORT_ERROR(MOT_ERROR_OOM,
@@ -450,6 +449,17 @@ RC TxnAccess::AccessLookup(const AccessType type, Sentinel* const originalSentin
         // Filter rows
         switch (curr_acc->m_type) {
             case AccessType::RD:
+                if (m_txnManager->GetTxnIsoLevel() == READ_COMMITED) {
+                    // If Cached row is not valid, remove it!!
+                    if (type == RD and curr_acc->m_stmtCount != m_txnManager->GetStmtCount()) {
+                        auto it = m_rowsSet->find(curr_acc->m_origSentinel);
+                        MOT_ASSERT(it != m_rowsSet->end());
+                        m_rowsSet->erase(it);
+                        ReleaseAccess(curr_acc);
+                        return RC::RC_LOCAL_ROW_NOT_FOUND;
+                    }
+                }
+                break;
             case AccessType::RD_FOR_UPDATE:
             case AccessType::WR:
                 break;
@@ -525,11 +535,7 @@ Row* TxnAccess::AddInsertToLocalAccess(Sentinel* org_sentinel, Row* org_row, RC&
     auto search = m_rowsSet->find(org_sentinel);
     if (likely(search == m_rowsSet->end())) {
         if (isUpgrade == true) {
-            if (org_sentinel->IsPrimaryIndex()) {
-                curr_access = GetNewRowAccess(org_sentinel->GetData(), INS, rc);
-            } else {
-                curr_access = GetNewRowAccess(org_row, INS, rc);
-            }
+            curr_access = GetNewRowAccess(org_sentinel->GetData(), INS, rc);
             // Check if draft is valid
             if (curr_access == nullptr) {
                 return nullptr;

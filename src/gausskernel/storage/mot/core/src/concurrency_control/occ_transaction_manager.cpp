@@ -62,7 +62,7 @@ bool OccTransactionManager::Init()
 
 bool OccTransactionManager::QuickVersionCheck(const Access* access)
 {
-    // We always validate on commited rows!
+    // We always validate on committed rows!
     const Row* row = access->GetRowFromHeader();
     return (row->m_rowHeader.GetCSN() == access->m_tid);
 }
@@ -77,13 +77,25 @@ bool OccTransactionManager::QuickHeaderValidation(const Access* access)
         // For upgrade we verify  the row
         // csn has not changed!
         Sentinel* sent = access->m_origSentinel;
-        if (access->m_params.IsUpgradeInsert() and access->m_params.IsDummyDeletedRow() == false) {
-            if (sent->GetData()->GetCommitSequenceNumber() != access->m_tid) {
-                return false;
+        if (access->m_params.IsUpgradeInsert()) {
+            if (access->m_params.IsDummyDeletedRow()) {
+                // Check is sentinel is deleted and CSN is VALID -  ABA problem
+                if (sent->IsCommited() == false) {
+                    if (sent->GetData()->GetCommitSequenceNumber() != access->m_tid) {
+                        return false;
+                    }
+                } else {
+                    return false;
+                }
+            } else {
+                // We deleted internally!, we only need to check version
+                if (sent->GetData()->GetCommitSequenceNumber() != access->m_tid) {
+                    return false;
+                }
             }
         } else {
-            // if the sent is commited we abort!
-            if (sent->IsCommited()) {
+            // If the sent is committed or inserted-deleted we abort!
+            if (sent->IsCommited() or sent->GetData() != nullptr) {
                 return false;
             }
         }
@@ -113,11 +125,11 @@ bool OccTransactionManager::ValidateWriteSet(TxnManager* txMan)
     TxnOrderedSet_t& orderedSet = txMan->m_accessMgr->GetOrderedRowSet();
     for (const auto& raPair : orderedSet) {
         const Access* ac = raPair.second;
-        if (ac->m_type == RD or !ac->m_params.IsPrimarySentinel()) {
+        if (ac->m_type == RD) {
             continue;
         }
 
-        if (!ac->GetRowFromHeader()->m_rowHeader.ValidateWrite(ac->m_tid)) {
+        if (!QuickHeaderValidation(ac)) {
             return false;
         }
     }
@@ -167,8 +179,8 @@ RC OccTransactionManager::LockHeaders(TxnManager* txMan, uint32_t& numSentinelsL
                 if (ac->m_params.IsPrimaryUpgrade()) {
                     ac->m_auxRow->m_rowHeader.Lock();
                 }
-                // New insert row is already commited!
-                // Check if row has chainged in sentinel
+                // New insert row is already committed!
+                // Check if row has changed in sentinel
                 if (!QuickHeaderValidation(ac)) {
                     rc = RC_ABORT;
                     goto final;

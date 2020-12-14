@@ -26,6 +26,7 @@
 #include "catalog/pgxc_node.h"
 #endif
 #include "access/nbtree.h"
+#include "instruments/instr_unique_sql.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/rel_gs.h"

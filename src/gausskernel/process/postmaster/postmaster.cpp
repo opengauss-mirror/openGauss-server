@@ -86,6 +86,7 @@
 #include "access/xact.h"
 #include "bootstrap/bootstrap.h"
 #include "catalog/pg_control.h"
+#include "dbmind/hypopg_index.h"
 #include "instruments/instr_unique_sql.h"
 #include "instruments/instr_user.h"
 #include "instruments/percentile.h"
@@ -1282,10 +1283,6 @@ int PostmasterMain(int argc, char* argv[])
                 ereport(FATAL, (errmsg("the options of -n is deprecated")));
                 break;
 
-            case 'O':
-                SetConfigOption("allow_system_table_mods", "true", PGC_INTERNAL, PGC_S_ARGV);
-                break;
-
             case 'o':
                 /* Other options to pass to the backend on the command line */
                 rc = snprintf_s(g_instance.ExtraOptions + strlen(g_instance.ExtraOptions),
@@ -2173,6 +2170,8 @@ int PostmasterMain(int argc, char* argv[])
         SHARED_CONTEXT);
     /* init unique sql */
     InitUniqueSQL();
+    /* init hypo index */
+    InitHypopg();
     /* init instr user */
     InitInstrUser();
     /* init Opfusion function id */
@@ -2945,7 +2944,7 @@ static int ServerLoop(void)
 
             if (g_instance.pid_cxt.RemoteServicePID == 0 && !dummyStandbyMode && IS_PGXC_DATANODE &&
                 t_thrd.postmaster_cxt.HaShmData->current_mode != NORMAL_MODE && !IS_DN_WITHOUT_STANDBYS_MODE() &&
-                IsRemoteReadModeOn())
+                IsRemoteReadModeOn() && get_cur_repl_num())
                 g_instance.pid_cxt.RemoteServicePID = initialize_util_thread(RPC_SERVICE);
         }
 
@@ -9310,14 +9309,6 @@ static void CreateHaListenSocket(void)
 
     /* we should not reset pooler port if it is used */
     use_pooler_port = NeedPoolerPort();
-    if (MAX_REPLNODE_NUM == 8)
-        Assert(t_thrd.postmaster_cxt.ReplConnArray[1] || t_thrd.postmaster_cxt.ReplConnArray[2] ||
-               t_thrd.postmaster_cxt.ReplConnArray[3] || t_thrd.postmaster_cxt.ReplConnArray[4] ||
-               t_thrd.postmaster_cxt.ReplConnArray[5] || t_thrd.postmaster_cxt.ReplConnArray[6] ||
-               t_thrd.postmaster_cxt.ReplConnArray[7]);
-    else if (MAX_REPLNODE_NUM == 5)
-        Assert(t_thrd.postmaster_cxt.ReplConnArray[1] || t_thrd.postmaster_cxt.ReplConnArray[2] ||
-               t_thrd.postmaster_cxt.ReplConnArray[3] || t_thrd.postmaster_cxt.ReplConnArray[4]);
 
     int ss_rc = memset_s(&newListenAddrs, sizeof(newListenAddrs), 0, sizeof(newListenAddrs));
     securec_check(ss_rc, "\0", "\0");
@@ -10341,6 +10332,9 @@ int GaussDbThreadMain(knl_thread_arg* arg)
 
             /* unique sql hooks */
             instr_unique_sql_register_hook();
+
+            /* hypopg index hooks */                                            
+            hypopg_register_hook();
 
             /*
              * Perform additional initialization and collect startup packet.

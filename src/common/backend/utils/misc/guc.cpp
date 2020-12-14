@@ -152,8 +152,8 @@
 #endif
 
 #define CONFIG_FILENAME "postgresql.conf"
-#define MOT_CONFIG_FILENAME "mot.conf"
 #define CONFIG_LOCK_FILE "postgresql.conf.lock"
+#define MOT_CONFIG_FILENAME "mot.conf"
 #define HBA_FILENAME "pg_hba.conf"
 #define IDENT_FILENAME "pg_ident.conf"
 #define INVALID_LINES_IDX (int)(~0)
@@ -360,6 +360,7 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
     "enable_adio_function",
     "fast_extend_file_size",
     "enable_global_stats",
+    "enable_hypo_index",
     "td_compatible_truncation",
 #ifdef ENABLE_MULTIPLE_NODES
     "gds_debug_mod",
@@ -1230,6 +1231,20 @@ static void init_configure_names_bool()
             NULL,
             NULL
         },
+        {                                                                       
+            {                                                                   
+                "enable_hypo_index",                                          
+                PGC_USERSET,                                                      
+                QUERY_TUNING_METHOD,                                            
+                gettext_noop("Enable hypothetical index for explain."),               
+                NULL                                                            
+            },                                                                  
+            &u_sess->attr.attr_sql.enable_hypo_index,                         
+            false,                                                               
+            NULL,                                                               
+            NULL,                                                               
+            NULL                                                                
+        }, 
 #ifdef ENABLE_MULTIPLE_NODES
         {
             {
@@ -1670,6 +1685,20 @@ static void init_configure_names_bool()
             true,
             NULL,
             NULL,
+            NULL
+        },
+        {
+            {
+                "enable_parallel_hash", 
+                PGC_USERSET, 
+                QUERY_TUNING_METHOD,
+                gettext_noop("Enables the planner's user of parallel hash plans."),
+                NULL
+            },
+            &u_sess->attr.attr_sql.enable_parallel_hash,
+            true,
+            NULL, 
+            NULL, 
             NULL
         },
         {
@@ -2597,7 +2626,7 @@ static void init_configure_names_bool()
         {
             {
                 "update_process_title",
-                PGC_SUSET,
+                PGC_INTERNAL,
                 STATS_COLLECTOR,
                 gettext_noop("Updates the process title to show the active SQL command."),
                 gettext_noop(
@@ -4667,6 +4696,22 @@ void set_qunit_case_number_hook(int newval, void* extra)
 static void init_configure_names_int()
 {
     struct config_int local_configure_names_int[] = {
+        {
+	    {
+	        "config_sync_interval",
+		PGC_POSTMASTER,
+		WAL_SETTINGS,
+		gettext_noop("The synchronization time interval for the config file."),
+		NULL
+	    },
+	    &g_instance.attr.attr_common.config_sync_interval,
+	    3600000,
+	    0,
+	    INT_MAX,
+	    NULL,
+	    NULL,
+	    NULL
+	},
         {
             {
                 "max_active_global_temporary_table",
@@ -10840,7 +10885,7 @@ static void init_configure_names_string()
                 GUC_LIST_INPUT
             },
             &u_sess->attr.attr_storage.SyncRepStandbyNames,
-            "",
+            "*",
             check_synchronous_standby_names,
             assign_synchronous_standby_names,
             NULL
@@ -12522,6 +12567,7 @@ static void init_single_node_unsupport_guc()
     u_sess->attr.attr_sql.agg_redistribute_enhancement = false;
     u_sess->attr.attr_sql.enable_agg_pushdown_for_cooperation_analysis = true;
     u_sess->attr.attr_common.enable_tsdb = false;
+    u_sess->attr.attr_common.update_process_title = false;
     u_sess->attr.attr_sql.acceleration_with_compute_pool = false;
     u_sess->attr.attr_sql.enable_constraint_optimization = true;
     u_sess->attr.attr_sql.enable_csqual_pushdown = true;
@@ -13520,13 +13566,13 @@ bool SelectConfigFiles(const char* userDoption, const char* progname)
     if (g_instance.attr.attr_common.MOTConfigFileName)
         motfname = make_absolute_path(g_instance.attr.attr_common.MOTConfigFileName);
     else if (configdir) {
-        motfname = (char*)guc_malloc(FATAL,strlen(configdir) + strlen(MOT_CONFIG_FILENAME) + 2);
+        motfname = (char*)guc_malloc(FATAL, strlen(configdir) + strlen(MOT_CONFIG_FILENAME) + 2);
         rc = snprintf_s(motfname,
-                strlen(configdir) + strlen(MOT_CONFIG_FILENAME) + 2,
-                strlen(configdir) + strlen(MOT_CONFIG_FILENAME) + 1,
-                "%s/%s",
-                configdir,
-                MOT_CONFIG_FILENAME);
+            strlen(configdir) + strlen(MOT_CONFIG_FILENAME) + 2,
+            strlen(configdir) + strlen(MOT_CONFIG_FILENAME) + 1,
+            "%s/%s",
+            configdir,
+            MOT_CONFIG_FILENAME);
         securec_check_ss(rc, configdir, "\0");
     }
 
@@ -21472,6 +21518,9 @@ int find_guc_option(
 {
     bool isMatched = false;
     int i = 0;
+    int targetLine = 0;
+    int matchTimes = 0;
+    
 
     if (optlines == NULL || opt_name == NULL) {
         return INVALID_LINES_IDX;
@@ -21485,22 +21534,41 @@ int find_guc_option(
         if (!is_opt_line_commented(optlines[i])) {
             isMatched = is_match_option_name(optlines[i], opt_name, paramlen, name_offset, value_len, value_offset);
             if (isMatched) {
-                return i;
+                matchTimes++;
+                targetLine = i;
             }
         }
     }
 
+    /* The line of last one will be recorded when there are parameters with the same name in postgresql.conf */
+    if (matchTimes > 1) {
+            ereport(NOTICE, (errmsg("There are %d \'%s\' not commented in \"postgresql.conf\", and only the "
+                                "last one in %dth line will be set and used.",
+                matchTimes,
+                opt_name,
+                (targetLine + 1))));
+        }
+
+    /* The line of last one will be returned */
+    if (matchTimes > 0) {
+        return targetLine;
+    }
+
     /* The second loop is to deal with the lines commented by '#' */
+    matchTimes = 0;
     for (i = 0; optlines[i] != NULL; i++) {
         if (is_opt_line_commented(optlines[i])) {
             isMatched = is_match_option_name(optlines[i], opt_name, paramlen, name_offset, value_len, value_offset);
             if (isMatched) {
-                return i;
+                matchTimes++;
+                targetLine = i;
             }
         }
     }
-
-    return INVALID_LINES_IDX;
+    
+    /* The line of last one will be returned, otherwise it return invaild line */
+    return (matchTimes > 0) ? targetLine : INVALID_LINES_IDX;
+    
 }
 /*
  * @@GaussDB@@

@@ -60,7 +60,7 @@ class InstallImplOLAP(InstallImpl):
             if (not str(self.context.time_out).isdigit()):
                 # --time-out is not a digit
                 raise Exception(ErrorCode.GAUSS_500["GAUSS_50003"] % (
-                    "-time-out", "integer"))
+                    "-time-out", "a nonnegative integer"))
             self.context.time_out = int(self.context.time_out)
             if (
                     self.context.time_out <= 0

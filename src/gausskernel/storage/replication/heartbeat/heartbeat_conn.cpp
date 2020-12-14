@@ -172,6 +172,9 @@ void UpdateLastHeartbeatTime(const char* remoteHost, int remotePort, TimestampTz
     SpinLockAcquire(&stat->mutex);
     for (int i = 1; i < MAX_REPLNODE_NUM; i++) {
         ReplConnInfo* replconninfo = t_thrd.postmaster_cxt.ReplConnArray[i];
+        if (replconninfo == NULL) {
+            continue;
+        }
 
         if (strncmp((char*)replconninfo->remotehost, (char*)remoteHost, IP_LEN) == 0 &&
             replconninfo->remoteheartbeatport == remotePort) {

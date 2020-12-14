@@ -1,3 +1,4 @@
+set enable_material to off;
 create table parallel_hashjoin_test_a (id int);
 create table parallel_hashjoin_test_b (id int);
 insert into parallel_hashjoin_test_a select n from generate_series(1,1000) n;
@@ -43,12 +44,12 @@ explain (costs off) select * from parallel_hashjoin_test_a left outer join paral
    Sort Key: parallel_hashjoin_test_a.id
    ->  Gather
          Number of Workers: 2
-         ->  Hash Left Join
+         ->  Parallel Hash Left Join
                Hash Cond: (parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id)
                ->  Parallel Seq Scan on parallel_hashjoin_test_a
                      Filter: (id < 10)
-               ->  Hash
-                     ->  Seq Scan on parallel_hashjoin_test_b
+               ->  Parallel Hash
+                     ->  Parallel Seq Scan on parallel_hashjoin_test_b
 (10 rows)
 
 select * from parallel_hashjoin_test_a left outer join parallel_hashjoin_test_b on parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id where parallel_hashjoin_test_a.id < 10 order by parallel_hashjoin_test_a.id;
@@ -66,19 +67,20 @@ select * from parallel_hashjoin_test_a left outer join parallel_hashjoin_test_b 
 (9 rows)
 
 -- Forbid parallel Hash Right Join or Hash Full Join.
-explain (costs off)select * from parallel_hashjoin_test_a right outer join parallel_hashjoin_test_b on parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id order by parallel_hashjoin_test_a.id;
-                                   QUERY PLAN                                   
---------------------------------------------------------------------------------
- Sort
-   Sort Key: parallel_hashjoin_test_a.id
-   ->  Hash Right Join
-         Hash Cond: (parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id)
-         ->  Seq Scan on parallel_hashjoin_test_a
-         ->  Hash
-               ->  Seq Scan on parallel_hashjoin_test_b
-(7 rows)
+explain (costs off)select * from parallel_hashjoin_test_a full join parallel_hashjoin_test_b on parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id order by parallel_hashjoin_test_a.id limit 10;
+                                      QUERY PLAN                                      
+--------------------------------------------------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: parallel_hashjoin_test_a.id
+         ->  Hash Full Join
+               Hash Cond: (parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id)
+               ->  Seq Scan on parallel_hashjoin_test_a
+               ->  Hash
+                     ->  Seq Scan on parallel_hashjoin_test_b
+(8 rows)
 
-select * from parallel_hashjoin_test_a right outer join parallel_hashjoin_test_b on parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id order by parallel_hashjoin_test_a.id;
+select * from parallel_hashjoin_test_a full join parallel_hashjoin_test_b on parallel_hashjoin_test_a.id = parallel_hashjoin_test_b.id order by parallel_hashjoin_test_a.id limit 10;
  id | id 
 ----+----
   1 |  1
@@ -93,8 +95,69 @@ select * from parallel_hashjoin_test_a right outer join parallel_hashjoin_test_b
  10 | 10
 (10 rows)
 
+-- parallel increase hash buckets
+set enable_mergejoin=off;
+DROP TABLE IF EXISTS par_hash_incr_bucket_a;
+NOTICE:  table "par_hash_incr_bucket_a" does not exist, skipping
+DROP TABLE IF EXISTS par_hash_incr_bucket_b;
+NOTICE:  table "par_hash_incr_bucket_b" does not exist, skipping
+DROP TABLE IF EXISTS par_hash_incr_bucket_c;
+NOTICE:  table "par_hash_incr_bucket_c" does not exist, skipping
+DROP TABLE IF EXISTS par_hash_incr_bucket_d;
+NOTICE:  table "par_hash_incr_bucket_d" does not exist, skipping
+create table par_hash_incr_bucket_a(a int,b int,c int,d int,e int);
+create table par_hash_incr_bucket_b(a int,b int,c int,d int,e int);
+create table par_hash_incr_bucket_c(a int,b int,c int,d int,e int);
+create table par_hash_incr_bucket_d(a int,b int,c int,d int,e int);
+insert into par_hash_incr_bucket_a select n, n , n , n , n from generate_series(1,100000) n;
+insert into par_hash_incr_bucket_b select n, n , n , n , n from generate_series(1,100000) n;
+insert into par_hash_incr_bucket_c select n, n , n , n , n from generate_series(1,100000) n;
+insert into par_hash_incr_bucket_d select n, n , n , n , n from generate_series(1,100000) n;
+explain (costs off) select count(*) from par_hash_incr_bucket_a cross join par_hash_incr_bucket_b cross join par_hash_incr_bucket_c cross join par_hash_incr_bucket_d
+where par_hash_incr_bucket_c.a = par_hash_incr_bucket_d.b
+ and par_hash_incr_bucket_a.c = par_hash_incr_bucket_b.d
+ and par_hash_incr_bucket_b.d = par_hash_incr_bucket_c.a
+ and par_hash_incr_bucket_b.e %2 =0;
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Hash Join
+         Hash Cond: (par_hash_incr_bucket_a.c = par_hash_incr_bucket_d.b)
+         ->  Hash Join
+               Hash Cond: (par_hash_incr_bucket_a.c = par_hash_incr_bucket_c.a)
+               ->  Gather
+                     Number of Workers: 2
+                     ->  Parallel Hash Join
+                           Hash Cond: (par_hash_incr_bucket_a.c = par_hash_incr_bucket_b.d)
+                           ->  Parallel Seq Scan on par_hash_incr_bucket_a
+                           ->  Parallel Hash
+                                 ->  Parallel Seq Scan on par_hash_incr_bucket_b
+                                       Filter: ((e % 2) = 0)
+               ->  Hash
+                     ->  Seq Scan on par_hash_incr_bucket_c
+         ->  Hash
+               ->  Seq Scan on par_hash_incr_bucket_d
+(17 rows)
+
+select count(*) from par_hash_incr_bucket_a cross join par_hash_incr_bucket_b cross join par_hash_incr_bucket_c cross join par_hash_incr_bucket_d
+where par_hash_incr_bucket_c.a = par_hash_incr_bucket_d.b
+ and par_hash_incr_bucket_a.c = par_hash_incr_bucket_b.d
+ and par_hash_incr_bucket_b.d = par_hash_incr_bucket_c.a
+ and par_hash_incr_bucket_b.e %2 =0;
+ count 
+-------
+ 50000
+(1 row)
+
+DROP TABLE IF EXISTS par_hash_incr_bucket_a;
+DROP TABLE IF EXISTS par_hash_incr_bucket_b;
+DROP TABLE IF EXISTS par_hash_incr_bucket_c;
+DROP TABLE IF EXISTS par_hash_incr_bucket_d;
+drop table parallel_hashjoin_test_a;
+drop table parallel_hashjoin_test_b;
 reset parallel_setup_cost;
 reset min_parallel_table_scan_size;
 reset parallel_tuple_cost;
 reset enable_nestloop;
+reset enable_mergejoin;
 reset force_parallel_mode;

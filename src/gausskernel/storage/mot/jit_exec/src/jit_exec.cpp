@@ -22,8 +22,12 @@
  * -------------------------------------------------------------------------
  */
 
-// be careful to include gscodegen.h before anything else to avoid clash with PM definition in datetime.h
-#include "global.h"
+/*
+ * ATTENTION:
+ * 1. Be sure to include gscodegen.h before anything else to avoid clash with PM definition in datetime.h.
+ * 2. Be sure to include libintl.h before gscodegen.h to avoid problem with gettext.
+ */
+#include "libintl.h"
 #include "codegen/gscodegen.h"
 #include "codegen/builtinscodegen.h"
 #include "catalog/pg_operator.h"
@@ -51,11 +55,9 @@
 
 #include "mot_engine.h"
 #include "utilities.h"
-#include "mot_internal.h"
 #include "catalog_column_types.h"
 #include "mot_error.h"
 #include "utilities.h"
-#include "mot_internal.h"
 #include "cycles.h"
 
 #include <assert.h>
@@ -191,7 +193,7 @@ static void ProcessJitResult(MOT::RC result, JitContext* jitContext, int newScan
         } else {
             JitStatisticsProvider::GetInstance().AddFailExecQuery();
         }
-        report_pg_error(result, currTxn, (void*)arg1, (void*)arg2);
+        report_pg_error(result, (void*)arg1, (void*)arg2);
     }
 }
 
@@ -201,10 +203,11 @@ static JitContext* GenerateJitContext(Query* query, const char* queryString, Jit
     JitContext* sourceJitContext = nullptr;
 
     uint64_t startTime = GetSysClock();
-    if (JitCanInitThreadCodeGen() && !IsMotPseudoCodegenForced()) {
+    if (g_instance.mot_cxt.jitExecMode == JIT_EXEC_MODE_LLVM) {
         MOT_LOG_TRACE("Generating LLVM JIT context for query: %s", queryString);
         sourceJitContext = JitCodegenLlvmQuery(query, queryString, jitPlan);
     } else {
+        MOT_ASSERT(g_instance.mot_cxt.jitExecMode == JIT_EXEC_MODE_TVM);
         MOT_LOG_TRACE("Generating TVM JIT context for query: %s", queryString);
         sourceJitContext = JitCodegenTvmQuery(query, queryString, jitPlan);
     }
@@ -365,7 +368,7 @@ extern int JitExecQuery(
             "Execute JIT",
             "Cannot execute jitted function: function is null. Aborting transaction.");
         JitStatisticsProvider::GetInstance().AddFailExecQuery();
-        report_pg_error(MOT::RC_ERROR, NULL);  // execution control ends, calls ereport(error,...)
+        report_pg_error(MOT::RC_ERROR);  // execution control ends, calls ereport(error,...)
     }
 
     // when running under thread-pool, it is possible to be executed from a thread that hasn't yet executed any MOT code
@@ -380,7 +383,7 @@ extern int JitExecQuery(
             "Execute JIT",
             "Cannot execute jitted code: Current transaction is undefined. Aborting transaction.");
         JitStatisticsProvider::GetInstance().AddFailExecQuery();
-        report_pg_error(MOT::RC_MEMORY_ALLOCATION_ERROR, NULL);  // execution control ends, calls ereport(error,...)
+        report_pg_error(MOT::RC_MEMORY_ALLOCATION_ERROR);  // execution control ends, calls ereport(error,...)
     }
 
     // during the very first invocation of the query we need to setup the reusable search keys
@@ -391,7 +394,7 @@ extern int JitExecQuery(
             MOT_REPORT_ERROR(
                 MOT_ERROR_OOM, "Execute JIT", "Failed to prepare for executing jitted code, aborting transaction");
             JitStatisticsProvider::GetInstance().AddFailExecQuery();
-            report_pg_error(MOT::RC_MEMORY_ALLOCATION_ERROR, NULL);  // execution control ends, calls ereport(error,...)
+            report_pg_error(MOT::RC_MEMORY_ALLOCATION_ERROR);  // execution control ends, calls ereport(error,...)
         }
     }
 
@@ -494,35 +497,26 @@ extern bool JitInitialize()
 
     if (JitCanInitThreadCodeGen()) {
         if (IsMotPseudoCodegenForced()) {
-            MOT_LOG_INFO("Forcing TVM on LLVM natively supported platform");
+            MOT_LOG_INFO("Forcing TVM on LLVM natively supported platform by user configuration");
+            g_instance.mot_cxt.jitExecMode = JIT_EXEC_MODE_TVM;
         } else {
             PrintNativeLlvmStartupInfo();
+            g_instance.mot_cxt.jitExecMode = JIT_EXEC_MODE_LLVM;
         }
     } else {
-        MOT_LOG_INFO("Using TVM on LLVM natively unsupported platform");
+        if (IsMotPseudoCodegenForced()) {
+            MOT_LOG_INFO("Forcing TVM on LLVM natively unsupported platform by user configuration");
+        } else {
+            MOT_LOG_WARN("Defaulting to TVM on LLVM natively unsupported platform");
+        }
+        g_instance.mot_cxt.jitExecMode = JIT_EXEC_MODE_TVM;
     }
 
-    enum InitState {
-        JIT_INIT,
-        JIT_ARM_LOCK_INIT,
-        JIT_CTX_POOL_INIT,
-        JIT_SRC_POOL_INIT,
-        JIT_INIT_DONE
-    } initState = JIT_INIT;
+    enum InitState { JIT_INIT, JIT_CTX_POOL_INIT, JIT_SRC_POOL_INIT, JIT_INIT_DONE } initState = JIT_INIT;
     bool result = true;
 
     // instead of goto
     do {
-        // initialize ARM compile lock
-#ifdef __aarch64__
-        result = InitArmCompileLock();
-#endif
-        if (!result) {
-            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "JIT Initialization", "Failed to initialize compilation lock for ARM");
-            break;
-        }
-        initState = JIT_ARM_LOCK_INIT;
-
         // initialize global JIT context pool
         result = InitGlobalJitContextPool();
         if (!result) {
@@ -565,11 +559,6 @@ extern bool JitInitialize()
         case JIT_CTX_POOL_INIT:
             DestroyGlobalJitContextPool();
             // fall through
-        case JIT_ARM_LOCK_INIT:
-#ifdef __aarch64__
-            DestroyArmCompileLock();
-#endif
-            // fall through
         case JIT_INIT:
         default:
             break;
@@ -583,14 +572,11 @@ extern void JitDestroy()
     DestroyJitSourceMap();
     DestroyJitSourcePool();
     DestroyGlobalJitContextPool();
-#ifdef __aarch64__
-    DestroyArmCompileLock();
-#endif
 }
 
 extern bool IsMotCodegenEnabled()
 {
-    return MOT_ATOMIC_LOAD(MOT::GetGlobalConfiguration().m_enableCodegen);
+    return MOT::GetGlobalConfiguration().m_enableCodegen;
 }
 
 extern bool IsMotPseudoCodegenForced()
@@ -606,10 +592,5 @@ extern bool IsMotCodegenPrintEnabled()
 extern uint32_t GetMotCodegenLimit()
 {
     return MOT::GetGlobalConfiguration().m_codegenLimit;
-}
-
-extern void DisableMotCodegen()
-{
-    MOT_ATOMIC_STORE(MOT::GetGlobalConfiguration().m_enableCodegen, false);
 }
 }  // namespace JitExec

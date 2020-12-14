@@ -667,8 +667,8 @@ static void set_rel_pathlist(PlannerInfo* root, RelOptInfo* rel, Index rti, Rang
         generate_gather_paths(root, rel);
     }
 
-    /* 
-     * Find the cheapest of the paths for this rel here because 
+    /*
+     * Find the cheapest of the paths for this rel here because
      * generate_gather_paths may delete a path that some paths have
      * a reference to.
      */
@@ -1072,10 +1072,10 @@ static void set_rel_consider_parallel(PlannerInfo *root, RelOptInfo *rel, RangeT
             break;
 
         case RTE_VALUES:
-            /*
-             * The data for a VALUES clause is stored in the plan tree itself,
-             * so scanning it in a worker is fine.
-             */
+            /* Check for parallel-restricted functions. */
+            if (has_parallel_hazard((Node *)rte->values_lists, false)) {
+                return;
+            }
             break;
 
         case RTE_CTE:
@@ -1101,6 +1101,14 @@ static void set_rel_consider_parallel(PlannerInfo *root, RelOptInfo *rel, RangeT
      */
     if (has_parallel_hazard((Node *)rel->baserestrictinfo, false))
         return;
+
+    /*
+     * Likewise, if the relation's outputs are not parallel-safe, give up.
+     * (Usually, they're just Vars, but sometimes they're not.)
+     */
+    if (has_parallel_hazard((Node *)rel->reltargetlist, false)) {
+        return;
+    }
 
     /* We have a winner. */
     rel->consider_parallel = true;
@@ -1783,7 +1791,7 @@ static void add_paths_to_append_rel(PlannerInfo *root, RelOptInfo *rel, List *li
 
             parallel_workers = Max(parallel_workers, path->parallel_workers);
         }
- 
+
         /*
          * Same formula here as above.  It's even more important in this
          * instance because the non-partial paths won't contribute anything to
@@ -2918,6 +2926,26 @@ static void recurse_push_qual(Node* setOp, Query* topquery, RangeTblEntry* rte, 
                     (int)nodeTag(setOp))));
     }
 }
+
+/*
+ * create_partial_bitmap_paths
+ * 	  Build partial bitmap heap path for the relation
+ */
+void create_partial_bitmap_paths(PlannerInfo *root, RelOptInfo *rel, Path *bitmapqual)
+{
+    /* Compute heap pages for bitmap heap scan */
+    double pages_fetched = compute_bitmap_pages(root, rel, bitmapqual, 1.0, NULL, NULL, rel->isPartitionedTable);
+    int parallel_workers = compute_parallel_worker(rel, pages_fetched, -1,
+        u_sess->attr.attr_sql.max_parallel_workers_per_gather);
+
+    if (parallel_workers <= 0) {
+        return;
+    }
+
+    add_partial_path(rel,
+        (Path *)create_bitmap_heap_path(root, rel, bitmapqual, NULL, 1.0, parallel_workers));
+}
+
 /*
  * partIterator tries to inherit pathkeys from scan path
  *

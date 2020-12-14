@@ -542,8 +542,9 @@ Install options:
         else:
             # The timeout parameter must be a pure number
             if (not str(self.g_opts.time_out).isdigit()):
-                GaussLog.exitWithError(ErrorCode.GAUSS_500["GAUSS_50003"]
-                                       % ("-time-out", "integer"))
+                GaussLog.exitWithError(
+                    ErrorCode.GAUSS_500["GAUSS_50003"] %
+                    ("-time-out", "a nonnegative integer"))
             self.g_opts.time_out = int(self.g_opts.time_out)
             # The timeout parameter must be greater than 0
             # The timeout parameter must be less than the integer maximum
