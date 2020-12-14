@@ -99,9 +99,10 @@ CENTOS = "centos"
 EULEROS = "euleros"
 KYLIN = "kylin"
 OPENEULER = "openeuler"
-SUPPORT_WHOLE_PLATFORM_LIST = [SUSE, REDHAT, CENTOS, EULEROS, OPENEULER, KYLIN]
+ASIANUX = "asianux"
+SUPPORT_WHOLE_PLATFORM_LIST = [SUSE, REDHAT, CENTOS, EULEROS, OPENEULER, KYLIN, ASIANUX]
 # RedhatX platform
-SUPPORT_RHEL_SERIES_PLATFORM_LIST = [REDHAT, CENTOS, "kylin"]
+SUPPORT_RHEL_SERIES_PLATFORM_LIST = [REDHAT, CENTOS, "kylin", "asianux"]
 SUPPORT_RHEL6X_VERSION_LIST = ["6.4", "6.5", "6.6", "6.7", "6.8", "6.9", "10"]
 SUPPORT_RHEL7X_VERSION_LIST = ["7.0", "7.1", "7.2", "7.3", "7.4", "7.5", "7.6", "10"]
 SUPPORT_RHEL_SERIES_VERSION_LIST = (SUPPORT_RHEL6X_VERSION_LIST +
@@ -126,13 +127,14 @@ PAK_CENTOS = "CentOS"
 PAK_EULER = "Euler"
 PAK_OPENEULER = "openEuler"
 PAK_REDHAT = "RedHat"
+PAK_ASIANUX = "asianux"
 
 
 #######################################################
 _supported_dists = (
     'SuSE', 'debian', 'fedora', 'redhat', 'centos', 'euleros', "openEuler",
     'mandrake', 'mandriva', 'rocks', 'slackware', 'yellowdog', 'gentoo',
-    'UnitedLinux', 'turbolinux', 'kylin')
+    'UnitedLinux', 'turbolinux', 'kylin', 'asianux')
 _release_filename = re.compile(r'(\w+)[-_](release|version)')
 _lsb_release_version = re.compile(r'(.+)'
                                   ' release '
@@ -1523,6 +1525,11 @@ class LinuxPlatform(GenericPlatform):
                                             prefixStr, packageVersion,
                                             PAK_REDHAT,
                                             BIT_VERSION, postfixStr))
+        elif distname in ASIANUX:
+            fileName = os.path.join(dirName, "./../../../",
+                                    "%s-%s-%s-%s.%s" % (
+                                        prefixStr, packageVersion, PAK_ASIANUX,
+                                        BIT_VERSION, postfixStr))
         elif distname == SUSE and version.split('.')[0] in ("11", "12"):
             fileName = os.path.join(dirName, "./../../../",
                                     "%s-%s-%s-%s.%s" % (
@@ -1991,3 +1998,4 @@ class UserPlatform():
 
 # global platform class
 g_Platform = UserPlatform().userPlatform
+

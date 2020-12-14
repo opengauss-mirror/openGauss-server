@@ -73,7 +73,7 @@ declare BUILD_DIR="${ROOT_DIR}/dest"
 PLAT_FORM_STR=$(sh "${ROOT_DIR}/src/get_PlatForm_str.sh")
 if [ "${PLAT_FORM_STR}"x == "Failed"x ]
 then
-    echo "We only support OPENEULER(aarch64), CentOS(x86-64), neokylin(aarch64), kylin(aarch64), CentOS(x86-64) platform."
+    echo "We only support OPENEULER(aarch64), CentOS(x86-64), neokylin(aarch64), kylin(aarch64), Asianux(x86-64) platform."
     exit 1;
 fi
 
