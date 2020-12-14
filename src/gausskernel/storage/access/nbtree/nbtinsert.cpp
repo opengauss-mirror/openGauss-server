@@ -1605,7 +1605,7 @@ static void _bt_insert_parent(Relation rel, Buffer buf, Buffer rbuf, BTStack sta
 
         /* Check for error only after writing children */
         if (pbuf == InvalidBuffer) {
-            XLogFlush(t_thrd.xlog_cxt.LogwrtResult->Write);
+            XLogWaitFlush(t_thrd.xlog_cxt.LogwrtResult->Write);
             ereport(ERROR,
                 (errcode(ERRCODE_INDEX_CORRUPTED),
                     errmsg("failed to re-find parent key in index \"%s\" for split pages %u/%u",

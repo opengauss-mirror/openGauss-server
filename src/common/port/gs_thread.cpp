@@ -293,6 +293,10 @@ static void check_boot_name_internel(AuxProcType aux_thread_type, char** name_th
             *name_thread = "WalWriter";
             break;
         }
+        case WalWriterAuxiliaryProcess: {
+            *name_thread = "WalWriterAuxiliary";
+            break;
+        }
         case WalReceiverProcess: {
             *name_thread = "WalReceiver";
             break;

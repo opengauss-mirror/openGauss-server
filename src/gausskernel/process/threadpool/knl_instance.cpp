@@ -340,6 +340,27 @@ static void knl_g_bgworker_init(knl_g_bgworker_context* bgworker_cxt)
     bgworker_cxt->have_crashed_worker = false;
 }
 
+static void knl_g_wal_init(knl_g_wal_context *wal_cxt)
+{
+    wal_cxt->walInsertStatusTable = NULL;
+    wal_cxt->walFlushWaitLock = NULL;
+    wal_cxt->walBufferInitWaitLock = NULL;
+    wal_cxt->walInitSegLock = NULL;
+    wal_cxt->isWalWriterUp = false;
+    wal_cxt->flushResult = InvalidXLogRecPtr;
+    wal_cxt->sentResult = InvalidXLogRecPtr;
+    wal_cxt->flushResultMutex = PTHREAD_MUTEX_INITIALIZER;
+    wal_cxt->flushResultCV = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
+    wal_cxt->XLogFlusherCPU = 0;
+    wal_cxt->isWalWriterSleeping = false;
+    wal_cxt->criticalEntryMutex = PTHREAD_MUTEX_INITIALIZER;
+    wal_cxt->criticalEntryCV = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
+    wal_cxt->XLogFlushWaitTime = 0.0;
+    wal_cxt->globalEndPosSegNo = InvalidXLogSegPtr;
+    wal_cxt->walWaitFlushCount3 = 0;
+    wal_cxt->lastWalStatusEntryFlushed = -1;
+}
+
 static void knl_g_mot_init(knl_g_mot_context* mot_cxt)
 {
     mot_cxt->jitExecMode = JitExec::JIT_EXEC_MODE_INVALID;
@@ -395,6 +416,7 @@ void knl_instance_init()
     knl_g_numa_init(&g_instance.numa_cxt);
     knl_g_mot_init(&g_instance.mot_cxt);
     knl_g_bgworker_init(&g_instance.bgworker_cxt);
+    knl_g_wal_init(&g_instance.wal_cxt);
 
     MemoryContextSwitchTo(old_cxt);
 

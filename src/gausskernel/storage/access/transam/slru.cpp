@@ -744,7 +744,7 @@ static bool SlruPhysicalWritePage(SlruCtl ctl, int64 pageno, int slotno, SlruFlu
              * section anyway, but let's make sure.
              */
             START_CRIT_SECTION();
-            XLogFlush(max_lsn);
+            XLogWaitFlush(max_lsn);
             END_CRIT_SECTION();
         }
     }

@@ -2441,6 +2441,31 @@ extern void resetBadBlockStat();
 extern bool CalcSQLRowStatCounter(
     PgStat_TableCounts* last_total_counter, PgStat_TableCounts* current_sql_table_counter);
 extern void GetCurrentTotalTableCounter(PgStat_TableCounts* total_table_counter);
+
+typedef struct XLogStat_Collect {
+    double entryScanTime;
+    double IOTime;
+    double memsetTime;
+    double entryUpdateTime;
+    uint64 writeBytes;
+    uint64 scanEntryCount;
+    uint64 writeSomethingCount;
+    uint64 flushWaitCount;
+    double xlogFlushWaitTime;
+    uint32 walAuxWakeNum;
+    XLogRecPtr writeRqstPtr;
+    XLogRecPtr minCopiedPtr;
+    double IONotificationTime;
+    double sendBufferTime;
+    double memsetNotificationTime;
+    uint32 remoteFlushWaitCount;
+} XLogStat_Collect;
+
+extern THR_LOCAL XLogStat_Collect *XLogStat_shared;
+
+extern void XLogStatShmemInit(void);
+extern Size XLogStatShmemSize(void);
+
 extern bool CheckUserExist(Oid userId, bool removeCount);
 void pgstat_init_sql_rt_info_array(knl_g_stat_context* stat_cxt);
 #endif /* PGSTAT_H */

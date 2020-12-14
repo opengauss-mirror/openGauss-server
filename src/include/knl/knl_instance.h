@@ -115,6 +115,7 @@ typedef struct knl_g_pid_context {
     ThreadId* PageWriterPID;
     ThreadId CheckpointerPID;
     ThreadId WalWriterPID;
+    ThreadId WalWriterAuxiliaryPID;
     ThreadId WalReceiverPID;
     ThreadId WalRcvWriterPID;
     ThreadId DataReceiverPID;
@@ -548,6 +549,39 @@ typedef struct knl_g_mot_context {
     JitExec::JitExecMode jitExecMode;
 } knl_g_mot_context;
 
+typedef struct WalInsertStatusEntry WALInsertStatusEntry;
+typedef struct WALFlushWaitLockPadded WALFlushWaitLockPadded;
+typedef struct WALBufferInitWaitLockPadded WALBufferInitWaitLockPadded;
+typedef struct WALInitSegLockPadded WALInitSegLockPadded;
+
+typedef struct knl_g_wal_context {
+    /* Start address of WAL insert status table that contains WAL_INSERT_STATUS_ENTRIES entries */
+    WALInsertStatusEntry* walInsertStatusTable;
+    WALFlushWaitLockPadded* walFlushWaitLock;
+    WALBufferInitWaitLockPadded* walBufferInitWaitLock;
+    WALInitSegLockPadded* walInitSegLock;
+    volatile bool isWalWriterUp;
+    XLogRecPtr  flushResult;
+    XLogRecPtr  sentResult;
+    pthread_mutex_t flushResultMutex;
+    pthread_cond_t flushResultCV;
+    int XLogFlusherCPU;
+    volatile bool isWalWriterSleeping;
+    pthread_mutex_t criticalEntryMutex;
+    pthread_cond_t criticalEntryCV;
+    volatile uint32 walWaitFlushCount3;
+    volatile double XLogFlushWaitTime;
+    /*
+     * walWaitFlushCount3 and XLogFlushWaitTime are only for xlog statistics use.
+     * We need this variable as well as XLogStat_shared->xlogFlushWaitTime because
+     * we want to only update XLogStat_shared->xlogFlushWaitTime together with other
+     * fields of XLogStat_shared so that we can probably get a consistent snapshot
+     * of statistics data without resorting to locks.
+     */
+    volatile XLogSegNo globalEndPosSegNo; /* Global variable for init xlog segment files. */
+    int lastWalStatusEntryFlushed;
+} knl_g_wal_context;
+
 typedef struct knl_instance_context {
     knl_virtual_role role;
     volatile int status;
@@ -600,6 +634,7 @@ typedef struct knl_instance_context {
     MemoryContext error_context;
     MemoryContext signal_context;
     MemoryContext increCheckPoint_context;
+    MemoryContext wal_context;
     MemoryContext account_context;
 
     knl_instance_attr_t attr;
@@ -615,6 +650,7 @@ typedef struct knl_instance_context {
     knl_g_bgwriter_context bgwriter_cxt;
     struct knl_g_dw_context dw_cxt;
     knl_g_shmem_context shmem_cxt;
+    knl_g_wal_context wal_cxt;
     knl_g_executor_context exec_cxt;
     knl_g_heartbeat_context heartbeat_cxt;
     knl_g_rto_context rto_cxt;

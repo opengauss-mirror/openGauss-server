@@ -254,7 +254,7 @@ LogicalDecodingContext* CreateInitDecodingContext(const char* plugin, List* outp
             flushptr = LogStandbySnapshot();
 
             /* and make sure it's fsynced to disk */
-            XLogFlush(flushptr);
+            XLogWaitFlush(flushptr);
         } else
             slot->data.restart_lsn = GetRedoRecPtr();
 

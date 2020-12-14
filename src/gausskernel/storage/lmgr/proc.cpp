@@ -248,6 +248,7 @@ void InitProcGlobal(void)
     g_instance.proc_base->startupProcPid = 0;
     g_instance.proc_base->startupBufferPinWaitBufId = -1;
     g_instance.proc_base->walwriterLatch = NULL;
+    g_instance.proc_base->walwriterauxiliaryLatch = NULL;
     g_instance.proc_base->checkpointerLatch = NULL;
     g_instance.proc_base->cbmwriterLatch = NULL;
     pg_atomic_init_u32(&g_instance.proc_base->procArrayGroupFirst, INVALID_PGPROCNO);

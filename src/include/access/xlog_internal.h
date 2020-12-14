@@ -219,6 +219,20 @@ typedef struct RmgrData {
     bool (*rm_safe_restartpoint)(void);
 } RmgrData;
 
+/*
+ * New XLogCtlInsert Structure.
+ */
+struct Combined128 {
+    uint64 currentBytePos;
+    uint32 byteSize;
+    int32  LRC;
+};
+
+union Union128 {
+    uint128_u value;
+    struct Combined128 struct128;
+};
+
 extern const RmgrData RmgrTable[];
 
 /*

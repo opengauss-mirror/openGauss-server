@@ -601,7 +601,7 @@ void RelationTruncate(Relation rel, BlockNumber nblocks)
          * contain entries for the non-existent heap pages.
          */
         if (fsm || vm)
-            XLogFlush(lsn);
+            XLogWaitFlush(lsn);
     }
     if (!RELATION_IS_GLOBAL_TEMP(rel)) {
         /* Lock RelFileNode to control concurrent with Catchup Thread */
@@ -673,7 +673,7 @@ void PartitionTruncate(Relation parent, Partition part, BlockNumber nblocks)
          * contain entries for the non-existent heap pages.
          */
         if (fsm || vm)
-            XLogFlush(lsn);
+            XLogWaitFlush(lsn);
     }
 
     /* Lock RelFileNode to control concurrent with Catchup Thread */
@@ -910,7 +910,7 @@ void XLogBlockSmgrRedoTruncate(RelFileNode rnode, BlockNumber blkno, XLogRecPtr 
      * after truncation, but that would leave a small window where the
      * WAL-first rule could be violated.
      */
-    XLogFlush(lsn);
+    XLogWaitFlush(lsn);
 
     LockRelFileNode(rnode, AccessExclusiveLock);
     smgrtruncate(reln, MAIN_FORKNUM, blkno);

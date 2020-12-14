@@ -54,7 +54,7 @@ void log_slot_create(const ReplicationSlotPersistentData* slotInfo)
     XLogRegisterData((char*)&xlrec, SizeOfSlotHeader);
 
     recptr = XLogInsert(RM_SLOT_ID, XLOG_SLOT_CREATE);
-    XLogFlush(recptr);
+    XLogWaitFlush(recptr);
     if (g_instance.attr.attr_storage.max_wal_senders > 0)
         WalSndWakeup();
 
@@ -81,7 +81,7 @@ void log_slot_advance(const ReplicationSlotPersistentData* slotInfo)
     XLogRegisterData((char*)&xlrec, SizeOfSlotHeader);
 
     Ptr = XLogInsert(RM_SLOT_ID, XLOG_SLOT_ADVANCE);
-    XLogFlush(Ptr);
+    XLogWaitFlush(Ptr);
     if (g_instance.attr.attr_storage.max_wal_senders > 0)
         WalSndWakeup();
     END_CRIT_SECTION();
@@ -101,7 +101,7 @@ void log_slot_drop(const char* name)
     XLogRegisterData((char*)&xlrec, SizeOfSlotHeader);
 
     Ptr = XLogInsert(RM_SLOT_ID, XLOG_SLOT_DROP);
-    XLogFlush(Ptr);
+    XLogWaitFlush(Ptr);
     if (g_instance.attr.attr_storage.max_wal_senders > 0)
         WalSndWakeup();
     END_CRIT_SECTION();
@@ -124,7 +124,7 @@ void LogCheckSlot()
     XLogRegisterData((char*)LogicalSlot, size);
 
     recptr = XLogInsert(RM_SLOT_ID, XLOG_SLOT_CHECK);
-    XLogFlush(recptr);
+    XLogWaitFlush(recptr);
     if (g_instance.attr.attr_storage.max_wal_senders > 0)
         WalSndWakeup();
 
@@ -892,7 +892,7 @@ void write_term_log(uint32 term)
     XLogRegisterData((char*)&term, sizeof(uint32));
 
     recptr = XLogInsert(RM_SLOT_ID, XLOG_TERM_LOG);
-    XLogFlush(recptr);
+    XLogWaitFlush(recptr);
     if (g_instance.attr.attr_storage.max_wal_senders > 0) {
         WalSndWakeup();
     }

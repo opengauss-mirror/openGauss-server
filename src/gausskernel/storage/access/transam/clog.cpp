@@ -1094,7 +1094,7 @@ static void WriteTruncateXlogRec(int64 pageno)
     XLogBeginInsert();
     XLogRegisterData((char*)(&pageno), sizeof(int64));
     recptr = XLogInsert(RM_CLOG_ID, CLOG_TRUNCATE);
-    XLogFlush(recptr);
+    XLogWaitFlush(recptr);
 }
 
 /*

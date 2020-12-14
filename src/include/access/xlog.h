@@ -22,7 +22,9 @@
 #include "access/parallel_recovery/redo_item.h"
 #include "knl/knl_instance.h"
 #include "access/htup.h"
+#include "storage/lwlock.h"
 
+#include <time.h>
 /* Sync methods */
 #define SYNC_METHOD_FSYNC 0
 #define SYNC_METHOD_FDATASYNC 1
@@ -133,6 +135,57 @@ extern const char* DemoteModeDescs[];
 extern const int DemoteModeNum;
 
 #define DemoteModeDesc(mode) (((mode) > 0 && (mode) < DemoteModeNum) ? DemoteModeDescs[(mode)] : DemoteModeDescs[0])
+
+typedef struct {
+    LWLock* lock;
+    PGSemaphoreData	sem;
+} WALFlushWaitLock;
+
+typedef struct {
+    LWLock* lock;
+    PGSemaphoreData	sem;
+} WALInitSegLock;
+
+typedef struct {
+    LWLock* lock;
+    PGSemaphoreData	sem;
+} WALBufferInitWaitLock;
+
+#define WAL_INSERT_STATUS_ENTRIES 4194304
+#define WAL_NOT_COPIED 0
+#define WAL_COPIED 1
+#define WAL_COPY_SUSPEND (-1)
+
+/* (ientry + 1) % WAL_INSERT_STATUS_ENTRIES */
+#define GET_NEXT_STATUS_ENTRY(ientry) ((ientry + 1) & (WAL_INSERT_STATUS_ENTRIES - 1))
+
+#define GET_STATUS_ENTRY_INDEX(ientry) ientry
+
+struct WalInsertStatusEntry {
+    /* The end LSN of the record corresponding to this entry */
+    uint64 endLSN;
+
+    /* The log record counter of the record corresponding to this entry */
+    int32  LRC;
+
+    /* WAL copy status: "0" - not copied; "1" - copied */
+    uint32 status;
+};
+
+struct WALFlushWaitLockPadded {
+    WALFlushWaitLock l;
+    char padding[PG_CACHE_LINE_SIZE];
+};
+
+struct WALBufferInitWaitLockPadded {
+    WALBufferInitWaitLock l;
+    char padding[PG_CACHE_LINE_SIZE];
+};
+
+struct WALInitSegLockPadded {
+    WALInitSegLock l;
+    char padding[PG_CACHE_LINE_SIZE];
+};
 
 /*
  * OR-able request flag bits for checkpoints.  The "cause" bits are used only
@@ -249,8 +302,10 @@ typedef struct XLogwrtResult {
     XLogRecPtr Flush; /* last byte + 1 flushed */
 } XLogwrtResult;
 
+extern void XLogMultiFileInit(int advance_xlog_file_num);
 extern XLogRecPtr XLogInsertRecord(struct XLogRecData* rdata, XLogRecPtr fpw_lsn, bool isupgrade = false);
-extern void XLogFlush(XLogRecPtr record, bool LogicalPage = false);
+extern void XLogWaitFlush(XLogRecPtr recptr);
+extern void XLogWaitBufferInit(XLogRecPtr recptr);
 extern void UpdateMinRecoveryPoint(XLogRecPtr lsn, bool force);
 extern bool XLogBackgroundFlush(void);
 extern bool XLogNeedsFlush(XLogRecPtr RecPtr);
@@ -305,6 +360,8 @@ extern void SetThisTimeID(uint64 timelineID);
 extern Size XLOGShmemSize(void);
 extern void XLOGShmemInit(void);
 extern void BootStrapXLOG(void);
+extern int XLogSemas(void);
+extern void InitWalSemaphores(void);
 extern void StartupXLOG(void);
 extern void ShutdownXLOG(int code, Datum arg);
 extern void InitXLOGAccess(void);

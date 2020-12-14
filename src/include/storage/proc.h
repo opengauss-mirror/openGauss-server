@@ -314,6 +314,8 @@ typedef struct PROC_HDR {
     pg_atomic_uint32 clogGroupFirst;
     /* WALWriter process's latch */
     Latch* walwriterLatch;
+    /* WALWriterAuxiliary process's latch */
+    Latch* walwriterauxiliaryLatch;
     /* Checkpointer process's latch */
     Latch* checkpointerLatch;
     /* BCMWriter process's latch */

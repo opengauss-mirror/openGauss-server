@@ -149,7 +149,7 @@ void ProcessCreateBarrierExecute(const char* id)
         rdata[0].next = NULL;
 
         recptr = XLogInsert(RM_BARRIER_ID, XLOG_BARRIER_CREATE, rdata);
-        XLogFlush(recptr);
+        XLogWaitFlush(recptr);
     }
 
     pq_beginmessage(&buf, 'b');
@@ -525,7 +525,7 @@ static void ExecuteBarrier(const char* id)
         rdata[0].next = NULL;
 
         recptr = XLogInsert(RM_BARRIER_ID, XLOG_BARRIER_CREATE, rdata);
-        XLogFlush(recptr);
+        XLogWaitFlush(recptr);
     }
 }
 
