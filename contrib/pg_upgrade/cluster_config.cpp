@@ -494,9 +494,9 @@ int get_value_in_config_file(char* pg_config_file, char* parameter_in_config, ch
 
     if (INVALID_LINES_IDX != values_line) {
         retcode = strncpy_s(para_value,
-            (size_t)Min(values_len - 1, MAX_VALUE_LEN),
+            MAX_VALUE_LEN,
             all_lines[values_line] + values_offset + 1,
-            (size_t)Min(values_len - 1, MAX_VALUE_LEN));
+            (size_t)Min(values_len - 2, MAX_VALUE_LEN - 1));
         securec_check_c(retcode, "\0", "\0");
     }
 
