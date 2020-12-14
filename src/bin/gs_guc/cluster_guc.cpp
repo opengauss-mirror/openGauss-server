@@ -1761,10 +1761,10 @@ char* get_AZ_value(const char* value, const char* data_dir)
     while (isspace((unsigned char)*p))
         p++;
     
-    if (strlen(p) == 0) {
-        len = strlen(emptyvalue) + 1;
+    if (strlen(p) == 0 || 0 == strcmp(p, "*")) {
+        len = strlen(emptyvalue) + strlen(p) + 1;
         result = (char*)pg_malloc_zero(len * sizeof(char));
-        nRet = snprintf_s(result, len, len - 1, "%s", emptyvalue);
+        nRet = snprintf_s(result, len, len - 1, "'%s'", p);
         securec_check_ss_c(nRet, "\0", "\0");
         return result;
     }
