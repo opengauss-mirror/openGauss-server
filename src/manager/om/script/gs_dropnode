@@ -37,7 +37,6 @@ from gspylib.common.ParallelBaseOM import ParallelBaseOM
 from gspylib.common.ParameterParsecheck import Parameter
 from gspylib.threads.SshTool import SshTool
 from impl.dropnode.DropnodeImpl import DropnodeImpl
-from gspylib.inspection.common.Exception import CheckException
 
 ENV_LIST = ["MPPDB_ENV_SEPARATE_PATH", "GPHOME", "PATH",
             "LD_LIBRARY_PATH", "PYTHONPATH", "GAUSS_WARNING_TYPE",
@@ -130,17 +129,22 @@ General options:
         if len(self.hostIpListForDel) == 0:
             GaussLog.exitWithError(ErrorCode.GAUSS_358["GAUSS_35801"] % "-h")
 
+        try:
+            pw_user = pwd.getpwnam(self.user)
+            gr_group = grp.getgrnam(self.group)
+        except KeyError as e:
+            if self.user in e.args[0]:
+                GaussLog.exitWithError(
+                    ErrorCode.GAUSS_503["GAUSS_50300"] % self.user)
+            if self.group in e.args[0]:
+                self.logger.log("Group %s not exist." % self.group)
+                sys.exit(1)
+
         # get dbcluster info from static config file
         self.clusterInfo.initFromStaticConfig(self.user)
         appPath = self.clusterInfo.appPath
         db_uid = os.stat(appPath).st_uid
         db_gid = os.stat(appPath).st_gid
-        try:
-            pw_user = pwd.getpwnam(self.user)
-            gr_group = grp.getgrnam(self.group)
-        except CheckException:
-            GaussLog.exitWithError(
-                ErrorCode.GAUSS_503["GAUSS_50300"] % self.user)
         if db_uid != pw_user.pw_uid or db_gid != gr_group.gr_gid:
             GaussLog.exitWithError(
                 ErrorCode.GAUSS_503["GAUSS_50323"] % self.user)
@@ -168,6 +172,10 @@ General options:
                     self.hostMapForExist[node.name]['dn_id'].append(
                         'dn_' + str(i.instanceId))
                     self.hostMapForExist[node.name]['port'].append(str(i.port))
+        localIp = self.backIpNameMap[DefaultValue.GetHostIpOrName()]
+        if localIp in self.hostIpListForDel:
+            GaussLog.exitWithError(ErrorCode.GAUSS_358["GAUSS_35803"] % \
+                                   localIp)
 
         for ipLoop in self.hostIpListForDel:
             if ipLoop not in self.backIpNameMap.values():
@@ -178,25 +186,13 @@ General options:
             GaussLog.exitWithError(ErrorCode.GAUSS_358["GAUSS_35802"] % \
                                    self.hostIpListForDel)
 
-        # check the node ip is the IP of the current server
-        localIp = self.backIpNameMap[DefaultValue.GetHostIpOrName()]
-        for dndir_loop in \
-            self.hostMapForExist[DefaultValue.GetHostIpOrName()]['datadir']:
-                cmd = "gs_ctl query -D %s|grep '\<local_role\>'| " \
-                      "awk -F ':' '{print $2}'" % dndir_loop
-                (status, output) = subprocess.getstatusoutput(cmd)
-                if 'Primary' not in output:
-                    GaussLog.exitWithError(ErrorCode.GAUSS_358["GAUSS_35804"])
-        if localIp in self.hostIpListForDel:
-            GaussLog.exitWithError(ErrorCode.GAUSS_358["GAUSS_35803"] % \
-                                   localIp)
-
     def check_repeat_process(self):
         """
         function: Check whether only one node be left in the cluster
         return a flag
         """
-        cmd = "ps -ef | grep gs_dropnode | grep -v grep"
+        cmd = "ps -ef | grep 'gs_dropnode -U %s -G %s' | grep -v grep" \
+              % (self.user, self.group)
         (status, output) = subprocess.getstatusoutput(cmd)
         if status == 0 and len(output.split('\n')) > 1:
             GaussLog.exitWithError(ErrorCode.GAUSS_358["GAUSS_35810"])
@@ -253,6 +249,15 @@ General options:
         if clsStatus in ["Unknown", "Unavailable"]:
             GaussLog.exitWithError(
                 ErrorCode.GAUSS_358["GAUSS_35806"] % clsStatus)
+
+        for dndir_loop in \
+            self.hostMapForExist[DefaultValue.GetHostIpOrName()]['datadir']:
+                cmd = "gs_ctl query -D %s|grep '\<local_role\>'| " \
+                      "awk -F ':' '{print $2}'" % dndir_loop
+                (status, output) = subprocess.getstatusoutput(cmd)
+                if 'Primary' not in output:
+                    GaussLog.exitWithError(ErrorCode.GAUSS_358["GAUSS_35804"])
+
         flag = input(
             statusDelHost + "Do you want to continue "
                             "to drop the target node (yes/no)? ")
