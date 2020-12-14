@@ -7436,7 +7436,7 @@ int PostgresMain(int argc, char* argv[], const char* dbname, const char* usernam
         if (t_thrd.msqueue_cxt.is_changed) {
             pq_stop_redirect_to_shm_mq();
         }
-        if (t_thrd.autonomous_cxt.handle) {
+        if (t_thrd.autonomous_cxt.handle.slot >= 0) {
             StopBackgroundWorker();
         }
         gstrace_tryblock_exit(true, oldTryCounter);

@@ -94,11 +94,6 @@ typedef struct BackgroundWorkerArray {
     BackgroundWorkerSlot slot[FLEXIBLE_ARRAY_MEMBER];
 } BackgroundWorkerArray;
 
-struct BackgroundWorkerHandle {
-    int slot;
-    uint64 generation;
-};
-
 /*
  * List of internal background worker entry points.  We need this for
  * reasons explained in LookupBackgroundWorkerFunction(), below.
@@ -1172,7 +1167,7 @@ void TerminateBackgroundWorker(const BackgroundWorkerHandle *handle)
 {
     bool signal_postmaster = false;
 
-    Assert(handle->slot < g_instance.attr.attr_storage.max_background_workers);
+    Assert( handle->slot >= 0 && handle->slot < g_instance.attr.attr_storage.max_background_workers);
     BackgroundWorkerSlot* slot = &t_thrd.bgworker_cxt.background_worker_data->slot[handle->slot];
 
     /* Set terminate flag in shared memory, unless slot has been reused. */
@@ -1191,9 +1186,11 @@ void TerminateBackgroundWorker(const BackgroundWorkerHandle *handle)
 
 void StopBackgroundWorker() 
 {
-    TerminateBackgroundWorker(t_thrd.autonomous_cxt.handle);
-    (void)WaitForBackgroundWorkerShutdown(t_thrd.autonomous_cxt.handle);
-    t_thrd.autonomous_cxt.handle = NULL;
+    TerminateBackgroundWorker(&(t_thrd.autonomous_cxt.handle));
+    (void)WaitForBackgroundWorkerShutdown(&(t_thrd.autonomous_cxt.handle));
+    // reset handle of autonomous_cxt
+    t_thrd.autonomous_cxt.handle.slot = -1;
+    t_thrd.autonomous_cxt.handle.generation = 0;
 }
 
 /*

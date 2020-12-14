@@ -137,7 +137,7 @@ AutonomousSession *AutonomousSessionStart(void)
     shm_toc_estimate_chunk(&e, guc_len);
     shm_toc_estimate_keys(&e, AUTONOMOUS_NKEYS);
     segsize = shm_toc_estimate(&e);
-    seg = (char *)palloc(sizeof(char) * segsize);
+    seg = (char *)MemoryContextAlloc(t_thrd.top_mem_cxt, sizeof(char) * segsize);
 
     session->seg = seg;
 
@@ -191,7 +191,8 @@ AutonomousSession *AutonomousSessionStart(void)
     shm_mq_set_handle(session->command_qh, session->worker_handle);
     shm_mq_set_handle(session->response_qh, session->worker_handle);
 
-    t_thrd.autonomous_cxt.handle = session->worker_handle;
+    t_thrd.autonomous_cxt.handle.slot = session->worker_handle->slot;
+    t_thrd.autonomous_cxt.handle.generation = session->worker_handle->generation;
 
     bgwstatus = WaitForBackgroundWorkerStartup(session->worker_handle, &pid);
     if (bgwstatus != BGWH_STARTED)
@@ -246,7 +247,8 @@ void AutonomousSessionEnd(AutonomousSession *session)
     pfree(session->worker_handle);
     pfree(session->seg);
     pfree(session);
-    t_thrd.autonomous_cxt.handle = NULL;
+    t_thrd.autonomous_cxt.handle.slot = -1;
+    t_thrd.autonomous_cxt.handle.generation = 0;
 }
 
 AutonomousResult *AutonomousSessionExecute(AutonomousSession *session, const char *sql)
