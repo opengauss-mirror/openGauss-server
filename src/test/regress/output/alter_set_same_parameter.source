@@ -1,0 +1,60 @@
+--
+-- TEST CASE: support the parameters with same name in postgrsql.conf
+--
+--show previous value of the parameter
+show autovacuum_naptime;
+ autovacuum_naptime
+--------------------
+ 10min
+(1 row)
+
+show enable_resource_track;
+ enable_resource_track
+-----------------------
+ on
+(1 row)
+
+show memorypool_size;
+ memorypool_size
+-----------------
+ 512MB
+(1 row)
+
+--append to the end of postgrsql.conf
+\! echo 'autovacuum_naptime = 2min' >> @abs_srcdir@/tmp_check/datanode1/postgresql.conf
+\! echo 'autovacuum_naptime = 5min' >> @abs_srcdir@/tmp_check/datanode1/postgresql.conf
+\! echo 'autovacuum_naptime = 4min' >> @abs_srcdir@/tmp_check/datanode1/postgresql.conf
+\! echo 'enable_resource_track = off' >> @abs_srcdir@/tmp_check/datanode1/postgresql.conf
+\! echo 'enable_resource_track = on' >> @abs_srcdir@/tmp_check/datanode1/postgresql.conf
+\! echo 'memorypool_size = 500MB' >> @abs_srcdir@/tmp_check/datanode1/postgresql.conf
+\! echo 'memorypool_size = 600MB' >> @abs_srcdir@/tmp_check/datanode1/postgresql.conf
+--reset value of the parameter
+alter system set autovacuum_naptime to '3min';
+NOTICE:  There are 3 'autovacuum_naptime' not commented in "postgresql.conf", and only the last one in 815th line will be set and used.
+alter system set enable_resource_track to 'off';
+NOTICE:  There are 2 'enable_resource_track' not commented in "postgresql.conf", and only the last one in 817th line will be set and used.
+alter system set memorypool_size to '550MB';
+NOTICE:  There are 2 'memorypool_size' not commented in "postgresql.conf", and only the last one in 819th line will be set and used.
+NOTICE:  please restart the database for the POSTMASTER level parameter to take effect.
+--show new value of the parameter
+show autovacuum_naptime;
+ autovacuum_naptime
+--------------------
+ 3min
+(1 row)
+
+show enable_resource_track;
+ enable_resource_track
+-----------------------
+ off
+(1 row)
+
+--restart database
+\! @abs_bindir@/gs_ctl restart -D @abs_srcdir@/tmp_check/datanode1/ > /dev/null 2>&1
+--show new value of the parameter with postmaster level
+\! @abs_bindir@/gsql -d postgres -p 54323 -c 'show memorypool_size'
+ memorypool_size
+-----------------
+ 550MB
+(1 row)
+
