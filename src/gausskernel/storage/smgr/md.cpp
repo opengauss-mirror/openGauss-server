@@ -1058,13 +1058,12 @@ bool mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char* b
     }
 
     if (nbytes != BLCKSZ) {
-#ifndef ENABLE_MULTIPLE_NODES
-       if(RecoveryInProgress()) {
-           return false;
-       }
-#endif
-
         if (nbytes < 0) {
+#ifndef ENABLE_MULTIPLE_NODES
+            if(RecoveryInProgress()) {
+                return false;
+            }
+#endif
             ereport(ERROR,
                 (errcode_for_file_access(),
                     errmsg("could not read block %u in file \"%s\": %m", blocknum, FilePathName(v->mdfd_vfd))));
@@ -1082,6 +1081,11 @@ bool mdread(SMgrRelation reln, ForkNumber forknum, BlockNumber blocknum, char* b
         } else {
             check_file_stat(FilePathName(v->mdfd_vfd));
             force_backtrace_messages = true;
+#ifndef ENABLE_MULTIPLE_NODES
+            if(RecoveryInProgress()) {
+                return false;
+            }
+#endif
             ereport(ERROR,
                 (errcode(ERRCODE_DATA_CORRUPTED),
                     errmsg("could not read block %u in file \"%s\": read only %d of %d bytes",
