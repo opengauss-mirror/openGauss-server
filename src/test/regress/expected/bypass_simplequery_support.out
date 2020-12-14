@@ -357,7 +357,7 @@ select * from test_bypass_sq1 where col1 is not null and col2 = 0 order by col1;
 explain update test_bypass_sq1 set col2=col2-1,col3='test_update' where col1=0 and col2=0;
                                           QUERY PLAN                                           
 -----------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the expression of query is not support.
+ [Bypass]
  Update on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=14)
    ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=14)
          Index Cond: ((col1 = 0) AND (col2 = 0))
@@ -367,7 +367,7 @@ update test_bypass_sq1 set col2=col2-1,col3='test_update' where col1=0 and col2=
 explain update test_bypass_sq1 set col2=col1-1,col3='test_update' where col1=2 and col2=2;
                                           QUERY PLAN                                           
 -----------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the expression of query is not support.
+ [Bypass]
  Update on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=10)
    ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=10)
          Index Cond: ((col1 = 2) AND (col2 = 2))
@@ -1145,7 +1145,7 @@ set enable_indexonlyscan=off;
 explain update test_bypass_sq2 set col2 = col2+1 where col1 = 0;
                                            QUERY PLAN                                            
 -------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the expression of query is not support.
+ [Bypass]
  Update on test_bypass_sq2  (cost=0.00..36.47 rows=11 width=14)
    ->  Index Scan using itest_bypass_sq2 on test_bypass_sq2  (cost=0.00..36.47 rows=11 width=14)
          Index Cond: (col1 = 0)
