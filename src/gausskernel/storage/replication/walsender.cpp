@@ -1664,7 +1664,7 @@ bool cmdStringCheck(const char* cmd_string)
  */
 static bool cmdStringLengthCheck(const char* cmd_string)
 {
-    const size_t cmd_length_limit = 200;
+    const size_t cmd_length_limit = 20000;
     const size_t slotname_limit = 64;
     char comd[cmd_length_limit] = {'\0'};
     char* sub_cmd = NULL;
