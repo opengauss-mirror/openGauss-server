@@ -620,14 +620,10 @@ void CheckpointManager::RemoveOldCheckpoints(uint64_t curCheckcpointId)
 void CheckpointManager::RemoveCheckpointDir(uint64_t checkpointId)
 {
     errno_t erc;
+    char buf[CheckpointUtils::maxPath];
     std::string oldCheckpointDir;
     if (!CheckpointUtils::SetWorkingDir(oldCheckpointDir, checkpointId)) {
         MOT_LOG_ERROR("removeCheckpointDir: failed to set working directory");
-        return;
-    }
-    char* buf = (char*)malloc(CheckpointUtils::maxPath);
-    if (buf == nullptr) {
-        MOT_LOG_ERROR("removeCheckpointDir: failed to allocate buffer");
         return;
     }
 
@@ -663,8 +659,6 @@ void CheckpointManager::RemoveCheckpointDir(uint64_t checkpointId)
             errno,
             gs_strerror(errno));
     }
-
-    free(buf);
 }
 
 bool CheckpointManager::CreateCheckpointMap()

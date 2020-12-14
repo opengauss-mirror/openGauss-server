@@ -103,9 +103,8 @@ else
 endif
 endif
 
-ifeq ($(CC_VERSION), 8.2.0)
-	CFLAGS += -faligned-new
-endif
+CFLAGS += -faligned-new
+
 # turn on some warnings
 CFLAGS += -Wwrite-strings -Wcast-align -Wreturn-type
 CFLAGS += -Wpointer-arith -Wlogical-op -Waddress -Wsizeof-pointer-memaccess -Winit-self
@@ -143,9 +142,7 @@ endif
 
 
 LDFLAGS += $(CFLAGS)
-ifeq ($(CC_VERSION), 8.2.0)
-	LDFLAGS += -latomic
-endif
+LDFLAGS += -latomic
 
 INCLUDE += -I$(JEMALLOC_INCLUDE_PATH)
 PYREPLICA :=

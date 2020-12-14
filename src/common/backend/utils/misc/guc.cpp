@@ -360,6 +360,7 @@ const char* sync_guc_variable_namelist[] = {"work_mem",
     "enable_adio_function",
     "fast_extend_file_size",
     "enable_global_stats",
+    "enable_hypo_index",
     "td_compatible_truncation",
 #ifdef ENABLE_MULTIPLE_NODES
     "gds_debug_mod",
@@ -1230,6 +1231,20 @@ static void init_configure_names_bool()
             NULL,
             NULL
         },
+        {                                                                       
+            {                                                                   
+                "enable_hypo_index",                                          
+                PGC_USERSET,                                                      
+                QUERY_TUNING_METHOD,                                            
+                gettext_noop("Enable hypothetical index for explain."),               
+                NULL                                                            
+            },                                                                  
+            &u_sess->attr.attr_sql.enable_hypo_index,                         
+            false,                                                               
+            NULL,                                                               
+            NULL,                                                               
+            NULL                                                                
+        }, 
 #ifdef ENABLE_MULTIPLE_NODES
         {
             {
@@ -2611,7 +2626,7 @@ static void init_configure_names_bool()
         {
             {
                 "update_process_title",
-                PGC_SUSET,
+                PGC_INTERNAL,
                 STATS_COLLECTOR,
                 gettext_noop("Updates the process title to show the active SQL command."),
                 gettext_noop(
@@ -10870,7 +10885,7 @@ static void init_configure_names_string()
                 GUC_LIST_INPUT
             },
             &u_sess->attr.attr_storage.SyncRepStandbyNames,
-            "",
+            "*",
             check_synchronous_standby_names,
             assign_synchronous_standby_names,
             NULL
@@ -12552,6 +12567,7 @@ static void init_single_node_unsupport_guc()
     u_sess->attr.attr_sql.agg_redistribute_enhancement = false;
     u_sess->attr.attr_sql.enable_agg_pushdown_for_cooperation_analysis = true;
     u_sess->attr.attr_common.enable_tsdb = false;
+    u_sess->attr.attr_common.update_process_title = false;
     u_sess->attr.attr_sql.acceleration_with_compute_pool = false;
     u_sess->attr.attr_sql.enable_constraint_optimization = true;
     u_sess->attr.attr_sql.enable_csqual_pushdown = true;

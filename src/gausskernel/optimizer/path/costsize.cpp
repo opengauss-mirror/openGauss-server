@@ -1260,6 +1260,8 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count, bool part
 
     cpu_run_cost += cpu_per_tuple * tuples_fetched;
 
+    run_cost += cpu_run_cost;
+
     /* Adjust costing for parallelism, if used. */
     if (path->path.parallel_workers > 0) {
         double parallel_divisor = get_parallel_divisor(&path->path);
@@ -1267,10 +1269,8 @@ void cost_index(IndexPath* path, PlannerInfo* root, double loop_count, bool part
         path->path.rows = clamp_row_est(path->path.rows / parallel_divisor);
 
         /* The CPU cost is divided among all the workers. */
-        cpu_run_cost /= parallel_divisor;
+        run_cost /= parallel_divisor;
     }
-
-    run_cost += cpu_run_cost;
 
     path->path.startup_cost = startup_cost;
     path->path.total_cost = startup_cost + run_cost;
@@ -1531,17 +1531,17 @@ void cost_bitmap_heap_scan(
     cpu_per_tuple = u_sess->attr.attr_sql.cpu_tuple_cost + qpqual_cost.per_tuple;
     cpu_run_cost = cpu_per_tuple * tuples_fetched;
 
+    run_cost += cpu_run_cost;
+
     /* Adjust costing for parallelism, if used. */
     if (path->parallel_workers > 0) {
         double parallel_divisor = get_parallel_divisor(path);
 
         /* The CPU cost is divided among all the workers. */
-        cpu_run_cost /= parallel_divisor;
+        run_cost /= parallel_divisor;
 
         path->rows = clamp_row_est(path->rows / parallel_divisor);
     }
-
-    run_cost += cpu_run_cost;
 
     path->startup_cost = startup_cost;
     path->total_cost = startup_cost + run_cost;
@@ -2953,6 +2953,12 @@ void final_cost_nestloop(PlannerInfo* root, NestPath* path, JoinCostWorkspace* w
     /* Mark the path with the correct row estimate */
     set_rel_path_rows(&path->path, path->path.parent, path->path.param_info);
 
+    /* For partial paths, scale row estimate. */
+    if (path->path.parallel_workers > 0) {
+        double parallel_divisor = get_parallel_divisor(&path->path);
+        path->path.rows = clamp_row_est(path->path.rows / parallel_divisor);
+    }
+
     /*
      * If inner_path or outer_path is EC functioinScan without stream,
      * we should set the multiple particularly.
@@ -3318,6 +3324,12 @@ void final_cost_mergejoin(
 
     /* Mark the path with the correct row estimate */
     set_rel_path_rows(&path->jpath.path, path->jpath.path.parent, path->jpath.path.param_info);
+
+    /* For partial paths, scale row estimate. */
+    if (path->jpath.path.parallel_workers > 0) {
+        double parallel_divisor = get_parallel_divisor(&path->jpath.path);
+        path->jpath.path.rows = clamp_row_est(path->jpath.path.rows / parallel_divisor);
+    }
 
     /*
      * If inner_path or outer_path is EC functioinScan without stream,
@@ -3895,6 +3907,12 @@ void final_cost_hashjoin(PlannerInfo* root, HashPath* path, JoinCostWorkspace* w
     double outerdistinct = 1.0;
     /* Mark the path with the correct row estimate */
     set_rel_path_rows(&path->jpath.path, path->jpath.path.parent, path->jpath.path.param_info);
+
+    /* For partial paths, scale row estimate. */
+    if (path->jpath.path.parallel_workers > 0) {
+        double parallel_divisor = get_parallel_divisor(&path->jpath.path);
+        path->jpath.path.rows = clamp_row_est(path->jpath.path.rows / parallel_divisor);
+    }
 
     /*
      * If inner_path or outer_path is EC functioinScan without stream,

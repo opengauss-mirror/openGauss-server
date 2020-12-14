@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Copyright (c) 2020 Huawei Technologies Co.,Ltd.
 
@@ -17,7 +16,7 @@ See the Mulan PSL v2 for more details.
 import numpy as np
 
 
-class Particle(object):
+class Particle:
     def __init__(self, position, velocity, best_position, fitness):
         self.position = position
         self.velocity = velocity
@@ -25,7 +24,7 @@ class Particle(object):
         self.fitness = fitness
 
 
-class Pso(object):
+class Pso:
     def __init__(self, func, dim, particle_nums, max_iteration, x_min, x_max, max_vel,
                  c1=2, c2=2, w_max=1, w_min=0.1):
         # hyper-parameters
@@ -58,7 +57,7 @@ class Pso(object):
             self.particles.append(particle)
 
     def _update_velocity(self, particle):
-        # w is a factor of inertance, we implement it adapting for iterations.
+        # w is a factor of inertia, we implement it adapting for iterations.
         self.w = self.w * (1 - 0.1 * self.iteration_count / self.max_iteration)
         self.w = np.clip(self.w, self.w_min, self.w_max)
 
@@ -101,7 +100,7 @@ class Pso(object):
         self.iteration_count += 1
         self.fitness_val_list.append(self.best_fitness)
 
-    def update(self):
+    def minimize(self):
         for i in range(self.max_iteration):
             self.update_one_step()
         return self.best_fitness, self.best_position

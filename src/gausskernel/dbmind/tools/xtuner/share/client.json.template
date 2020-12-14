@@ -1,0 +1,8 @@
+{
+  "db_name": "postgres",
+  "db_user": "dba",
+  "host": "127.0.0.1",
+  "host_user": "dba",
+  "port": 5432,
+  "ssh_port": 22
+}

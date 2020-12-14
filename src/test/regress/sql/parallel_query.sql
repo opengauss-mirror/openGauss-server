@@ -308,6 +308,7 @@ reset min_parallel_index_scan_size;
 -- nestloop
 set enable_hashjoin=off;
 set enable_mergejoin=off;
+set enable_bitmapscan=off;
 explain (costs off, analyse on) select schemaname, tablename from pg_tables where tablename like 'sql%' order by tablename;
 --set parallel parameter
 set force_parallel_mode=on;
@@ -318,6 +319,20 @@ set min_parallel_table_scan_size=0;
 set parallel_leader_participation=on;
 -- nestloop
 explain (costs off, analyse on) select schemaname, tablename from pg_tables where tablename like 'sql%' order by tablename;
+
+--worker send NOTICE message to leader
+CREATE FUNCTION f_parallel_notice (text)
+       RETURNS bool LANGUAGE 'plpgsql' COST 0.0000001
+       AS 'BEGIN RAISE NOTICE ''notice => %'', $1; RETURN true; END';
+CREATE TABLE notice_table(a int);
+insert into notice_table values(generate_series(1,5));
+--let worker do the work
+set parallel_leader_participation=off;
+explain select * from notice_table where f_parallel_notice(a);
+select * from notice_table where f_parallel_notice(a);
+drop table notice_table;
+drop function f_parallel_notice;
+
 --clean up
 reset force_parallel_mode;
 reset parallel_setup_cost;
@@ -325,5 +340,6 @@ reset parallel_tuple_cost;
 reset max_parallel_workers_per_gather;
 reset min_parallel_table_scan_size;
 reset parallel_leader_participation;
+reset enable_bitmapscan;
 reset enable_hashjoin;
 reset enable_mergejoin;

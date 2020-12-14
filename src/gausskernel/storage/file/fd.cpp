@@ -1376,7 +1376,7 @@ void PathNameCreateTemporaryDir(const char *basedir, const char *directory)
          * EEXIST to close a race against another process following the same
          * algorithm.
          */
-        if (mkdir(directory, S_IRWXU) < 0 && errno != EEXIST) {
+        if (mkdir(basedir, S_IRWXU) < 0 && errno != EEXIST) {
             ereport(ERROR,
                 (errcode_for_file_access(), errmsg("cannot create temporary directory \"%s\": %m", basedir)));
         }

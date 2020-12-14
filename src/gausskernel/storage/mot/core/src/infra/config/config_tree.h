@@ -154,15 +154,6 @@ public:
     }
 
     /**
-     * @brief Retrieves the virtual root section for modification.
-     * @return The root section.
-     */
-    inline ConfigSection* ModifyRootSection()
-    {
-        return &m_rootSection;
-    }
-
-    /**
      * @brief Prints the configuration tree to the log.
      * @param logLevel The log level used for printing.
      */

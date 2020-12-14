@@ -56,6 +56,14 @@ function test_1()
   gs_guc set -D $primary_data_dir -c "synchronous_standby_names = 'jane'"
   start_cluster
   check_asynchronous_commit "datanode1" 4
+  
+  echo "test synchronous_standby_names = ''"
+  kill_cluster
+  gs_guc set -D $primary_data_dir -c "synchronous_commit = on"
+  gs_guc set -D $primary_data_dir -c "synchronous_standby_names = ''"
+  gs_guc set -D $primary_data_dir -c "most_available_sync = on"
+  start_cluster
+  check_asynchronous_commit "datanode1" 4
 }
 
 function tear_down() {

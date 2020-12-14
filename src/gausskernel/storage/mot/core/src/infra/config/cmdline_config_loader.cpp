@@ -84,7 +84,8 @@ ConfigTree* CmdLineConfigLoader::ParseCmdLine(char** argv, int argc)
     mot_string key;
     mot_string value;
     bool parseError = false;
-    int arrayIndex = 0;
+    uint64_t arrayIndex = 0;
+    bool hasArrayIndex = false;
 
     for (int i = 0; i < argc && !parseError; ++i) {
         if (!line.assign(argv[i])) {
@@ -114,12 +115,13 @@ ConfigTree* CmdLineConfigLoader::ParseCmdLine(char** argv, int argc)
                 currentSection = itr->second;
 
                 // parse the key-value part
-                if (!ConfigFileParser::ParseKeyValue(keyValuePart, sectionFullName, key, value, arrayIndex)) {
+                if (!ConfigFileParser::ParseKeyValue(
+                    keyValuePart, sectionFullName, key, value, arrayIndex, hasArrayIndex)) {
                     // key-value line malformed
                     parseError = true;
                 } else {
                     // check for array item
-                    if (arrayIndex == -1) {
+                    if (!hasArrayIndex) {
                         ConfigItem* configItem = ConfigFileParser::MakeConfigValue(sectionFullName, key, value);
                         if (configItem == nullptr) {
                             REPORT_PARSE_ERROR(MOT_ERROR_INTERNAL,
@@ -142,14 +144,14 @@ ConfigTree* CmdLineConfigLoader::ParseCmdLine(char** argv, int argc)
                             }
                         }
                         // create item and add it to array
-                        if ((uint32_t)arrayIndex != configArray->GetConfigItemCount()) {
+                        if (arrayIndex != configArray->GetConfigItemCount()) {
                             // array items must be ordered
                             REPORT_PARSE_ERROR(MOT_ERROR_INVALID_CFG,
                                 "Failed to parse command line arguments: array %s items not well-ordered, "
-                                "expecting %u, got %u (command line argument: %s)",
+                                "expecting %u, got %" PRIu64 " (command line argument: %s)",
                                 configArray->GetName(),
                                 configArray->GetConfigItemCount(),
-                                (uint32_t)arrayIndex,
+                                arrayIndex,
                                 argv[i]);
                         } else {
                             ConfigItem* configItem =
@@ -160,7 +162,7 @@ ConfigTree* CmdLineConfigLoader::ParseCmdLine(char** argv, int argc)
                                     value.c_str());
                             } else if (!configArray->AddConfigItem(configItem)) {
                                 REPORT_PARSE_ERROR(MOT_ERROR_OOM,
-                                    "Failed to add %dth item to configuration array %s",
+                                    "Failed to add %" PRIu64 "th item to configuration array %s",
                                     arrayIndex,
                                     configArray->GetName());
                             }

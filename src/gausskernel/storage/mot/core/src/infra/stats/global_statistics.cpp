@@ -102,14 +102,11 @@ mot_string GlobalStatistics::MakeName(const char* baseName, NamingScheme namingS
     return result;
 }
 
-bool GlobalStatistics::RegisterStatistics(StatisticVariable* statVar)
+void GlobalStatistics::RegisterStatistics(StatisticVariable* statVar)
 {
-    bool result = true;
     if (!m_statVars.push_back(statVar)) {
         MOT_REPORT_ERROR(
             MOT_ERROR_OOM, "Register Statistics", "Failed to register statistics variable %s", statVar->GetName());
-        result = false;
     }
-    return result;
 }
 }  // namespace MOT

@@ -51,7 +51,7 @@
 #define LOCAL_RECEIVE_KDATA_COST 1.3 /* The receive cost for local stream */
 #define DEFAULT_SMP_THREAD_COST 1000 /* The cost for add a new thread */
 #define DEFAULT_STREAM_MULTIPLE 1.0
-#define DEFAULT_PARALLEL_TUPLE_COST 0.1
+#define DEFAULT_PARALLEL_TUPLE_COST 0.05
 #define DEFAULT_PARALLEL_SETUP_COST 1000.0
 
 #define DEFAULT_EFFECTIVE_CACHE_SIZE 16384 /* measured in pages */

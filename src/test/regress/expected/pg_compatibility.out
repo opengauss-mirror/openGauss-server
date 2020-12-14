@@ -43,3 +43,67 @@ select concat_ws(null,'ABCDE', 2, null, 22);
  
 (1 row)
 
+
+--char、varchar test
+create table char_test(a char(10),b varchar(10));
+insert into char_test values('零一二三四五六七八九','零一二三四五六七八九');
+insert into char_test values('零1二3四5六7八9','零1二3四5六7八9');
+insert into char_test values('零1二3四5六7八9','零1二3四5六7八90');
+ERROR:  value too long for type character varying(10)
+CONTEXT:  referenced column: b
+insert into char_test values('零1二3四5六7八90','零1二3四5六7八9');
+ERROR:  value too long for type character(10)
+CONTEXT:  referenced column: a
+insert into char_test values('零0','零1二3');
+insert into char_test values('','');
+insert into char_test values(null,null);
+insert into char_test values('0','0');
+select length(a),length(b) from char_test;
+ length | length 
+--------+--------
+     10 |     10
+     10 |     10
+      2 |      4
+      0 |      0
+        |
+      1 |      1
+(6 rows)
+
+select lengthb(a),lengthb(b) from char_test;
+ lengthb | lengthb 
+---------+---------
+      30 |      30
+      20 |      20
+      10 |       8
+      10 |       0
+         |
+      10 |       1
+(6 rows)
+
+select bit_length(a),bit_length(b) from char_test;
+ bit_length | bit_length 
+------------+------------
+        240 |        240
+        160 |        160
+         32 |         64
+          0 |          0
+            |
+          8 |          8
+(6 rows)
+
+
+create index a on char_test(a);
+create index b on char_test(b);
+set enable_seqscan to off;
+select * from char_test where a = '零0';
+     a     |   b
+-----------+--------
+ 零0       | 零1二3
+(1 row)
+
+select * from char_test where b = '零1二3';
+     a     |   b    
+-----------+--------
+ 零0       | 零1二3
+(1 row)
+

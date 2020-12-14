@@ -25,9 +25,14 @@
 #ifndef JIT_LLVM_FUNCS_H
 #define JIT_LLVM_FUNCS_H
 
-// Be sure to include jit_llvm_query.h before anything else because of global.h.
-// See jit_llvm_query.h for more details.
+/*
+ * ATTENTION: Be sure to include jit_llvm_query.h before anything else because of gscodegen.h
+ * See jit_llvm_query.h for more details.
+ */
 #include "jit_llvm_query.h"
+#include "jit_plan.h"
+
+#include <vector>
 
 namespace JitExec {
 /** @brief Gets a key from the execution context. */
@@ -664,7 +669,7 @@ inline void AddInitSearchKey(JitLlvmCodeGenContext* ctx, JitRangeScanType rangeS
         AddInitKey(ctx, ctx->inner_key_value, ctx->inner_index_value);
     } else if (rangeScanType == JIT_RANGE_SCAN_MAIN) {
         AddInitKey(ctx, ctx->key_value, ctx->index_value);
-    } else if (rangeScanType == JIT_RANGE_SCAN_MAIN) {
+    } else if (rangeScanType == JIT_RANGE_SCAN_SUB_QUERY) {
         AddInitKey(ctx, ctx->m_subQueryData[subQueryIndex].m_searchKey, ctx->m_subQueryData[subQueryIndex].m_index);
     }
 }

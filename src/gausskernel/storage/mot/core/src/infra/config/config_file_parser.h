@@ -53,11 +53,12 @@ public:
      * @param section The containing section (for error message in case of failure).
      * @param[out] key The resulting key.
      * @param[out] value The resulting value.
-     * @param[out] arrayIndex The array index in case of array item, or -1 if not.
+     * @param[out] arrayIndex The array index in case of array item.
+     * @param[out] hasArrayIndex Returns true if the key specifies an array item.
      * @return True if parsing was successful.
      */
-    static bool ParseKeyValue(
-        const mot_string& keyValuePart, const mot_string& section, mot_string& key, mot_string& value, int& arrayIndex);
+    static bool ParseKeyValue(const mot_string& keyValuePart, const mot_string& section, mot_string& key,
+        mot_string& value, uint64_t& arrayIndex, bool& hasArrayIndex);
 
     /**
      * @brief Creates a typed configuration value.

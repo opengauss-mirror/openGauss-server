@@ -41,7 +41,6 @@
 #include "foreign/fdwapi.h"
 #include "foreign/foreign.h"
 #include "miscadmin.h"
-#include "nodes/makefuncs.h"
 #include "nodes/nodes.h"
 #include "nodes/nodeFuncs.h"
 #include "optimizer/cost.h"
@@ -187,22 +186,6 @@ inline bool IsNotEqualOper(OpExpr* op);
 static int MOTGetFdwType()
 {
     return MOT_ORC;
-}
-
-static inline void BitmapDeSerialize(uint8_t* bitmap, int16_t len, ListCell** cell)
-{
-    for (int i = 0; i < len; i++) {
-        bitmap[i] = (uint8_t)((Const*)lfirst(*cell))->constvalue;
-        *cell = lnext(*cell);
-    }
-}
-
-static inline List* BitmapSerialize(List* result, uint8_t* bitmap, int16_t len)
-{
-    for (int i = 0; i < len; i++)
-        result = lappend(result, makeConst(INT1OID, -1, InvalidOid, 1, Int8GetDatum(bitmap[i]), false, true));
-
-    return result;
 }
 
 void MOTRecover()
@@ -536,7 +519,7 @@ static bool IsOrderingApplicable(PathKey* pathKey, RelOptInfo* rel, MOT::Index* 
     do {
         const int16_t* cols = ix->GetColumnKeyFields();
         int16_t numKeyCols = ix->GetNumFields();
-        ListCell* lcEm;
+        ListCell* lcEm = nullptr;
 
         foreach (lcEm, pathKey->pk_eclass->ec_members) {
             EquivalenceMember* em = (EquivalenceMember*)lfirst(lcEm);
@@ -992,7 +975,7 @@ static TupleTableSlot* MOTIterateForeignScan(ForeignScanState* node)
         return nullptr;
     }
 
-    MOT::Row* currRow;
+    MOT::Row* currRow = nullptr;
     MOTFdwStateSt* festate = (MOTFdwStateSt*)node->fdw_state;
     TupleTableSlot* slot = node->ss.ss_ScanTupleSlot;
     bool found = false;
@@ -1035,7 +1018,6 @@ static TupleTableSlot* MOTIterateForeignScan(ForeignScanState* node)
             }
             CleanQueryStatesOnError(festate->m_currTxn);
             report_pg_error(rc,
-                festate->m_currTxn,
                 (void*)(festate->m_currTxn->m_errIx != nullptr ? festate->m_currTxn->m_errIx->GetName().c_str()
                                                                : "unknown"),
                 (void*)festate->m_currTxn->m_errMsgBuf);
@@ -1083,7 +1065,6 @@ static TupleTableSlot* MOTIterateForeignScan(ForeignScanState* node)
 
                 CleanQueryStatesOnError(festate->m_currTxn);
                 report_pg_error(rc,
-                    festate->m_currTxn,
                     (void*)(festate->m_currTxn->m_errIx != NULL ? festate->m_currTxn->m_errIx->GetName().c_str()
                                                                 : "unknown"),
                     (void*)festate->m_currTxn->m_errMsgBuf);
@@ -1410,7 +1391,7 @@ static TupleTableSlot* MOTExecForeignInsert(
         fdwState->m_table = fdwState->m_currTxn->GetTableByExternalId(RelationGetRelid(resultRelInfo->ri_RelationDesc));
         if (fdwState->m_table == nullptr) {
             pfree(fdwState);
-            report_pg_error(MOT::RC_TABLE_NOT_FOUND, fdwState->m_currTxn);
+            report_pg_error(MOT::RC_TABLE_NOT_FOUND);
             return nullptr;
         }
         fdwState->m_numAttrs = RelationGetNumberOfAttributes(resultRelInfo->ri_RelationDesc);
@@ -1437,7 +1418,6 @@ static TupleTableSlot* MOTExecForeignInsert(
         elog(DEBUG2, "Abort parent transaction from MOT insert, id %lu", fdwState->m_txnId);
         CleanQueryStatesOnError(fdwState->m_currTxn);
         report_pg_error(rc,
-            fdwState->m_currTxn,
             (void*)(fdwState->m_currTxn->m_errIx != nullptr ? fdwState->m_currTxn->m_errIx->GetName().c_str()
                                                             : "unknown"),
             (void*)fdwState->m_currTxn->m_errMsgBuf);
@@ -1450,7 +1430,7 @@ static TupleTableSlot* MOTExecForeignUpdate(
 {
     MOTFdwStateSt* fdwState = (MOTFdwStateSt*)resultRelInfo->ri_FdwState;
     MOT::RC rc = MOT::RC_OK;
-    MOT::Row* currRow;
+    MOT::Row* currRow = nullptr;
     AttrNumber num = fdwState->m_ctidNum - 1;
     MOTRecConvertSt cv;
 
@@ -1470,14 +1450,14 @@ static TupleTableSlot* MOTExecForeignUpdate(
             planSlot->tts_nvalid,
             (planSlot->tts_isnull[num] ? "NULL" : "NOT NULL"));
         CleanQueryStatesOnError(fdwState->m_currTxn);
-        report_pg_error(MOT::RC_ERROR, fdwState->m_currTxn);
+        report_pg_error(MOT::RC_ERROR);
         return nullptr;
     }
 
     if (currRow == nullptr) {
         elog(ERROR, "MOTExecForeignUpdate failed to fetch row");
         CleanQueryStatesOnError(fdwState->m_currTxn);
-        report_pg_error(((rc == MOT::RC_OK) ? MOT::RC_ERROR : rc), fdwState->m_currTxn);
+        report_pg_error(((rc == MOT::RC_OK) ? MOT::RC_ERROR : rc));
         return nullptr;
     }
 
@@ -1496,7 +1476,6 @@ static TupleTableSlot* MOTExecForeignUpdate(
         elog(DEBUG2, "Abort parent transaction from MOT update, id %lu", fdwState->m_txnId);
         CleanQueryStatesOnError(fdwState->m_currTxn);
         report_pg_error(rc,
-            fdwState->m_currTxn,
             (void*)(fdwState->m_currTxn->m_errIx != nullptr ? fdwState->m_currTxn->m_errIx->GetName().c_str()
                                                             : "unknown"),
             (void*)fdwState->m_currTxn->m_errMsgBuf);
@@ -1509,7 +1488,7 @@ static TupleTableSlot* MOTExecForeignDelete(
 {
     MOTFdwStateSt* fdwState = (MOTFdwStateSt*)resultRelInfo->ri_FdwState;
     MOT::RC rc = MOT::RC_OK;
-    MOT::Row* currRow;
+    MOT::Row* currRow = nullptr;
     AttrNumber num = fdwState->m_ctidNum - 1;
     MOTRecConvertSt cv;
 
@@ -1524,7 +1503,7 @@ static TupleTableSlot* MOTExecForeignDelete(
             planSlot->tts_nvalid,
             (planSlot->tts_isnull[num] ? "NULL" : "NOT NULL"));
         CleanQueryStatesOnError(fdwState->m_currTxn);
-        report_pg_error(MOT::RC_ERROR, fdwState->m_currTxn);
+        report_pg_error(MOT::RC_ERROR);
         return nullptr;
     }
 
@@ -1535,7 +1514,7 @@ static TupleTableSlot* MOTExecForeignDelete(
         }
         elog(ERROR, "MOTExecForeignDelete failed to fetch row");
         CleanQueryStatesOnError(fdwState->m_currTxn);
-        report_pg_error(((rc == MOT::RC_OK) ? MOT::RC_ERROR : rc), fdwState->m_currTxn);
+        report_pg_error(((rc == MOT::RC_OK) ? MOT::RC_ERROR : rc));
         return nullptr;
     }
 
@@ -1553,7 +1532,6 @@ static TupleTableSlot* MOTExecForeignDelete(
         elog(DEBUG2, "Abort parent transaction from MOT delete, id %lu", fdwState->m_txnId);
         CleanQueryStatesOnError(fdwState->m_currTxn);
         report_pg_error(rc,
-            fdwState->m_currTxn,
             (void*)(fdwState->m_currTxn->m_errIx != nullptr ? fdwState->m_currTxn->m_errIx->GetName().c_str()
                                                             : "unknown"),
             (void*)fdwState->m_currTxn->m_errMsgBuf);
@@ -1692,7 +1670,7 @@ static void MOTXactCallback(XactEvent event, void* arg)
                 // commit this transaction. So we need to save the prepared transaction for further instructions from
                 // CN or gs_clean. If we failed to save it, it's a panic situation.
                 report_pg_error(
-                    MOT::RC_PANIC, txn, (char*)"Failed to save prepared transaction data (FailedCommitPrepared)");
+                    MOT::RC_PANIC, (char*)"Failed to save prepared transaction data (FailedCommitPrepared)");
             }
             return;
         } else {
@@ -1903,7 +1881,7 @@ static void MOTTruncateForeignTable(TruncateStmt* stmt, Relation rel)
                 errmodule(MOD_MOT),
                 errmsg("A checkpoint is in progress - cannot truncate table.")));
     } else {
-        report_pg_error(rc, NULL, NULL, NULL, NULL, NULL, NULL);
+        report_pg_error(rc);
     }
 }
 
@@ -1983,129 +1961,6 @@ static void InitMOTHandler()
         MOT::GetRecoveryManager()->SetCommitLogCallback(&GetTransactionStateCallback);
         MOTAdaptor::m_callbacks_initialized = true;
     }
-}
-
-MOTFdwStateSt* InitializeFdwState(void* fdwState, List** fdwExpr, uint64_t exTableID)
-{
-    MOTFdwStateSt* state = (MOTFdwStateSt*)palloc0(sizeof(MOTFdwStateSt));
-    List* values = (List*)fdwState;
-    ListCell* cell = list_head(values);
-
-    state->m_allocInScan = true;
-    state->m_cmdOper = (CmdType)((Const*)lfirst(cell))->constvalue;
-    cell = lnext(cell);
-    state->m_order = (SORTDIR_ENUM)((Const*)lfirst(cell))->constvalue;
-    cell = lnext(cell);
-    state->m_hasForUpdate = (bool)((Const*)lfirst(cell))->constvalue;
-    cell = lnext(cell);
-    state->m_foreignTableId = ((Const*)lfirst(cell))->constvalue;
-    cell = lnext(cell);
-    state->m_numAttrs = ((Const*)lfirst(cell))->constvalue;
-    cell = lnext(cell);
-    state->m_ctidNum = ((Const*)lfirst(cell))->constvalue;
-    cell = lnext(cell);
-    state->m_numExpr = ((Const*)lfirst(cell))->constvalue;
-    cell = lnext(cell);
-
-    int len = BITMAP_GETLEN(state->m_numAttrs);
-    state->m_attrsUsed = (uint8_t*)palloc0(len);
-    state->m_attrsModified = (uint8_t*)palloc0(len);
-    BitmapDeSerialize(state->m_attrsUsed, len, &cell);
-
-    if (cell != NULL) {
-        state->m_bestIx = &state->m_bestIxBuf;
-        state->m_bestIx->Deserialize(cell, exTableID);
-    }
-
-    if (fdwExpr != NULL && *fdwExpr != NULL) {
-        ListCell* c = NULL;
-        int i = 0;
-
-        // divide fdw expr to param list and original expr
-        state->m_remoteCondsOrig = NULL;
-
-        foreach (c, *fdwExpr) {
-            if (i < state->m_numExpr) {
-                i++;
-                continue;
-            } else {
-                state->m_remoteCondsOrig = lappend(state->m_remoteCondsOrig, lfirst(c));
-            }
-        }
-
-        *fdwExpr = list_truncate(*fdwExpr, state->m_numExpr);
-    }
-    return state;
-}
-
-void* SerializeFdwState(MOTFdwStateSt* state)
-{
-    List* result = NULL;
-
-    result = lappend(result, makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum(state->m_cmdOper), false, true));
-    result = lappend(result, makeConst(INT1OID, -1, InvalidOid, 4, Int8GetDatum(state->m_order), false, true));
-    result = lappend(result, makeConst(BOOLOID, -1, InvalidOid, 1, BoolGetDatum(state->m_hasForUpdate), false, true));
-    result =
-        lappend(result, makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum(state->m_foreignTableId), false, true));
-    result = lappend(result, makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum(state->m_numAttrs), false, true));
-    result = lappend(result, makeConst(INT4OID, -1, InvalidOid, 4, Int32GetDatum(state->m_ctidNum), false, true));
-    result = lappend(result, makeConst(INT2OID, -1, InvalidOid, 2, Int16GetDatum(state->m_numExpr), false, true));
-    int len = BITMAP_GETLEN(state->m_numAttrs);
-    result = BitmapSerialize(result, state->m_attrsUsed, len);
-
-    if (state->m_bestIx != nullptr) {
-        state->m_bestIx->Serialize(&result);
-    }
-    ReleaseFdwState(state);
-    return result;
-}
-
-void CleanCursors(MOTFdwStateSt* state)
-{
-    for (int i = 0; i < 2; i++) {
-        if (state->m_cursor[i]) {
-            state->m_cursor[i]->Invalidate();
-            state->m_cursor[i]->Destroy();
-            delete state->m_cursor[i];
-            state->m_cursor[i] = NULL;
-        }
-    }
-}
-
-void CleanQueryStatesOnError(MOT::TxnManager* txn)
-{
-    if (txn != nullptr) {
-        for (auto& itr : txn->m_queryState) {
-            MOTFdwStateSt* state = (MOTFdwStateSt*)itr.second;
-            if (state != nullptr) {
-                CleanCursors(state);
-            }
-        }
-    }
-}
-
-void ReleaseFdwState(MOTFdwStateSt* state)
-{
-    CleanCursors(state);
-
-    if (state->m_currTxn) {
-        state->m_currTxn->m_queryState.erase((uint64_t)state);
-    }
-
-    if (state->m_bestIx && state->m_bestIx != &state->m_bestIxBuf)
-        pfree(state->m_bestIx);
-
-    if (state->m_remoteCondsOrig != nullptr)
-        list_free(state->m_remoteCondsOrig);
-
-    if (state->m_attrsUsed != NULL)
-        pfree(state->m_attrsUsed);
-
-    if (state->m_attrsModified != NULL)
-        pfree(state->m_attrsModified);
-
-    state->m_table = NULL;
-    pfree(state);
 }
 
 void MOTCheckpointFetchLock()

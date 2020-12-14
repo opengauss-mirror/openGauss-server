@@ -39,11 +39,18 @@ namespace MOT {
 namespace CheckpointUtils {
 
 /**
- * @brief A wrapper function that checks is a file exists
+ * @brief A wrapper function that checks if a file exists
  * @param fileName The file name to check
  * @return Boolean value denoting success or failure.
  */
-bool FileExists(std::string fileName);
+bool IsFileExists(std::string fileName);
+
+/**
+ * @brief A wrapper function that checks if a dir exists
+ * @param fileName The directory name to check
+ * @return Boolean value denoting success or failure.
+ */
+bool IsDirExists(std::string dirName);
 
 /**
  * @brief A wrapper function that opens a file for writing.

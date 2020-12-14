@@ -22,8 +22,8 @@
  * -------------------------------------------------------------------------
  */
 
-#include "global.h"
 #include "jit_llvm_util.h"
+#include "global.h"
 #include "utilities.h"
 #include "knl/knl_session.h"
 #include "utils/elog.h"
@@ -125,7 +125,12 @@ void JitStatement::EvalNot(llvm::Value* value, llvm::BasicBlock* successBlock, l
 
 bool JitStatement::CurrentBlockEndsInBranch()
 {
-    return m_builder->GetInsertBlock()->back().isTerminator();
+    bool result = false;
+    llvm::BasicBlock* currentBlock = m_builder->GetInsertBlock();
+    if (!currentBlock->empty()) {
+        result = currentBlock->back().isTerminator();
+    }
+    return result;
 }
 
 JitIf::JitIf(

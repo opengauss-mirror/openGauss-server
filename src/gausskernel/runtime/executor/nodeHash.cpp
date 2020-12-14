@@ -30,6 +30,7 @@
 #include "commands/tablespace.h"
 #include "executor/execdebug.h"
 #include "executor/hashjoin.h"
+#include "utils/sharedtuplestore.h"
 #include "executor/nodeHash.h"
 #include "executor/nodeHashjoin.h"
 #include "miscadmin.h"
@@ -1782,6 +1783,8 @@ retry:
         Assert(hashtable->batches[batchno].preallocated >= tuple_size);
         hashtable->batches[batchno].preallocated -= tuple_size;
         sts_puttuple(hashtable->batches[batchno].inner_tuples, &hashvalue, tuple);
+        hashtable->spill_count += 1;
+        *hashtable->spill_size += get_header_size(hashtable->batches[batchno].inner_tuples) + tuple->t_len;
     }
     ++hashtable->batches[batchno].ntuples;
 }

@@ -78,6 +78,30 @@ static TupleTableSlot* IndexOnlyNext(IndexOnlyScanState* node)
     econtext = node->ss.ps.ps_ExprContext;
     slot = node->ss.ss_ScanTupleSlot;
 
+    if (scandesc == NULL) {
+        /*
+         * We reach here if the index only scan is not parallel, or if we're
+         * executing a index only scan that was intended to be parallel
+         * serially.
+         */
+        scandesc = abs_idx_beginscan(node->ss.ss_currentRelation, node->ioss_RelationDesc, estate->es_snapshot,
+                        node->ioss_NumScanKeys, node->ioss_NumOrderByKeys, (ScanState*)node);
+        node->ioss_ScanDesc = scandesc;
+
+        /* Set it up for index-only scan */
+        GetIndexScanDesc(node->ioss_ScanDesc)->xs_want_itup = true;
+        node->ioss_VMBuffer = InvalidBuffer;
+
+        /*
+         * If no run-time keys to calculate or they are ready, go ahead and
+         * pass the scankeys to the index AM.
+         */
+        if (node->ioss_NumRuntimeKeys == 0 || node->ioss_RuntimeKeysReady) {
+            abs_idx_rescan_local(scandesc, node->ioss_ScanKeys, node->ioss_NumScanKeys,
+                         node->ioss_OrderByKeys, node->ioss_NumOrderByKeys);
+        }
+    }
+
     /*
      * OK, now that we have what we need, fetch the next tuple.
      */
@@ -612,42 +636,14 @@ IndexOnlyScanState* ExecInitIndexOnlyScan(IndexOnlyScan* node, EState* estate, i
                 indexstate->ioss_NumOrderByKeys,
                 (ScanState*)indexstate);
         }
-    } else {
-        /*
-         * Initialize scan descriptor.
-         */
-        if (!node->scan.plan.parallel_aware) {
-            indexstate->ioss_ScanDesc = abs_idx_beginscan(currentRelation,
-                indexstate->ioss_RelationDesc,
-                estate->es_snapshot,
-                indexstate->ioss_NumScanKeys,
-                indexstate->ioss_NumOrderByKeys,
-                (ScanState*)indexstate);
-        }
     }
 
-    if (!node->scan.plan.parallel_aware) {
+    if (indexstate->ioss_ScanDesc == NULL) {
         /*
-        * If is Partition table, if ( 0 == node->scan.itrs), scan_desc is NULL.
-        */
-        if (PointerIsValid(indexstate->ioss_ScanDesc)) {
-            /* Set it up for index-only scan */
-            GetIndexScanDesc(indexstate->ioss_ScanDesc)->xs_want_itup = true;
-            indexstate->ioss_VMBuffer = InvalidBuffer;
-
-            /*
-            * If no run-time keys to calculate, go ahead and pass the scankeys to the
-            * index AM.
-            */
-            if (indexstate->ioss_NumRuntimeKeys == 0)
-                abs_idx_rescan_local(indexstate->ioss_ScanDesc,
-                    indexstate->ioss_ScanKeys,
-                    indexstate->ioss_NumScanKeys,
-                    indexstate->ioss_OrderByKeys,
-                    indexstate->ioss_NumOrderByKeys);
-        } else {
-            indexstate->ss.ps.stubType = PST_Scan;
-        }
+         * For non-partition table, ioss_ScanDesc always none, so set stubType to PST_None.
+         * For partition table, if ( 0 == node->scan.itrs), scan_desc is NULL, so set stubType to PST_Scan.
+         */
+        indexstate->ss.ps.stubType = node->scan.isPartTbl ? PST_Scan : PST_None;
     }
 
     /*
@@ -841,10 +837,10 @@ void ExecIndexOnlyScanInitializeDSM(IndexOnlyScanState *node, ParallelContext *p
     node->ioss_VMBuffer = InvalidBuffer;
 
     /*
-     * If no run-time keys to calculate, go ahead and pass the scankeys to
+     * If no run-time keys to calculate or they are ready, go ahead and pass the scankeys to
      * the index AM.
      */
-    if (node->ioss_NumRuntimeKeys == 0) {
+    if (node->ioss_NumRuntimeKeys == 0 || node->ioss_RuntimeKeysReady) {
         abs_idx_rescan(node->ioss_ScanDesc, node->ioss_ScanKeys, node->ioss_NumScanKeys, node->ioss_OrderByKeys,
             node->ioss_NumOrderByKeys);
     }
@@ -888,10 +884,10 @@ void ExecIndexOnlyScanInitializeWorker(IndexOnlyScanState *node, void *context)
     GetIndexScanDesc(node->ioss_ScanDesc)->xs_want_itup = true;
 
     /*
-     * If no run-time keys to calculate, go ahead and pass the scankeys to the
+     * If no run-time keys to calculate or they are ready, go ahead and pass the scankeys to the
      * index AM.
      */
-    if (node->ioss_NumRuntimeKeys == 0) {
+    if (node->ioss_NumRuntimeKeys == 0 || node->ioss_RuntimeKeysReady) {
         abs_idx_rescan(node->ioss_ScanDesc, node->ioss_ScanKeys, node->ioss_NumScanKeys, node->ioss_OrderByKeys,
             node->ioss_NumOrderByKeys);
     }

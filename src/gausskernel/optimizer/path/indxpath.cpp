@@ -871,7 +871,7 @@ static List* build_index_paths(PlannerInfo* root, RelOptInfo* rel, IndexOptInfo*
     }
 
     bool relHasbkt = false;
-    if (index_relation_has_bucket(index)) {
+    if (u_sess->attr.attr_sql.enable_hypo_index == false && index_relation_has_bucket(index)) {
         relHasbkt = true;
     }
     /*

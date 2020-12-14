@@ -17,6 +17,12 @@
 #include "nodes/relation.h"
 #include "utils/relcache.h"
 
+/* Hook for plugins to get control in get_relation_info() */
+typedef void (*get_relation_info_hook_type) (PlannerInfo *root, Oid relationObjectId, bool inhparent, RelOptInfo *rel);
+extern THR_LOCAL PGDLLIMPORT get_relation_info_hook_type get_relation_info_hook;
+
+extern List* build_index_tlist(PlannerInfo* root, IndexOptInfo* index, Relation heapRelation);
+
 extern void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, RelOptInfo* rel);
 
 extern void estimate_rel_size(Relation rel, int32* attr_widths, RelPageType* pages, double* tuples, double* allvisfrac,

@@ -82,9 +82,9 @@ public:
 
     void setPreparedDestReceiver(DestReceiver* preparedDest);
 
-    Datum CalFuncNodeVal(Oid functionId, List* args, bool* is_null);
+    Datum CalFuncNodeVal(Oid functionId, List* args, bool* is_null, Datum* values, bool* isNulls);
 
-    Datum EvalSimpleArg(Node* arg, bool* is_null);
+    Datum EvalSimpleArg(Node* arg, bool* is_null, Datum* values, bool* isNulls);
 
     static void tearDown(OpFusion* opfusion);
 
@@ -159,6 +159,8 @@ public:
     bool m_isCompleted;
 
     long m_position;
+private:
+    static FusionType GetMotFusionType(PlannedStmt* plannedStmt);
 };
 
 class SelectFusion : public OpFusion {
@@ -199,6 +201,10 @@ private:
 
     int m_targetParamNum;
 
+    Datum* m_curVarValue;
+
+    bool* m_curVarIsnull;
+
     bool m_is_bucket_rel;
 };
 
@@ -227,6 +233,19 @@ private:
     Datum* m_targetValues;
 
     bool* m_targetIsnull;
+
+    Datum* m_curVarValue;
+
+    struct VarLoc {
+        int varNo;
+        int scanKeyIndx;
+    };
+
+    VarLoc* m_targetVarLoc;
+
+    int m_varNum;
+
+    bool* m_curVarIsnull;
 
     int* m_targetConstLoc;
 

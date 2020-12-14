@@ -14,21 +14,22 @@ See the Mulan PSL v2 for more details.
 """
 import time
 
-
-from exceptions import ExecutionError
+# WARN: You need to import data into the database and SQL statements in the following path will be executed.
+# The program automatically collects the total execution duration of these SQL statements.
+path = '/home/opengauss/project/tpcds/queries'  # modify this path
+cmd = "gsql -U {user} -W {password} -d {db} -p {port} -f {file}"
 
 
 def run(remote_server, local_host):
-    path = '/media/sdc/opengauss/tpch/query_simple'  # modify this path
-    cmd = "find . -type f -name '*.sql'"
-    stdout, stderr = remote_server.exec_command_sync("cd {path};{cmd}".format(path=path, cmd=cmd))
+    find_file_cmd = "find . -type f -name '*.sql'"
+    stdout, stderr = remote_server.exec_command_sync(['cd %s' % path, find_file_cmd])
     if len(stderr) > 0:
-        raise ExecutionError(stderr)
+        raise Exception(stderr)
     files = stdout.strip().split('\n')
     time_start = time.time()
     for file in files:
-        cmd = "gsql -U opengauss -d tpch -p 5000 -f {file}".format(file=file)
-        stdout, stderr = remote_server.exec_command_sync("cd {path};{cmd}".format(path=path, cmd=cmd))
+        perform_cmd = cmd.format(file=file)
+        stdout, stderr = remote_server.exec_command_sync(['cd %s' % path, perform_cmd])
         if len(stderr) > 0:
             print(stderr)
     cost = time.time() - time_start

@@ -58,10 +58,11 @@ bool ConfigFileParser::BreakSectionName(const mot_string& sectionFullName, mot_s
     return result;
 }
 
-bool ConfigFileParser::ParseKeyValue(
-    const mot_string& keyValuePart, const mot_string& section, mot_string& key, mot_string& value, int& arrayIndex)
+bool ConfigFileParser::ParseKeyValue(const mot_string& keyValuePart, const mot_string& section, mot_string& key,
+    mot_string& value, uint64_t& arrayIndex, bool& hasArrayIndex)
 {
     bool result = false;
+    hasArrayIndex = false;
     uint32_t equalPos = keyValuePart.find('=');
     if (equalPos == mot_string::npos) {
         MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
@@ -73,7 +74,6 @@ bool ConfigFileParser::ParseKeyValue(
     } else {
         key.trim();
         value.trim();
-        arrayIndex = -1;
         result = true;
 
         // check for array item
@@ -85,9 +85,8 @@ bool ConfigFileParser::ParseKeyValue(
                 MOT_REPORT_ERROR(
                     MOT_ERROR_INTERNAL, "Load Configuration", "Failed to parse integer part from array item specifier");
             } else {
-                uint64_t intValue = 0;
-                if (ParseUIntValue(section, key, intPart, intValue, true)) {
-                    arrayIndex = (int)intValue;
+                if (ParseUIntValue(section, key, intPart, arrayIndex, true)) {
+                    hasArrayIndex = true;
                     key.substr_inplace(0, poundPos);
                     result = true;
                 } else {

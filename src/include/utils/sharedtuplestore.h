@@ -48,4 +48,5 @@ extern void sts_puttuple(SharedTuplestoreAccessor* accessor, const void* meta_da
 
 extern MinimalTuple sts_parallel_scan_next(SharedTuplestoreAccessor* accessor, void* meta_data);
 
+extern uint64 get_header_size(SharedTuplestoreAccessor* accessor);
 #endif /* SHAREDTUPLESTORE_H */

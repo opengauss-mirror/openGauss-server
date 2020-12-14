@@ -3970,6 +3970,7 @@ static int XLogFileRead(XLogSegNo segno, int emode, TimeLineID tli, int source, 
                 snprintf_s(activitymsg, sizeof(activitymsg), sizeof(activitymsg) - 1, "waiting for %s", xlogfname);
             securec_check_ss(errorno, "", "");
             set_ps_display(activitymsg, false);
+            knl_thread_set_name("Xlog from Archive");
 
             t_thrd.xlog_cxt.restoredFromArchive = RestoreArchivedFile(path, xlogfname, "RECOVERYXLOG", XLogSegSize);
             if (!t_thrd.xlog_cxt.restoredFromArchive) {

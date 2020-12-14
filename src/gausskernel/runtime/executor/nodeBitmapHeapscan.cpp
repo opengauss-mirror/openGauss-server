@@ -1242,10 +1242,10 @@ void ExecBitmapHeapReInitializeDSM(BitmapHeapScanState *node, ParallelContext *p
     pstate->state = BM_INITIAL;
 
     if (pstate->tbmiterator != NULL) {
-        tbm_free_shared_area(pstate->tbmiterator);
+        tbm_free_shared_area(node->tbm, pstate->tbmiterator);
     }
     if (pstate->prefetch_iterator != NULL) {
-        tbm_free_shared_area(pstate->prefetch_iterator);
+        tbm_free_shared_area(node->tbm, pstate->prefetch_iterator);
     }
     pstate->tbmiterator = NULL;
     pstate->prefetch_iterator = NULL;

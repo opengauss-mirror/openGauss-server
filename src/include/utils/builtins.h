@@ -1521,6 +1521,11 @@ extern Datum check_engine_status(PG_FUNCTION_ARGS);
 
 /* AI */
 extern Datum gs_index_advise(PG_FUNCTION_ARGS);
+extern Datum hypopg_create_index(PG_FUNCTION_ARGS);
+extern Datum hypopg_display_index(PG_FUNCTION_ARGS);
+extern Datum hypopg_drop_index(PG_FUNCTION_ARGS);
+extern Datum hypopg_estimate_size(PG_FUNCTION_ARGS);
+extern Datum hypopg_reset_index(PG_FUNCTION_ARGS);
 
 /* MOT */
 extern Datum mot_global_memory_detail(PG_FUNCTION_ARGS);
