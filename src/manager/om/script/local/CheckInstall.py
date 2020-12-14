@@ -258,7 +258,7 @@ def checkPath(path_type_in):
     sep1_ascii = ord('/')
     sep2_ascii = ord('_')
     sep3_ascii = ord('-')
-    sep3_ascii = ord('.')
+    sep4_ascii = ord('.')
     for i in range(0, pathLen):
         char_check = ord(path_type_in[i])
         if (not (
