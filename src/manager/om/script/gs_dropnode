@@ -321,9 +321,9 @@ if __name__ == "__main__":
     dropNode.initLogs()
     dropNode.check_repeat_process()
     dropNode.checkParameters()
-    dropNode.check_cluster_status()
-    dropNode.flagForOnlyPrimaryLeft()
     dropNode.checkConnection(list(dropNode.backIpNameMap.keys()),
                              dropNode.envFile)
+    dropNode.check_cluster_status()
+    dropNode.flagForOnlyPrimaryLeft()
     dropNodeImpl = DropnodeImpl(dropNode)
     dropNodeImpl.run()
