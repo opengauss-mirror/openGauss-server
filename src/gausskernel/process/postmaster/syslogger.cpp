@@ -1817,7 +1817,13 @@ static void LogCtlCreateLogParentDirectory(void)
          * ignore its returned value of this case.
          */
         (void)chmod(logdir, S_IRWXU | S_IRGRP | S_IXGRP);
+    }  else if (EEXIST != errno) {
+        /* this directory may be created already, don't care this case */
+        ereport(FATAL,
+                (errmsg(
+                "could not create directory \"%s\": %s\n", logdir, gs_strerror(errno))));
     }
+
     pfree(logdir);
 
     /* for the other log types */
