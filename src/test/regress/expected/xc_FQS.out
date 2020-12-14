@@ -13,10 +13,11 @@ insert into tab1_rr values (9, 2);
 explain (costs off, verbose on, nodes off, num_nodes on) insert into tab1_rr values (9, 2);
         QUERY PLAN        
 --------------------------
+ [Bypass]
  Insert on public.tab1_rr
    ->  Result
          Output: 9, 2
-(3 rows)
+(4 rows)
 
 -- simple select
 -- should get FQSed
@@ -372,10 +373,11 @@ insert into tab1_hash values (9, 2);
 explain (costs off, verbose on, nodes off) insert into tab1_hash values (9, 2);
          QUERY PLAN         
 ----------------------------
+ [Bypass]
  Insert on public.tab1_hash
    ->  Result
          Output: 9, 2
-(3 rows)
+(4 rows)
 
 -- simple select
 -- should get FQSed
@@ -750,10 +752,11 @@ insert into tab1_modulo values (9, 2);
 explain (costs off, verbose on, nodes off) insert into tab1_modulo values (9, 2);
           QUERY PLAN          
 ------------------------------
+ [Bypass]
  Insert on public.tab1_modulo
    ->  Result
          Output: 9, 2
-(3 rows)
+(4 rows)
 
 -- simple select
 -- should get FQSed
@@ -1130,10 +1133,11 @@ insert into tab1_replicated values (9, 2);
 explain (costs off, verbose on, nodes off) insert into tab1_replicated values (9, 2);
             QUERY PLAN            
 ----------------------------------
+ [Bypass]
  Insert on public.tab1_replicated
    ->  Result
          Output: 9, 2
-(3 rows)
+(4 rows)
 
 -- simple select
 select * from tab1_replicated;

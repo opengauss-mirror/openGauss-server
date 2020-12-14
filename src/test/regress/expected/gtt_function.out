@@ -406,30 +406,34 @@ analyze gt1;
 explain (costs off) select * from gt1 where a=1;
                QUERY PLAN               
 ----------------------------------------
+ [Bypass]
  Index Only Scan using idx_gt1_1 on gt1
    Index Cond: (a = 1)
-(2 rows)
+(3 rows)
 
 explain (costs off) select * from gt1 where a=200000;
                QUERY PLAN               
 ----------------------------------------
+ [Bypass]
  Index Only Scan using idx_gt1_1 on gt1
    Index Cond: (a = 200000)
-(2 rows)
+(3 rows)
 
 explain (costs off) select * from gt1 where a*10=300;
             QUERY PLAN             
 -----------------------------------
+ [Bypass]
  Index Scan using idx_gt1_3 on gt1
    Index Cond: ((a * 10) = 300)
-(2 rows)
+(3 rows)
 
 explain (costs off) select * from gt1 where a*10=3;
             QUERY PLAN             
 -----------------------------------
+ [Bypass]
  Index Scan using idx_gt1_3 on gt1
    Index Cond: ((a * 10) = 3)
-(2 rows)
+(3 rows)
 
 --ok
 create global temp table gtt_test0(c1 int) with(on_commit_delete_rows='true');

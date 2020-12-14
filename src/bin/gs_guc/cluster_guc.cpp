@@ -36,6 +36,7 @@
 #include "common/config/cm_config.h"
 #include <limits.h>
 #include <fcntl.h>
+#include <math.h>
 
 const int CLUSTER_CONFIG_SUCCESS = 0;
 const int CLUSTER_CONFIG_ERROR = 1;
@@ -174,6 +175,23 @@ const int MB_PER_GB = 1024;
 #define MIN_PER_D (60 * 24)
 #define H_PER_D 24
 
+/* the number of the unit type */
+const int UNIT_TYPE = 8;
+/* 
+ * transform unit matrix
+ * Elements in each line represent the transform value between this unit and another unit when a unit is basic unit.
+*/
+const int g_unit_transform[UNIT_TYPE][UNIT_TYPE] = { 
+    {1, KB_PER_MB, KB_PER_GB, 0, 0, 0, 0, 0},                /* the transform value based on KB */
+    {0, 1, MB_PER_GB, 0, 0, 0, 0, 0},                        /* the transform value based on MB */
+    {0, 0, 1, 0, 0, 0, 0, 0},                                /* the transform value based on GB */
+    {0, 0, 0, 1, MS_PER_S, MS_PER_MIN, MS_PER_H, MS_PER_D},  /* the transform value based on ms */
+    {0, 0, 0, 0, 1, S_PER_MIN, S_PER_H, S_PER_D},            /* the transform value based on s */
+    {0, 0, 0, 0, 0, 1, MIN_PER_H, MIN_PER_D},                /* the transform value based on min */
+    {0, 0, 0, 0, 0, 0, 1, H_PER_D},                          /* the transform value based on h */
+    {0, 0, 0, 0, 0, 0, 0, 1}                                 /* the transform value based on d */
+    };
+
 /* execute result */
 #define SUCCESS 0
 #define FAILURE 1
@@ -266,7 +284,10 @@ void get_instance_configfile(const char* datadir);
 char* get_ctl_command_type();
 void* pg_malloc(size_t size);
 void* pg_malloc_zero(size_t size);
-#ifdef __cplusplus
+template <typename T>
+static int parse_value(
+    const char* paraname, const UnitType unitval, const UnitType new_unitval, const char* endptr, T* tmp_val);
+#ifdef __cplusplus 
 extern "C" {
 #endif /* __cplusplus */
 
@@ -326,8 +347,12 @@ int check_parameter_value(
     const char* paraname, GucParaType type, char* guc_list_value, const char* guc_list_unit, const char* value);
 int check_parameter_name(char** guc_opt, int type);
 bool check_parameter_is_valid(int type);
-int parse_value(const char* paraname, const char* value, const char* guc_list_unit, int64* result_int,
-    double* result_double, bool isInt);
+static int check_int_overflow(
+    const char* paraname, const UnitType unitval, const UnitType tmp_unitval, int64 tmp_int_val);
+static int check_double_overflow(
+    const char* paraname, const double val, const bool inf_is_valid, const bool zero_is_valid);
+int parse_int_value(const char* paraname, const char* value, const char* guc_list_unit, int64* result_int);
+int parse_double_value(const char* paraname, const char* value, const char* guc_list_unit, double* result_double);
 int get_guc_minmax_value(const char* guc_list_val, struct guc_minmax_value& value_list);
 int check_int_real_type_value(
     const char* paraname, const char* guc_list_value, const char* guc_list_unit, const char* value, bool isInt);
@@ -3769,8 +3794,8 @@ int check_int_value(const char* paraname, const struct guc_minmax_value& value_l
     bool is_in_list = false;
     bool is_exists_alpha = false;
     /* makesure the min/max value from guc config list file is correct */
-    if ((FAILURE == parse_value(paraname, value_list.min_val_str, NULL, &int_min_val, NULL, true)) ||
-        (FAILURE == parse_value(paraname, value_list.max_val_str, NULL, &int_max_val, NULL, true))) {
+    if ((FAILURE == parse_int_value(paraname, value_list.min_val_str, NULL, &int_min_val)) ||
+        (FAILURE == parse_int_value(paraname, value_list.max_val_str, NULL, &int_max_val))) {
         (void)write_stderr("ERROR: The minmax value of parameter \"%s\" requires an integer value.\n", paraname);
         return FAILURE;
     }
@@ -3827,8 +3852,8 @@ int check_real_value(const char* paraname, const struct guc_minmax_value& value_
     double double_min_val, double double_max_val)
 {
     /* makesure the min/max value from guc config list file is correct */
-    if ((FAILURE == parse_value(paraname, value_list.min_val_str, NULL, NULL, &double_min_val, false)) ||
-        (FAILURE == parse_value(paraname, value_list.max_val_str, NULL, NULL, &double_max_val, false))) {
+    if ((FAILURE == parse_double_value(paraname, value_list.min_val_str, NULL, &double_min_val)) ||
+        (FAILURE == parse_double_value(paraname, value_list.max_val_str, NULL, &double_max_val))) {
         (void)write_stderr("ERROR: The minmax value of parameter \"%s\" requires a numeric value.\n", paraname);
         return FAILURE;
     }
@@ -3876,12 +3901,16 @@ int check_int_real_type_value(
     securec_check_c(nRet, "\0", "\0");
 
     /* parse int_newval/double_newval value*/
-    if (FAILURE == parse_value(paraname, value, guc_list_unit, &int_newval, &double_newval, isInt)) {
-        if (isInt)
+    if (isInt) {
+        if (FAILURE == parse_int_value(paraname, value, guc_list_unit, &int_newval)) {
             (void)write_stderr("ERROR: The parameter \"%s\" requires an integer value.\n", paraname);
-        else
+            return FAILURE;
+        } 
+    } else {
+        if (FAILURE == parse_double_value(paraname, value, guc_list_unit, &double_newval)) {
             (void)write_stderr("ERROR: The parameter \"%s\" requires a numeric value.\n", paraname);
-        return FAILURE;
+            return FAILURE;
+        }
     }
 
     /* get min/max value from guc config file */
@@ -3903,55 +3932,94 @@ int check_int_real_type_value(
 
 /*
  ************************************************************************************
- Function: parse_value
- Desc    : parese value from guc config file.
+ Function: check_int_overflow
+ Desc    : check to see if a int val has underflowed or overflowed for parameter.
            paraname          parameter name
-           value             parameter value
-           guc_list_unit     the unit of parameter from guc config file
-           result_int        the parse result about int
-           result_double        the parse result about double
-           isInt                  true is int, false is real
+           unitval           the unit of parameter from guc config file
+           new_unitval       the unit of parameter
+           new_int_val       the value of parameter
  Return  : SUCCESS
            FAILURE
  ************************************************************************************
 */
-int parse_value(const char* paraname, const char* value, const char* guc_list_unit, int64* result_int,
-    double* result_double, bool isInt)
+static int check_int_overflow(
+    const char* paraname, const UnitType unitval, const UnitType new_unitval, int64 new_int_val)
+{   
+    int per_unit_transfer = INT_MIN;
+
+    /* the transformation value */
+    per_unit_transfer = g_unit_transform[unitval][new_unitval];
+        
+    if (new_int_val > (LLONG_MAX / per_unit_transfer) || new_int_val < (LLONG_MIN / per_unit_transfer)) {
+        (void)write_stderr("ERROR: An overflow occurs for this parameter \"%s\".\n", paraname);
+        return FAILURE;
+    }
+
+    return SUCCESS;
+}
+
+/*
+ ************************************************************************************
+ Function: check_double_overflow
+ Desc    : check to see if a double val has underflowed or overflowed for parameter.
+           paraname          parameter name
+           val               the value of parameter after calculation
+           inf_is_valid      infinity is valid
+           zero_is_valid     zero is valid
+ Return  : SUCCESS
+           FAILURE
+ ************************************************************************************
+*/
+static int check_double_overflow(
+    const char* paraname, const double val, const bool inf_is_valid, const bool zero_is_valid)
+{
+    if (isinf(val) && !(inf_is_valid)) {                                                                        
+        (void)write_stderr("ERROR: An overflow occurs for this parameter \"%s\".\n", paraname);                
+        return FAILURE;
+    }  
+
+    if ((val) == 0.0 && !(zero_is_valid)) {                                                                     
+        (void)write_stderr("ERROR: An overflow occurs for this parameter \"%s\".\n", paraname);                
+        return FAILURE;
+    }
+        
+    return SUCCESS; 
+}
+
+/*
+ ************************************************************************************
+ Function: parse_int_value
+ Desc    : parese int value from guc config file.
+           paraname          parameter name
+           value             parameter value
+           guc_list_unit     the unit of parameter from guc config file
+           result_int        the parse result about int
+ Return  : SUCCESS
+           FAILURE
+ ************************************************************************************
+*/
+int parse_int_value(const char* paraname, const char* value, const char* guc_list_unit, int64* result_int)
 {
     int64 int_val = INT_MIN;
-    double double_val;
-    double tmp_double_val;
+    int64 tmp_int_val;
     char* endptr = NULL;
-    UnitType unitval = UNIT_ERROR;
     bool contain_space = false;
+    UnitType int_unitval = UNIT_ERROR;
+    UnitType new_int_unitval = UNIT_ERROR;
+    
 
     if (NULL != result_int) {
         *result_int = 0;
     }
-
-    if (NULL != result_double) {
-        *result_double = 0;
-    }        
-
+    
     errno = 0;
-    if (isInt) {
-        /* transform value into long int */
-        int_val = strtoll(value, &endptr, 0);
-        if (endptr == value || errno == ERANGE) {
-            return FAILURE;
-        }
-            
-        tmp_double_val = (double)int_val;
-    } else {
-        /* transform value into double */
-        double_val = strtod(value, &endptr);
-        if (endptr == value || errno == ERANGE) {
-            return FAILURE;
-        }
-            
-        tmp_double_val = double_val;
+    /* transform value into long int */
+    int_val = strtoll(value, &endptr, 0);
+    if (endptr == value || errno == ERANGE) {
+        return FAILURE;
     }
-
+	
+    tmp_int_val = int_val;
     /* skill the blank */
     while (isspace((unsigned char)*endptr)) {
         endptr++;
@@ -3969,136 +4037,102 @@ int parse_value(const char* paraname, const char* value, const char* guc_list_un
             return FAILURE;
         }
 
-        unitval = get_guc_unit(guc_list_unit);
-        if (UNIT_ERROR == unitval) {
-            (void)write_stderr("ERROR: Invalid units for this parameter \"%s\".\n", paraname);
+        /* the unit of parameter from guc config file */
+        int_unitval = get_guc_unit(guc_list_unit);
+        /* the unit of real parameter */
+        new_int_unitval = get_guc_unit(endptr);
+
+        /* get_guc_unit */
+        if (FAILURE == parse_value(paraname, int_unitval, new_int_unitval, endptr, &int_val)) {
             return FAILURE;
-        } else if (UNIT_KB == unitval) {
-            if (strncmp(endptr, "kB", 2) == 0) {
-                endptr += 2;
-            } else if (strncmp(endptr, "MB", 2) == 0) {
-                endptr += 2;
-                tmp_double_val *= KB_PER_MB;
-            } else if (strncmp(endptr, "GB", 2) == 0) {
-                endptr += 2;
-                tmp_double_val *= KB_PER_GB;
-            } else {
-                (void)write_stderr(
-                    "ERROR: Valid units for this parameter \"%s\" are \"kB\", \"MB\" and \"GB\".\n", paraname);
-                return FAILURE;
-            }
-        } else if (UNIT_MB == unitval) {
-            if (strncmp(endptr, "MB", 2) == 0) {
-                endptr += 2;
-            } else if (strncmp(endptr, "GB", 2) == 0) {
-                endptr += 2;
-                tmp_double_val *= MB_PER_GB;
-            } else {
-                (void)write_stderr("ERROR: Valid units for this parameter \"%s\" are \"MB\" and \"GB\".\n", paraname);
-                return FAILURE;
-            }
-        } else if (UNIT_GB == unitval) {
-            if (strncmp(endptr, "GB", 2) == 0) {
-                endptr += 2;
-            } else {
-                (void)write_stderr("ERROR: Valid units for this parameter \"%s\" is \"GB\".\n", paraname);
-                return FAILURE;
-            }
-        } else if (UNIT_MS == unitval) {
-            if (strncmp(endptr, "ms", 2) == 0) {
-                endptr += 2;
-            } else if (strncmp(endptr, "s", 1) == 0) {
-                endptr += 1;
-                tmp_double_val *= MS_PER_S;
-            } else if (strncmp(endptr, "min", 3) == 0) {
-                endptr += 3;
-                tmp_double_val *= MS_PER_MIN;
-            } else if (strncmp(endptr, "h", 1) == 0) {
-                endptr += 1;
-                tmp_double_val *= MS_PER_H;
-            } else if (strncmp(endptr, "d", 1) == 0) {
-                endptr += 1;
-                tmp_double_val *= MS_PER_D;
-            } else {
-                (void)write_stderr(
-                    "ERROR: Valid units for this parameter \"%s\" are \"ms\", \"s\", \"min\", \"h\", and \"d\".\n",
-                    paraname);
-                return FAILURE;
-            }
-        } else if (UNIT_S == unitval) {
-            if (strncmp(endptr, "s", 1) == 0) {
-                endptr += 1;
-            } else if (strncmp(endptr, "min", 3) == 0) {
-                endptr += 3;
-                tmp_double_val *= S_PER_MIN;
-            } else if (strncmp(endptr, "h", 1) == 0) {
-                endptr += 1;
-                tmp_double_val *= S_PER_H;
-            } else if (strncmp(endptr, "d", 1) == 0) {
-                endptr += 1;
-                tmp_double_val *= S_PER_D;
-            } else {
-                (void)write_stderr(
-                    "ERROR: Valid units for this parameter \"%s\" are \"s\", \"min\", \"h\", and \"d\".\n", paraname);
-                return FAILURE;
-            }
-        } else if (UNIT_MIN == unitval) {
-            if (strncmp(endptr, "min", 3) == 0) {
-                endptr += 3;
-            } else if (strncmp(endptr, "h", 1) == 0) {
-                endptr += 1;
-                tmp_double_val *= MIN_PER_H;
-            } else if (strncmp(endptr, "d", 1) == 0) {
-                endptr += 1;
-                tmp_double_val *= MIN_PER_D;
-            } else {
-                (void)write_stderr(
-                    "ERROR: Valid units for this parameter \"%s\" are \"min\", \"h\", and \"d\".\n", paraname);
-                return FAILURE;
-            }
-        } else if (UNIT_H == unitval) {
-            if (strncmp(endptr, "h", 1) == 0) {
-                endptr += 1;
-            } else if (strncmp(endptr, "d", 1) == 0) {
-                endptr += 1;
-                tmp_double_val *= H_PER_D;
-            } else {
-                (void)write_stderr(
-                    "ERROR: Valid units for this parameter \"%s\" are \"min\", \"h\", and \"d\".\n", paraname);
-                return FAILURE;
-            }
-        } else if (UNIT_D == unitval) {
-            if (strncmp(endptr, "d", 1) == 0) {
-                endptr += 1;
-            } else {
-                (void)write_stderr("ERROR: Valid units for this parameter \"%s\" is \"d\".\n", paraname);
-                return FAILURE;
-            }
-        } else {
+        }
+        
+        /* overflow processing */
+        if (FAILURE == check_int_overflow(paraname, int_unitval, new_int_unitval, tmp_int_val)) {
             return FAILURE;
         }
     }
 
-    while (isspace((unsigned char)*endptr))
-        endptr++;
+    if (NULL != result_int) {
+        *result_int = int_val;
+    } 
 
-    if (*endptr != '\0') {
+    return SUCCESS;
+}
+
+/*
+ ************************************************************************************
+ Function: parse_double_value
+ Desc    : parese double value from guc config file.
+           paraname          parameter name
+           value             parameter value
+           guc_list_unit     the unit of parameter from guc config file
+           result_double     the parse result about double
+ Return  : SUCCESS
+           FAILURE
+ ************************************************************************************
+*/
+int parse_double_value(const char* paraname, const char* value, const char* guc_list_unit, double* result_double)
+{
+    double double_val;
+    double tmp_double_val;
+    char* endptr = NULL;
+    bool contain_space = false;
+    UnitType double_unitval = UNIT_ERROR;
+    UnitType new_double_unitval = UNIT_ERROR;
+    int per_unit_transfer = INT_MIN;
+
+    if (NULL != result_double) {
+        *result_double = 0;
+    } 
+
+    errno = 0;
+    /* transform value into double */
+    double_val = strtod(value, &endptr);
+    if (endptr == value || errno == ERANGE) {
         return FAILURE;
-    }        
+    }
 
-    if (isInt) {
-        if (tmp_double_val > LLONG_MAX || tmp_double_val < LLONG_MIN) {
+    tmp_double_val = double_val;
+    /* skill the blank */
+    while (isspace((unsigned char)*endptr)) {
+        endptr++;
+        contain_space = true;
+    }
+
+    if ('\0' != *endptr) {
+        /* if unit is NULL, it means the value is incorrect */
+        if (NULL == guc_list_unit || '\0' == guc_list_unit[0]) {
+            return FAILURE;
+        }            
+
+        if (contain_space) {
+            (void)write_stderr("ERROR: There should not hava space between value and unit.\n");
             return FAILURE;
         }
 
-        if (NULL != result_int) {
-            *result_int = (int64)tmp_double_val;
+        /* the unit of parameter from guc config file */
+        double_unitval = get_guc_unit(guc_list_unit);
+        /* the unit of real parameter */
+        new_double_unitval = get_guc_unit(endptr);
+        /* the transformation value */
+        per_unit_transfer = g_unit_transform[double_unitval][new_double_unitval];
+    
+        /* get_guc_unit */
+        if (FAILURE == parse_value(paraname, double_unitval, new_double_unitval, endptr, &double_val)) {
+            return FAILURE;
         }
-    } else {
-        if (NULL != result_double) {
-            *result_double = tmp_double_val;
-        }            
+
+        /* overflow processing */
+        if (FAILURE == check_double_overflow(paraname, double_val, isinf(tmp_double_val) || 
+            isinf((double)per_unit_transfer), tmp_double_val == 0 || (double)per_unit_transfer == 0)) {
+            return FAILURE;   
+        }
     }
+
+    if (NULL != result_double) {
+        *result_double = double_val;
+    } 
 
     return SUCCESS;
 }
@@ -4244,3 +4278,136 @@ static char* GetEnvStr(const char* env)
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */
+
+/*
+ ************************************************************************************
+ Function: parse_value
+ Desc    : parese value from guc config file.
+           paraname          parameter name
+           unitval           the unit of parameter from guc config file
+           new_unitval       the unit of parameter
+           endptr            the address of parameter value
+           tmp_val           the temporary value of parameter value
+ Return  : SUCCESS
+           FAILURE
+ ************************************************************************************
+*/
+template <typename T>
+static int parse_value(
+    const char* paraname, const UnitType unitval, const UnitType new_unitval, const char* endptr, T* tmp_val)
+{   
+    switch (unitval) {
+        case UNIT_ERROR: {
+            (void)write_stderr("ERROR: Invalid units for this parameter \"%s\".\n", paraname);
+            return FAILURE;
+        } 
+        case UNIT_KB: {
+            if (new_unitval == UNIT_KB || new_unitval == UNIT_MB || new_unitval == UNIT_GB) {
+                endptr += 2;
+                *tmp_val *= g_unit_transform[UNIT_KB][new_unitval];
+            } else {
+                (void)write_stderr(
+                    "ERROR: Valid units for this parameter \"%s\" are \"kB\", \"MB\" and \"GB\".\n", paraname);
+                return FAILURE;
+            }
+            break;
+        }
+        case UNIT_MB: {
+            if (new_unitval == UNIT_MB || new_unitval == UNIT_GB) {
+                endptr += 2;
+                *tmp_val *= g_unit_transform[UNIT_MB][new_unitval];
+            } else {
+                (void)write_stderr(
+                    "ERROR: Valid units for this parameter \"%s\" are \"MB\" and \"GB\".\n", paraname);
+                return FAILURE;
+            }
+            break;
+        }
+        case UNIT_GB: {
+            if (new_unitval == UNIT_GB) {
+                endptr += 2;
+            } else {
+                (void)write_stderr("ERROR: Valid units for this parameter \"%s\" is \"GB\".\n", paraname);
+                return FAILURE;
+            }
+            break;
+        }
+        case UNIT_MS: {
+            if (new_unitval == UNIT_MS) {
+                endptr += 2;
+            } else if (new_unitval == UNIT_S || new_unitval == UNIT_H || new_unitval == UNIT_D) {
+                endptr += 1;
+                *tmp_val *= g_unit_transform[UNIT_MS][new_unitval];
+            } else if (new_unitval == UNIT_MIN) {
+                endptr += 3;
+                *tmp_val *= g_unit_transform[UNIT_MS][new_unitval];
+            } else {
+                (void)write_stderr(
+                    "ERROR: Valid units for this parameter \"%s\" are \"ms\", \"s\", \"min\", \"h\", and \"d\".\n",
+                    paraname);
+                return FAILURE;
+            }
+            break;
+        }
+        case UNIT_S: {
+            if (new_unitval == UNIT_S || new_unitval == UNIT_H || new_unitval == UNIT_D) {
+                endptr += 1;
+                *tmp_val *= g_unit_transform[UNIT_S][new_unitval];
+            } else if (new_unitval == UNIT_MIN) {
+                endptr += 3;
+                *tmp_val *= g_unit_transform[UNIT_S][new_unitval];
+            } else {
+                (void)write_stderr(
+                    "ERROR: Valid units for this parameter \"%s\" are \"s\", \"min\", \"h\", and \"d\".\n", 
+                    paraname);
+                return FAILURE;
+            }
+            break;
+        } 
+        case UNIT_MIN: {
+            if (new_unitval == UNIT_H || new_unitval == UNIT_D) {
+                endptr += 1;
+                *tmp_val *= g_unit_transform[UNIT_MIN][new_unitval];
+            } else if (new_unitval == UNIT_MIN) {
+                endptr += 3;
+            } else {
+                (void)write_stderr(
+                    "ERROR: Valid units for this parameter \"%s\" are \"min\", \"h\", and \"d\".\n", paraname);
+                return FAILURE;
+            }
+            break;
+        } 
+        case UNIT_H:{
+            if (new_unitval == UNIT_H || new_unitval == UNIT_D) {
+                endptr += 1;
+                *tmp_val *= g_unit_transform[UNIT_H][new_unitval];
+            } else {
+                (void)write_stderr(
+                    "ERROR: Valid units for this parameter \"%s\" are \"min\", \"h\", and \"d\".\n", paraname);
+                return FAILURE;
+            }
+            break;
+        } 
+        case UNIT_D:{
+            if (new_unitval == UNIT_D) {
+                endptr += 1;
+            } else {
+                (void)write_stderr("ERROR: Valid units for this parameter \"%s\" is \"d\".\n", paraname);
+                return FAILURE;
+            }
+            break;
+        } 
+        default: {
+            return FAILURE;
+        }
+    }
+
+    while (isspace((unsigned char)*endptr))
+        endptr++;
+
+    if (*endptr != '\0') {
+        return FAILURE;
+    }  
+
+    return SUCCESS;
+}  

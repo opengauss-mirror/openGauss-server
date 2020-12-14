@@ -15,108 +15,108 @@ create table test_bypass_sq1(col1 int, col2 int, col3 text);
 create index itest_bypass_sq1 on test_bypass_sq1(col1,col2);
 -- bypass insert data
  explain insert into test_bypass_sq1 values (0,0,'test_insert');
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ [Bypass]
  Insert on test_bypass_sq1  (cost=0.00..0.01 rows=1 width=0)
    ->  Result  (cost=0.00..0.01 rows=1 width=0)
 (3 rows)
 
  insert into test_bypass_sq1 values (0,0,'test_insert');
  explain insert into test_bypass_sq1 values (0,1,'test_insert');
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ [Bypass]
  Insert on test_bypass_sq1  (cost=0.00..0.01 rows=1 width=0)
    ->  Result  (cost=0.00..0.01 rows=1 width=0)
 (3 rows)
 
  insert into test_bypass_sq1 values (0,1,'test_insert');
  explain insert into test_bypass_sq1 values (1,1,'test_insert');
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ [Bypass]
  Insert on test_bypass_sq1  (cost=0.00..0.01 rows=1 width=0)
    ->  Result  (cost=0.00..0.01 rows=1 width=0)
 (3 rows)
 
  insert into test_bypass_sq1 values (1,1,'test_insert');
  explain insert into test_bypass_sq1 values (1,2,'test_insert');
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ [Bypass]
  Insert on test_bypass_sq1  (cost=0.00..0.01 rows=1 width=0)
    ->  Result  (cost=0.00..0.01 rows=1 width=0)
 (3 rows)
 
  insert into test_bypass_sq1 values (1,2,'test_insert');
  explain insert into test_bypass_sq1 values (0,0,'test_insert2');
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ [Bypass]
  Insert on test_bypass_sq1  (cost=0.00..0.01 rows=1 width=0)
    ->  Result  (cost=0.00..0.01 rows=1 width=0)
 (3 rows)
 
  insert into test_bypass_sq1 values (0,0,'test_insert2');
  explain insert into test_bypass_sq1 values (2,2,'test_insert2');
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ [Bypass]
  Insert on test_bypass_sq1  (cost=0.00..0.01 rows=1 width=0)
    ->  Result  (cost=0.00..0.01 rows=1 width=0)
 (3 rows)
 
  insert into test_bypass_sq1 values (2,2,'test_insert2');
  explain insert into test_bypass_sq1 values (0,0,'test_insert3');
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ [Bypass]
  Insert on test_bypass_sq1  (cost=0.00..0.01 rows=1 width=0)
    ->  Result  (cost=0.00..0.01 rows=1 width=0)
 (3 rows)
 
  insert into test_bypass_sq1 values (0,0,'test_insert3');
  explain insert into test_bypass_sq1 values (3,3,'test_insert3');
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ [Bypass]
  Insert on test_bypass_sq1  (cost=0.00..0.01 rows=1 width=0)
    ->  Result  (cost=0.00..0.01 rows=1 width=0)
 (3 rows)
 
  insert into test_bypass_sq1 values (3,3,'test_insert3');
  explain insert into test_bypass_sq1(col1,col2) values (1,1);
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ [Bypass]
  Insert on test_bypass_sq1  (cost=0.00..0.01 rows=1 width=0)
    ->  Result  (cost=0.00..0.01 rows=1 width=0)
 (3 rows)
 
  insert into test_bypass_sq1(col1,col2) values (1,1);
  explain insert into test_bypass_sq1(col1,col2) values (2,2);
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ [Bypass]
  Insert on test_bypass_sq1  (cost=0.00..0.01 rows=1 width=0)
    ->  Result  (cost=0.00..0.01 rows=1 width=0)
 (3 rows)
 
  insert into test_bypass_sq1(col1,col2) values (2,2);
  explain insert into test_bypass_sq1(col1,col2) values (3,3);
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ [Bypass]
  Insert on test_bypass_sq1  (cost=0.00..0.01 rows=1 width=0)
    ->  Result  (cost=0.00..0.01 rows=1 width=0)
 (3 rows)
 
  insert into test_bypass_sq1(col1,col2) values (3,3);
  explain insert into test_bypass_sq1 values (null,null,null);
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ [Bypass]
  Insert on test_bypass_sq1  (cost=0.00..0.01 rows=1 width=0)
    ->  Result  (cost=0.00..0.01 rows=1 width=0)
 (3 rows)
@@ -127,7 +127,7 @@ set enable_indexonlyscan=off;
 explain select * from test_bypass_sq1 where col1=0 and col2=0;
                                        QUERY PLAN                                        
 -----------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=40)
    Index Cond: ((col1 = 0) AND (col2 = 0))
 (3 rows)
@@ -143,7 +143,7 @@ select * from test_bypass_sq1 where col1=0 and col2=0;
 explain select col1,col2 from test_bypass_sq1 where col1>0 and col2>0 order by col1,col2;
                                         QUERY PLAN                                         
 -------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..49.44 rows=130 width=8)
    Index Cond: ((col1 > 0) AND (col2 > 0))
 (3 rows)
@@ -163,7 +163,7 @@ select col1,col2 from test_bypass_sq1 where col1>0 and col2>0 order by col1,col2
 explain select col1,col2 from test_bypass_sq1 where col1>0 and col2>0 order by col1,col2 limit 1;
                                            QUERY PLAN                                            
 -------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Limit  (cost=0.00..0.38 rows=1 width=8)
    ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..49.44 rows=130 width=8)
          Index Cond: ((col1 > 0) AND (col2 > 0))
@@ -178,7 +178,7 @@ select col1,col2 from test_bypass_sq1 where col1>0 and col2>0 order by col1,col2
 explain select col1,col2 from test_bypass_sq1 where col1=0 and col2=0 order by col1,col2 for update limit 1;
                                              QUERY PLAN                                              
 -----------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Limit  (cost=0.00..8.28 rows=1 width=14)
    ->  LockRows  (cost=0.00..8.28 rows=1 width=14)
          ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=14)
@@ -194,7 +194,7 @@ select col1,col2 from test_bypass_sq1 where col1=0 and col2=0 order by col1,col2
 explain select col1,col2 from test_bypass_sq1 where col1=0 and col2=0 order by col1,col2 limit 0;
                                           QUERY PLAN                                          
 ----------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Limit  (cost=0.00..8.27 rows=1 width=8)
    ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=8)
          Index Cond: ((col1 = 0) AND (col2 = 0))
@@ -208,7 +208,7 @@ select col1,col2 from test_bypass_sq1 where col1=0 and col2=0 order by col1,col2
 explain select col1,col2 from test_bypass_sq1 where col1=0 and col2=0 order by col1,col2 for update limit 0;
                                              QUERY PLAN                                              
 -----------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Limit  (cost=0.00..8.28 rows=1 width=14)
    ->  LockRows  (cost=0.00..8.28 rows=1 width=14)
          ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=14)
@@ -226,7 +226,7 @@ set enable_indexscan = off;
 explain select col1,col2 from test_bypass_sq1 where col1=0 and col2=0;
                                                     QUERY PLAN                                                     
 -------------------------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=10000000000.00..1000000000827.01 rows=1 width=8)
    Index Cond: ((col1 = 0) AND (col2 = 0))
 (3 rows)
@@ -242,7 +242,7 @@ select col1,col2 from test_bypass_sq1 where col1=0 and col2=0;
 explain select col1,col2 from test_bypass_sq1 where col1=0 and col2=0 order by col1 limit 1;
                                                        QUERY PLAN                                                        
 -------------------------------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Limit  (cost=10000000000.00..1000000000827.01 rows=1 width=8)
    ->  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=10000000000.00..1000000000827.01 rows=1 width=8)
          Index Cond: ((col1 = 0) AND (col2 = 0))
@@ -257,7 +257,7 @@ select col1,col2 from test_bypass_sq1 where col1=0 and col2=0 order by col1 limi
 explain select col1,col2 from test_bypass_sq1 where col1=0 and col2=0 order by col1 limit 0;
                                                        QUERY PLAN                                                        
 -------------------------------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Limit  (cost=10000000000.00..1000000000827.01 rows=1 width=8)
    ->  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=10000000000.00..1000000000827.01 rows=1 width=8)
          Index Cond: ((col1 = 0) AND (col2 = 0))
@@ -271,18 +271,18 @@ select col1,col2 from test_bypass_sq1 where col1=0 and col2=0 order by col1 limi
 reset enable_indexscan;
 --error
 explain select * from test_bypass_sq1 where col1=0 and col2=0 order by col1 limit -1;
-                                          QUERY PLAN                                           
------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query used limit count grammar with const less than zero.
  Limit  (cost=0.00..8.27 rows=1 width=40)
    ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=40)
          Index Cond: ((col1 = 0) AND (col2 = 0))
 (4 rows)
 
 explain select * from test_bypass_sq1 where col1=0 and col2=0 order by col1 for update limit -1;
-                                             QUERY PLAN                                              
------------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query used limit count grammar with const less than zero.
  Limit  (cost=0.00..8.28 rows=1 width=46)
    ->  LockRows  (cost=0.00..8.28 rows=1 width=46)
          ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=46)
@@ -293,7 +293,7 @@ explain select * from test_bypass_sq1 where col1=0 and col2=0 order by col1 for 
 explain update  test_bypass_sq1 set col3='test_null' where col1 is null and col2 is null;
                                           QUERY PLAN                                           
 -----------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Update on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=14)
    ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=14)
          Index Cond: ((col1 IS NULL) AND (col2 IS NULL))
@@ -303,7 +303,7 @@ update  test_bypass_sq1 set col3='test_null' where col1 is null and col2 is null
 explain select * from test_bypass_sq1 where col1 is null and col2 is null;
                                        QUERY PLAN                                        
 -----------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=40)
    Index Cond: ((col1 IS NULL) AND (col2 IS NULL))
 (3 rows)
@@ -317,7 +317,7 @@ select * from test_bypass_sq1 where col1 is null and col2 is null;
 explain select col1,col2 from test_bypass_sq1 where col1 is not null and col2 is not null order by col1,col2;
                                            QUERY PLAN                                            
 -------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..71.41 rows=1155 width=8)
    Index Cond: ((col1 IS NOT NULL) AND (col2 IS NOT NULL))
 (3 rows)
@@ -341,7 +341,7 @@ select col1,col2 from test_bypass_sq1 where col1 is not null and col2 is not nul
 explain select * from test_bypass_sq1 where col1 is not null and col2 = 0 order by col1;
                                         QUERY PLAN                                        
 ------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..39.92 rows=6 width=40)
    Index Cond: ((col1 IS NOT NULL) AND (col2 = 0))
 (3 rows)
@@ -357,7 +357,7 @@ select * from test_bypass_sq1 where col1 is not null and col2 = 0 order by col1;
 explain update test_bypass_sq1 set col2=col2-1,col3='test_update' where col1=0 and col2=0;
                                           QUERY PLAN                                           
 -----------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [No Bypass]reason: Bypass not executed because the expression of query is not support.
  Update on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=14)
    ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=14)
          Index Cond: ((col1 = 0) AND (col2 = 0))
@@ -367,7 +367,7 @@ update test_bypass_sq1 set col2=col2-1,col3='test_update' where col1=0 and col2=
 explain update test_bypass_sq1 set col2=col1-1,col3='test_update' where col1=2 and col2=2;
                                           QUERY PLAN                                           
 -----------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [No Bypass]reason: Bypass not executed because the expression of query is not support.
  Update on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=10)
    ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=10)
          Index Cond: ((col1 = 2) AND (col2 = 2))
@@ -377,7 +377,7 @@ update test_bypass_sq1 set col2=col1-1,col3='test_update' where col1=2 and col2=
 explain select * from test_bypass_sq1 where col1=0 and col2=-1;
                                        QUERY PLAN                                        
 -----------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=40)
    Index Cond: ((col1 = 0) AND (col2 = (-1)))
 (3 rows)
@@ -392,9 +392,9 @@ select * from test_bypass_sq1 where col1=0 and col2=-1;
 
 --not bypass
 explain insert into test_bypass_sq1 values(0,generate_series(1,100),'test');
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because the expression of query is not support.
  Insert on test_bypass_sq1  (cost=0.00..5.01 rows=1000 width=0)
    ->  Result  (cost=0.00..5.01 rows=1000 width=0)
 (3 rows)
@@ -402,7 +402,7 @@ explain insert into test_bypass_sq1 values(0,generate_series(1,100),'test');
 explain select * from test_bypass_sq1 where col3 is not null;
                                        QUERY PLAN                                        
 -----------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [No Bypass]reason: Bypass not executed because query's scan operator is not index.
  Seq Scan on test_bypass_sq1  (cost=10000000000.00..1000000002167.00 rows=1161 width=40)
    Filter: (col3 IS NOT NULL)
 (3 rows)
@@ -411,7 +411,7 @@ explain select * from test_bypass_sq1 where col3 is not null;
 explain update test_bypass_sq1 set col2=mod(5,3)  where col1=1 and col2=1;
                                           QUERY PLAN                                           
 -----------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Update on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=42)
    ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=42)
          Index Cond: ((col1 = 1) AND (col2 = 1))
@@ -422,7 +422,7 @@ update test_bypass_sq1 set col2=mod(5,3)  where col1=1 and col2=1;
 explain update test_bypass_sq1 set col2=111,col3='test_update2' where  col1=0;
                                            QUERY PLAN                                           
 ------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Update on test_bypass_sq1  (cost=0.00..24.36 rows=6 width=10)
    ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..24.36 rows=6 width=10)
          Index Cond: (col1 = 0)
@@ -432,7 +432,7 @@ update test_bypass_sq1 set col2=111,col3='test_update2' where  col1=0;
 explain select * from test_bypass_sq1 where col1=0 order by col1;
                                         QUERY PLAN                                        
 ------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..24.36 rows=6 width=40)
    Index Cond: (col1 = 0)
 (3 rows)
@@ -449,7 +449,7 @@ select * from test_bypass_sq1 where col1=0 order by col1;
 explain select * from test_bypass_sq1 where col2=2 order by col1;
                                         QUERY PLAN                                        
 ------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..37.06 rows=6 width=40)
    Index Cond: (col2 = 2)
 (3 rows)
@@ -465,7 +465,7 @@ select * from test_bypass_sq1 where col2=2 order by col1;
 explain select col1,col2 from test_bypass_sq1 where col1>0 order by col1;
                                            QUERY PLAN                                           
 ------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..51.06 rows=389 width=8)
    Index Cond: (col1 > 0)
 (3 rows)
@@ -485,7 +485,7 @@ select col1,col2 from test_bypass_sq1 where col1>0 order by col1;
 explain select col1,col2 from test_bypass_sq1 where col1>0 order by col1 limit 3;
                                               QUERY PLAN                                              
 ------------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Limit  (cost=0.00..0.39 rows=3 width=8)
    ->  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..51.06 rows=389 width=8)
          Index Cond: (col1 > 0)
@@ -502,7 +502,7 @@ select col1,col2 from test_bypass_sq1 where col1>0 order by col1 limit 3;
 explain select * from test_bypass_sq1 where col1=0 order by col1 for update limit 2;
                                               QUERY PLAN                                              
 ------------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Limit  (cost=0.00..8.14 rows=2 width=46)
    ->  LockRows  (cost=0.00..24.42 rows=6 width=46)
          ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..24.36 rows=6 width=46)
@@ -519,7 +519,7 @@ select * from test_bypass_sq1 where col1=0 order by col1 for update limit 2;
 explain select col1,col2 from test_bypass_sq1 where col2<5 order by col1;
                                            QUERY PLAN                                           
 ------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..60.89 rows=389 width=8)
    Index Cond: (col2 < 5)
 (3 rows)
@@ -539,7 +539,7 @@ select col1,col2 from test_bypass_sq1 where col2<5 order by col1;
 explain select col1,col2 from test_bypass_sq1 where col1>=0 and col2>0 order by col1;
                                            QUERY PLAN                                           
 ------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..49.44 rows=130 width=8)
    Index Cond: ((col1 >= 0) AND (col2 > 0))
 (3 rows)
@@ -563,7 +563,7 @@ select col1,col2 from test_bypass_sq1 where col1>=0 and col2>0 order by col1;
 explain select * from test_bypass_sq1 where col1>=0 and col2>0 order by col1 limit 3;
                                             QUERY PLAN                                            
 --------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Limit  (cost=0.00..1.14 rows=3 width=40)
    ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..49.44 rows=130 width=40)
          Index Cond: ((col1 >= 0) AND (col2 > 0))
@@ -580,7 +580,7 @@ select * from test_bypass_sq1 where col1>=0 and col2>0 order by col1 limit 3;
 explain select * from test_bypass_sq1 where col1=1 and col2=2 order by col1 for update limit 1;
                                              QUERY PLAN                                              
 -----------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Limit  (cost=0.00..8.28 rows=1 width=46)
    ->  LockRows  (cost=0.00..8.28 rows=1 width=46)
          ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=46)
@@ -598,7 +598,7 @@ set enable_indexscan = off;
 explain select col1,col2 from  test_bypass_sq1 where col1=0 order by col2;
                                                     QUERY PLAN                                                     
 -------------------------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=10000000000.00..1000000002435.51 rows=6 width=8)
    Index Cond: (col1 = 0)
 (3 rows)
@@ -615,7 +615,7 @@ select col1,col2 from  test_bypass_sq1 where col1=0 order by col2;
 explain select col2,col1 from test_bypass_sq1 where col2=2 order by col1;
                                                     QUERY PLAN                                                     
 -------------------------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=10000000000.00..1000000003706.26 rows=6 width=8)
    Index Cond: (col2 = 2)
 (3 rows)
@@ -631,7 +631,7 @@ select col2,col1 from test_bypass_sq1 where col2=2 order by col1;
 explain select col1,col2 from test_bypass_sq1 where col1>0 order by col1;
                                                      QUERY PLAN                                                      
 ---------------------------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=10000000000.00..1000000005105.76 rows=389 width=8)
    Index Cond: (col1 > 0)
 (3 rows)
@@ -651,7 +651,7 @@ select col1,col2 from test_bypass_sq1 where col1>0 order by col1;
 explain select col1,col2 from test_bypass_sq1 where col1 is null and col2 is null;
                                                     QUERY PLAN                                                     
 -------------------------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=10000000000.00..1000000000827.01 rows=1 width=8)
    Index Cond: ((col1 IS NULL) AND (col2 IS NULL))
 (3 rows)
@@ -665,7 +665,7 @@ select col1,col2 from test_bypass_sq1 where col1 is null and col2 is null;
 explain select col2,col1 from test_bypass_sq1 where col1>0 order by col1 limit 3;
                                                         QUERY PLAN                                                         
 ---------------------------------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Limit  (cost=10000000000.00..17634961478.96 rows=3 width=8)
    ->  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=10000000000.00..1000000005105.76 rows=389 width=8)
          Index Cond: (col1 > 0)
@@ -682,7 +682,7 @@ select col2,col1 from test_bypass_sq1 where col1>0 order by col1 limit 3;
 explain select col1,col2 from test_bypass_sq1 where col2<5 order by col1;
                                                      QUERY PLAN                                                      
 ---------------------------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=10000000000.00..1000000006089.26 rows=389 width=8)
    Index Cond: (col2 < 5)
 (3 rows)
@@ -702,7 +702,7 @@ select col1,col2 from test_bypass_sq1 where col2<5 order by col1;
 explain select col1,col2 from test_bypass_sq1 where col1>=0 and col2>0 order by col1;
                                                      QUERY PLAN                                                      
 ---------------------------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=10000000000.00..1000000004944.01 rows=130 width=8)
    Index Cond: ((col1 >= 0) AND (col2 > 0))
 (3 rows)
@@ -726,7 +726,7 @@ select col1,col2 from test_bypass_sq1 where col1>=0 and col2>0 order by col1;
 explain select col1,col2 from test_bypass_sq1 where col1>=0 and col2>0 order by col1 limit 3;
                                                         QUERY PLAN                                                         
 ---------------------------------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Limit  (cost=10000000000.00..32846153960.25 rows=3 width=8)
    ->  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=10000000000.00..1000000004944.01 rows=130 width=8)
          Index Cond: ((col1 >= 0) AND (col2 > 0))
@@ -743,7 +743,7 @@ select col1,col2 from test_bypass_sq1 where col1>=0 and col2>0 order by col1 lim
 explain select col1,col2 from test_bypass_sq1 where col1>=0 and col2>0 order by col1 limit null;
                                                         QUERY PLAN                                                         
 ---------------------------------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Limit  (cost=10000000000.00..1000000004944.01 rows=130 width=8)
    ->  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=10000000000.00..1000000004944.01 rows=130 width=8)
          Index Cond: ((col1 >= 0) AND (col2 > 0))
@@ -770,7 +770,7 @@ reset enable_indexscan;
 explain select * from test_bypass_sq1 where col1>col2;
                                        QUERY PLAN                                       
 ----------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [No Bypass]reason: Bypass not executed because query's scan operator is not index.
  Seq Scan on test_bypass_sq1  (cost=10000000000.00..1000000002458.75 rows=389 width=40)
    Filter: (col1 > col2)
 (3 rows)
@@ -778,7 +778,7 @@ explain select * from test_bypass_sq1 where col1>col2;
 explain select * from test_bypass_sq1 where col1=3 and col2=3 for update;
                                           QUERY PLAN                                           
 -----------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  LockRows  (cost=0.00..8.28 rows=1 width=46)
    ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=46)
          Index Cond: ((col1 = 3) AND (col2 = 3))
@@ -794,7 +794,7 @@ select * from test_bypass_sq1 where col1=3 and col2=3 for update;
 explain select * from test_bypass_sq1 where col3='test_update2';
                                       QUERY PLAN                                      
 --------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [No Bypass]reason: Bypass not executed because query's scan operator is not index.
  Seq Scan on test_bypass_sq1  (cost=10000000000.00..1000000002458.75 rows=6 width=40)
    Filter: (col3 = 'test_update2'::text)
 (3 rows)
@@ -803,7 +803,7 @@ explain select * from test_bypass_sq1 where col3='test_update2';
 explain select * from test_bypass_sq1 where col1>0 and col2>0 order by col1 limit 3 offset 3;
                                             QUERY PLAN                                            
 --------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Limit  (cost=1.14..2.28 rows=3 width=40)
    ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..49.44 rows=130 width=40)
          Index Cond: ((col1 > 0) AND (col2 > 0))
@@ -820,7 +820,7 @@ select * from test_bypass_sq1 where col1>0 and col2>0 order by col1 limit 3 offs
 explain select * from test_bypass_sq1 where col1>0  order by col1 for update limit 3 offset 3;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Limit  (cost=0.42..0.85 rows=3 width=46)
    ->  LockRows  (cost=0.00..54.95 rows=389 width=46)
          ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..51.06 rows=389 width=46)
@@ -830,7 +830,7 @@ explain select * from test_bypass_sq1 where col1>0  order by col1 for update lim
 explain select * from test_bypass_sq1 where col1>0  order by col1 for update limit 3 offset null;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Limit  (cost=0.00..0.42 rows=3 width=46)
    ->  LockRows  (cost=0.00..54.95 rows=389 width=46)
          ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..51.06 rows=389 width=46)
@@ -840,7 +840,7 @@ explain select * from test_bypass_sq1 where col1>0  order by col1 for update lim
 explain select * from test_bypass_sq1 where col1>0 and col2>0 order by col1 offset 3;
                                             QUERY PLAN                                            
 --------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Limit  (cost=1.14..49.44 rows=127 width=40)
    ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..49.44 rows=130 width=40)
          Index Cond: ((col1 > 0) AND (col2 > 0))
@@ -858,7 +858,7 @@ select * from test_bypass_sq1 where col1>0 and col2>0 order by col1 offset 3;
 explain select * from test_bypass_sq1 where col1>0 order by col1 for update offset 3;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Limit  (cost=0.42..54.95 rows=386 width=46)
    ->  LockRows  (cost=0.00..54.95 rows=389 width=46)
          ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..51.06 rows=389 width=46)
@@ -868,7 +868,7 @@ explain select * from test_bypass_sq1 where col1>0 order by col1 for update offs
 explain update test_bypass_sq1 set col2=3*7  where col1=3 and col2=2;
                                           QUERY PLAN                                           
 -----------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Update on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=42)
    ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=42)
          Index Cond: ((col1 = 3) AND (col2 = 2))
@@ -878,7 +878,7 @@ update test_bypass_sq1 set col2=3*7  where col1=3 and col2=2;
 explain delete from  test_bypass_sq1 where col1=1 and col2=1;
                                           QUERY PLAN                                          
 ----------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Delete on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=6)
    ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=6)
          Index Cond: ((col1 = 1) AND (col2 = 1))
@@ -888,7 +888,7 @@ delete from  test_bypass_sq1 where col1=1 and col2=1;
 explain delete from test_bypass_sq1 where col1 is null and col2 is null;
                                           QUERY PLAN                                          
 ----------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Delete on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=6)
    ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..8.27 rows=1 width=6)
          Index Cond: ((col1 IS NULL) AND (col2 IS NULL))
@@ -896,9 +896,9 @@ explain delete from test_bypass_sq1 where col1 is null and col2 is null;
 
 delete from test_bypass_sq1 where col1 is null and col2 is null;
 explain insert into test_bypass_sq1 values (null,null,null);
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ [Bypass]
  Insert on test_bypass_sq1  (cost=0.00..0.01 rows=1 width=0)
    ->  Result  (cost=0.00..0.01 rows=1 width=0)
 (3 rows)
@@ -915,7 +915,7 @@ select * from test_bypass_sq1 where col1=3;
 explain select col1,col2 from test_bypass_sq1 order by col1 desc;
                                                 QUERY PLAN                                                
 ----------------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Only Scan Backward using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..65.76 rows=1167 width=8)
 (2 rows)
 
@@ -939,7 +939,7 @@ select col1,col2 from test_bypass_sq1 order by col1 desc; --order by is supporte
 explain select col1,col2 from test_bypass_sq1 order by col1;
                                            QUERY PLAN                                            
 -------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..65.76 rows=1167 width=8)
 (2 rows)
 
@@ -964,7 +964,7 @@ select col1,col2 from test_bypass_sq1 order by col1;
 explain select col1,col2 from test_bypass_sq1 order by col1,col2;
                                            QUERY PLAN                                            
 -------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..65.76 rows=1167 width=8)
 (2 rows)
 
@@ -988,7 +988,7 @@ select col1,col2 from test_bypass_sq1 order by col1,col2;
 explain select * from test_bypass_sq1 where col1 > 0 order by col1,col2 desc;
                                             QUERY PLAN                                            
 --------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [No Bypass]reason: Bypass not executed because query's scan operator is not index.
  Sort  (cost=67.79..68.76 rows=389 width=40)
    Sort Key: col1, col2 DESC
    ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..51.06 rows=389 width=40)
@@ -999,7 +999,7 @@ explain select * from test_bypass_sq1 where col1 > 0 order by col1,col2 desc;
 explain select col1,col2 from test_bypass_sq1 where col1 > 0 order by col1,col2;
                                            QUERY PLAN                                           
 ------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..51.06 rows=389 width=8)
    Index Cond: (col1 > 0)
 (3 rows)
@@ -1020,7 +1020,7 @@ select col1,col2 from test_bypass_sq1 where col1 > 0 order by col1,col2;
 explain select * from test_bypass_sq1 where true;
                                        QUERY PLAN                                        
 -----------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [No Bypass]reason: Bypass not executed because query's scan operator is not index.
  Seq Scan on test_bypass_sq1  (cost=10000000000.00..1000000002167.00 rows=1167 width=40)
 (2 rows)
 
@@ -1028,7 +1028,7 @@ explain select * from test_bypass_sq1 where true;
 explain select col1, col2 from test_bypass_sq1 where true order by col1;
                                            QUERY PLAN                                            
 -------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..65.76 rows=1167 width=8)
 (2 rows)
 
@@ -1086,7 +1086,7 @@ select col1, col2 from test_bypass_sq1 order by col1 desc;
 explain insert into test_bypass_sq1 select * from test_bypass_sq1 where col1>0;
                                             QUERY PLAN                                            
 --------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [No Bypass]reason: Bypass not executed because query combines insert operator with others.
  Insert on test_bypass_sq1  (cost=0.00..51.06 rows=389 width=40)
    ->  Index Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..51.06 rows=389 width=40)
          Index Cond: (col1 > 0)
@@ -1100,9 +1100,9 @@ create table test_bypass_sq2(col1 int not null, col2 int);
 create index itest_bypass_sq2 on test_bypass_sq2(col1);
 --bypass
 explain insert into test_bypass_sq2(col1) values (0);
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ [Bypass]
  Insert on test_bypass_sq2  (cost=0.00..0.01 rows=1 width=0)
    ->  Result  (cost=0.00..0.01 rows=1 width=0)
 (3 rows)
@@ -1110,18 +1110,18 @@ explain insert into test_bypass_sq2(col1) values (0);
 insert into test_bypass_sq2(col1) values (0);
 --error
 explain insert into test_bypass_sq2(col1) values (null);
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ [Bypass]
  Insert on test_bypass_sq2  (cost=0.00..0.01 rows=1 width=0)
    ->  Result  (cost=0.00..0.01 rows=1 width=0)
 (3 rows)
 
 --bypass
 explain insert into test_bypass_sq2(col1,col2) values (1,1);
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ [Bypass]
  Insert on test_bypass_sq2  (cost=0.00..0.01 rows=1 width=0)
    ->  Result  (cost=0.00..0.01 rows=1 width=0)
 (3 rows)
@@ -1133,9 +1133,9 @@ insert into test_bypass_sq2(col1,col2) values (1,1);
 insert into test_bypass_sq2(col1,col2) values (2,2);
 insert into test_bypass_sq2(col1,col2) values (3,3);
 explain insert into test_bypass_sq2(col1,col2) values (null,null);--error
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+                         QUERY PLAN                          
+-------------------------------------------------------------
+ [Bypass]
  Insert on test_bypass_sq2  (cost=0.00..0.01 rows=1 width=0)
    ->  Result  (cost=0.00..0.01 rows=1 width=0)
 (3 rows)
@@ -1145,7 +1145,7 @@ set enable_indexonlyscan=off;
 explain update test_bypass_sq2 set col2 = col2+1 where col1 = 0;
                                            QUERY PLAN                                            
 -------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [No Bypass]reason: Bypass not executed because the expression of query is not support.
  Update on test_bypass_sq2  (cost=0.00..36.47 rows=11 width=14)
    ->  Index Scan using itest_bypass_sq2 on test_bypass_sq2  (cost=0.00..36.47 rows=11 width=14)
          Index Cond: (col1 = 0)
@@ -1155,7 +1155,7 @@ update test_bypass_sq2 set col2 = col2+1 where col1 = 0;
 explain select * from test_bypass_sq2  where col1 = 0 order by col1;
                                         QUERY PLAN                                        
 ------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Scan using itest_bypass_sq2 on test_bypass_sq2  (cost=0.00..36.44 rows=11 width=8)
    Index Cond: (col1 = 0)
 (3 rows)
@@ -1169,7 +1169,7 @@ select * from test_bypass_sq2  where col1 = 0 order by col1;
 explain select * from test_bypass_sq2  where col1 >= 0 order by col1;
                                         QUERY PLAN                                         
 -------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Scan using itest_bypass_sq2 on test_bypass_sq2  (cost=0.00..56.78 rows=716 width=8)
    Index Cond: (col1 >= 0)
 (3 rows)
@@ -1188,7 +1188,7 @@ select * from test_bypass_sq2  where col1 >= 0 order by col1;
 explain select * from test_bypass_sq2  where col1 >= 0 order by col1 limit 4;
                                            QUERY PLAN                                            
 -------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Limit  (cost=0.00..0.32 rows=4 width=8)
    ->  Index Scan using itest_bypass_sq2 on test_bypass_sq2  (cost=0.00..56.78 rows=716 width=8)
          Index Cond: (col1 >= 0)
@@ -1206,7 +1206,7 @@ select * from test_bypass_sq2  where col1 >= 0 order by col1 limit 4;
 explain select * from test_bypass_sq2  where col1 = 1 order by col1 for update limit 1;
                                               QUERY PLAN                                               
 -------------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Limit  (cost=0.00..3.32 rows=1 width=14)
    ->  LockRows  (cost=0.00..36.55 rows=11 width=14)
          ->  Index Scan using itest_bypass_sq2 on test_bypass_sq2  (cost=0.00..36.44 rows=11 width=14)
@@ -1222,7 +1222,7 @@ select * from test_bypass_sq2  where col1 = 1 order by col1 for update limit 1;
 explain select col1 from test_bypass_sq2 order by col1 limit 2;
                                             QUERY PLAN                                            
 --------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Limit  (cost=0.00..0.07 rows=2 width=4)
    ->  Index Scan using itest_bypass_sq2 on test_bypass_sq2  (cost=0.00..80.49 rows=2149 width=4)
 (3 rows)
@@ -1237,7 +1237,7 @@ select col1 from test_bypass_sq2 order by col1 limit 2;
 explain select * from test_bypass_sq2  where col1 > 0 order by col1 limit 2 offset 2;
                                            QUERY PLAN                                            
 -------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Limit  (cost=0.16..0.32 rows=2 width=8)
    ->  Index Scan using itest_bypass_sq2 on test_bypass_sq2  (cost=0.00..56.78 rows=716 width=8)
          Index Cond: (col1 > 0)
@@ -1253,7 +1253,7 @@ select * from test_bypass_sq2  where col1 > 0 order by col1 limit 2 offset 2;
 explain select * from test_bypass_sq2  where col1 > 0 order by col1 for update limit 2 offset 2;
                                                QUERY PLAN                                               
 --------------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Limit  (cost=0.18..0.36 rows=2 width=14)
    ->  LockRows  (cost=0.00..63.94 rows=716 width=14)
          ->  Index Scan using itest_bypass_sq2 on test_bypass_sq2  (cost=0.00..56.78 rows=716 width=14)
@@ -1265,7 +1265,7 @@ reset enable_indexonlyscan;
 explain select * from test_bypass_sq2  where col2 is null;
                                       QUERY PLAN                                      
 --------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [No Bypass]reason: Bypass not executed because query's scan operator is not index.
  Seq Scan on test_bypass_sq2  (cost=10000000000.00..1000000003149.00 rows=11 width=8)
    Filter: (col2 IS NULL)
 (3 rows)
@@ -1273,7 +1273,7 @@ explain select * from test_bypass_sq2  where col2 is null;
 explain select * from test_bypass_sq2  where col1 = 0 and col2 = 0;
                                        QUERY PLAN                                        
 -----------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [No Bypass]reason: Bypass not executed because query used indexscan with qual.
  Index Scan using itest_bypass_sq2 on test_bypass_sq2  (cost=0.00..36.47 rows=1 width=8)
    Index Cond: (col1 = 0)
    Filter: (col2 = 0)
@@ -1282,7 +1282,7 @@ explain select * from test_bypass_sq2  where col1 = 0 and col2 = 0;
 explain select t1.col3, t2.col2  from test_bypass_sq1 as t1 join test_bypass_sq2 as t2 on t1.col1=t2.col1;
                                                  QUERY PLAN                                                 
 ------------------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [No Bypass]reason: Bypass not executed because query's scan operator is not index.
  Hash Join  (cost=80.34..307.71 rows=12539 width=36)
    Hash Cond: (t2.col1 = t1.col1)
    ->  Index Scan using itest_bypass_sq2 on test_bypass_sq2 t2  (cost=0.00..80.49 rows=2149 width=8)
@@ -1293,7 +1293,7 @@ explain select t1.col3, t2.col2  from test_bypass_sq1 as t1 join test_bypass_sq2
 explain select count(*),col1 from test_bypass_sq1 group by col1;
                                               QUERY PLAN                                               
 -------------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [No Bypass]reason: Bypass not executed because query's scan operator is not index.
  GroupAggregate  (cost=0.00..73.59 rows=200 width=12)
    Group By Key: col1
    ->  Index Only Scan using itest_bypass_sq1 on test_bypass_sq1  (cost=0.00..65.76 rows=1167 width=4)
@@ -1328,7 +1328,7 @@ select col1 from test_bypass_sq2 order by col1;
 explain select * from test_bypass_sq2 order by col1,col2;
                                           QUERY PLAN                                          
 ----------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [No Bypass]reason: Bypass not executed because query's scan operator is not index.
  Sort  (cost=1000000003267.94..1000000003273.31 rows=2149 width=8)
    Sort Key: col1, col2
    ->  Seq Scan on test_bypass_sq2  (cost=10000000000.00..1000000003149.00 rows=2149 width=8)
@@ -1347,9 +1347,9 @@ insert into test_bypass_sq3 values(2,3,null);
 insert into test_bypass_sq3 values (3,3,null);
 --not bypass
 explain insert into test_bypass_sq3 values(3,3,current_timestamp);
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because the expression of query is not support.
  Insert on test_bypass_sq3  (cost=0.00..0.01 rows=1 width=0)
    ->  Result  (cost=0.00..0.01 rows=1 width=0)
 (3 rows)
@@ -1357,7 +1357,7 @@ explain insert into test_bypass_sq3 values(3,3,current_timestamp);
 explain select * from test_bypass_sq3 where col1 = 1 order by col2;
                                            QUERY PLAN                                           
 ------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [No Bypass]reason: Bypass not executed because query's scan operator is not index.
  Sort  (cost=32.55..32.57 rows=9 width=16)
    Sort Key: col2
    ->  Index Scan using itest_bypass_sq3 on test_bypass_sq3  (cost=0.00..32.41 rows=9 width=16)
@@ -1402,7 +1402,7 @@ insert into test_bypass_sq4 values (null,null,null);
 explain select col3, col1, col2 from test_bypass_sq4 where col2 >22 order by 1,3;
                                          QUERY PLAN                                         
 --------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Scan using itest_bypass_sq4 on test_bypass_sq4  (cost=0.00..69.32 rows=648 width=12)
    Index Cond: (col2 > 22)
 (3 rows)
@@ -1423,7 +1423,7 @@ select col3, col1, col2 from test_bypass_sq4 where col2 >22 order by 1,3;
 explain select * from test_bypass_sq4 where col2 =22 and col3= 32 order by col2;
                                        QUERY PLAN                                        
 -----------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Scan using itest_bypass_sq4 on test_bypass_sq4  (cost=0.00..8.27 rows=1 width=12)
    Index Cond: ((col3 = 32) AND (col2 = 22))
 (3 rows)
@@ -1437,7 +1437,7 @@ select * from test_bypass_sq4 where col2 =22 and col3= 32 order by col2;
 explain select col3,col2,col3 from test_bypass_sq4 where col3 >= 33 and col2 >= 22 order by col3,col2;
                                            QUERY PLAN                                           
 ------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Only Scan using itest_bypass_sq4 on test_bypass_sq4  (cost=0.00..52.89 rows=216 width=8)
    Index Cond: ((col3 >= 33) AND (col2 >= 22))
 (3 rows)
@@ -1465,7 +1465,7 @@ select col2,col3,col2 from test_bypass_sq4 where col3 >= 34 and col2 >= 22 order
 explain select col3,col2,col3 from test_bypass_sq4 where col3 >= 33 and col2 >= 22 order by col3 for update;
                                             QUERY PLAN                                            
 --------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  LockRows  (cost=0.00..55.05 rows=216 width=14)
    ->  Index Scan using itest_bypass_sq4 on test_bypass_sq4  (cost=0.00..52.89 rows=216 width=14)
          Index Cond: ((col3 >= 33) AND (col2 >= 22))
@@ -1474,7 +1474,7 @@ explain select col3,col2,col3 from test_bypass_sq4 where col3 >= 33 and col2 >= 
 explain select col2,col3,col2 from test_bypass_sq4 where col3 >= 34 and col2 >= 22 order by col3,col2 for update;
                                             QUERY PLAN                                            
 --------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  LockRows  (cost=0.00..55.05 rows=216 width=14)
    ->  Index Scan using itest_bypass_sq4 on test_bypass_sq4  (cost=0.00..52.89 rows=216 width=14)
          Index Cond: ((col3 >= 34) AND (col2 >= 22))
@@ -1490,7 +1490,7 @@ select col2,col3,col2 from test_bypass_sq4 where col3 is null and col2 is null o
 explain select col2,col3 from test_bypass_sq4 where col3 is null and col2 is not null;
                                           QUERY PLAN                                           
 -----------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Only Scan using itest_bypass_sq4 on test_bypass_sq4  (cost=0.00..32.45 rows=10 width=8)
    Index Cond: ((col3 IS NULL) AND (col2 IS NOT NULL))
 (3 rows)
@@ -1504,7 +1504,7 @@ select col2,col3 from test_bypass_sq4 where col3 is null and col2 is not null;
 explain select col2,col3 from test_bypass_sq4 where col3 is not null order by col3 desc,col2 desc;
                                                 QUERY PLAN                                                
 ----------------------------------------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+ [Bypass]
  Index Only Scan Backward using itest_bypass_sq4 on test_bypass_sq4  (cost=0.00..82.11 rows=1935 width=8)
    Index Cond: (col3 IS NOT NULL)
 (3 rows)
@@ -1709,9 +1709,9 @@ create table test_bypass_sq6(col1 int, col2 complextype,col3 text);
 create index itest_bypass_sq6 on test_bypass_sq6(col1,col3);
 --not bypass
 explain insert into test_bypass_sq6 values (1,ROW(1, 'Simon1'::text),'test'::text);
-                               QUERY PLAN                                
--------------------------------------------------------------------------
- [No Bypass]reason: Bypass not executed because the plan is custom plan.
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ [No Bypass]reason: Bypass not executed because query used unsupported DML target type.
  Insert on test_bypass_sq6  (cost=0.00..0.01 rows=1 width=0)
    ->  Result  (cost=0.00..0.01 rows=1 width=0)
 (3 rows)
