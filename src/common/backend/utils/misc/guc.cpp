@@ -21518,6 +21518,9 @@ int find_guc_option(
 {
     bool isMatched = false;
     int i = 0;
+    int targetLine = 0;
+    int matchTimes = 0;
+    
 
     if (optlines == NULL || opt_name == NULL) {
         return INVALID_LINES_IDX;
@@ -21531,22 +21534,41 @@ int find_guc_option(
         if (!is_opt_line_commented(optlines[i])) {
             isMatched = is_match_option_name(optlines[i], opt_name, paramlen, name_offset, value_len, value_offset);
             if (isMatched) {
-                return i;
+                matchTimes++;
+                targetLine = i;
             }
         }
     }
 
+    /* The line of last one will be recorded when there are parameters with the same name in postgresql.conf */
+    if (matchTimes > 1) {
+            ereport(NOTICE, (errmsg("There are %d \'%s\' not commented in \"postgresql.conf\", and only the "
+                                "last one in %dth line will be set and used.",
+                matchTimes,
+                opt_name,
+                (targetLine + 1))));
+        }
+
+    /* The line of last one will be returned */
+    if (matchTimes > 0) {
+        return targetLine;
+    }
+
     /* The second loop is to deal with the lines commented by '#' */
+    matchTimes = 0;
     for (i = 0; optlines[i] != NULL; i++) {
         if (is_opt_line_commented(optlines[i])) {
             isMatched = is_match_option_name(optlines[i], opt_name, paramlen, name_offset, value_len, value_offset);
             if (isMatched) {
-                return i;
+                matchTimes++;
+                targetLine = i;
             }
         }
     }
-
-    return INVALID_LINES_IDX;
+    
+    /* The line of last one will be returned, otherwise it return invaild line */
+    return (matchTimes > 0) ? targetLine : INVALID_LINES_IDX;
+    
 }
 /*
  * @@GaussDB@@
