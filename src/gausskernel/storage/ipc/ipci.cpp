@@ -135,6 +135,7 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
         size = add_size(size, PredicateLockShmemSize());
         size = add_size(size, ProcGlobalShmemSize());
         size = add_size(size, XLOGShmemSize());
+        size = add_size(size, XLogStatShmemSize());
         size = add_size(size, CLOGShmemSize());
         size = add_size(size, CSNLOGShmemSize());
         size = add_size(size, TwoPhaseShmemSize());
@@ -198,6 +199,7 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
          */
         numSemas = ProcGlobalSemas();
         numSemas += SpinlockSemas();
+        numSemas += XLogSemas();
 
 #ifdef ENABLED_DEBUG_SYNC
         numSemas += 1; /* For debug sync handling */
@@ -241,6 +243,7 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
      * Set up xlog, clog, and buffers
      */
     XLOGShmemInit();
+    XLogStatShmemInit();
     dw_shmem_init();
 
     {
@@ -298,6 +301,12 @@ void CreateSharedMemoryAndSemaphores(bool makePrivate, int port)
     }
     ReplicationSlotsShmemInit();
     WalSndShmemInit();
+    /*
+    * Set up WAL semaphores. This must be done after WalSndShmemInit().
+    */
+    if (!IsUnderPostmaster) {
+        InitWalSemaphores();
+    }
     WalRcvShmemInit();
     DataSndShmemInit();
     DataRcvShmemInit();

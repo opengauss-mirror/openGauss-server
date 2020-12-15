@@ -1784,6 +1784,11 @@ typedef struct knl_t_walwriter_context {
     volatile sig_atomic_t shutdown_requested;
 } knl_t_walwriter_context;
 
+typedef struct knl_t_walwriterauxiliary_context {
+    volatile sig_atomic_t got_SIGHUP;
+    volatile sig_atomic_t shutdown_requested;
+} knl_t_walwriterauxiliary_context;
+
 typedef struct knl_t_poolcleaner_context {
     volatile sig_atomic_t shutdown_requested;
 } knl_t_poolcleaner_context;
@@ -2872,6 +2877,7 @@ typedef struct knl_thrd_context {
     knl_t_walreceiver_context walreceiver_cxt;
     knl_t_walreceiverfuncs_context walreceiverfuncs_cxt;
     knl_t_walwriter_context walwriter_cxt;
+    knl_t_walwriterauxiliary_context walwriterauxiliary_cxt;
     knl_t_catchup_context catchup_cxt;
     knl_t_wlmthrd_context wlm_cxt;
     knl_t_xact_context xact_cxt;

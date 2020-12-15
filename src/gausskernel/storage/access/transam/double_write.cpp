@@ -1087,7 +1087,7 @@ static void dw_flush(dw_context_t* dw_ctx, XLogRecPtr latest_lsn, ThrdDwCxt* thr
 
     dw_assemble_batch(dw_ctx, offset_page, file_head->head.dwn);
     if (!XLogRecPtrIsInvalid(latest_lsn)) {
-        XLogFlush(latest_lsn);
+        XLogWaitFlush(latest_lsn);
     }
     pgstat_report_waitevent(WAIT_EVENT_DW_WRITE);
     dw_pwrite_file(dw_ctx->fd, dw_ctx->buf, (pages_to_write * BLCKSZ), (offset_page * BLCKSZ));

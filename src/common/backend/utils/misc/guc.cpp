@@ -6533,6 +6533,23 @@ static void init_configure_names_int()
         },
         {
             {
+                "wal_writer_cpu",
+                PGC_POSTMASTER,
+                WAL_SETTINGS,
+                gettext_noop("Sets the binding CPU number for the WAL writer thread."),
+                NULL,
+                GUC_NOT_IN_SAMPLE
+            },
+            &g_instance.attr.attr_storage.wal_writer_cpu,
+            -1,
+            -1,
+            1023,
+            NULL,
+            NULL,
+            NULL
+        },	
+        {
+            {
                 "advance_xlog_file_num",
                 PGC_POSTMASTER,
                 WAL_SETTINGS,
@@ -6548,6 +6565,41 @@ static void init_configure_names_int()
             NULL,
             NULL
         },
+        {
+             {
+                "xlog_flush_uplimit",
+                PGC_POSTMASTER,
+                WAL_SETTINGS,
+                gettext_noop("Sets the maximum bytes that a xlog flush can write."),
+                NULL,
+                GUC_NOT_IN_SAMPLE
+            },
+            &g_instance.attr.attr_storage.xlog_flush_uplimit,
+            INT_MAX,
+            100,
+            INT_MAX,
+            NULL,
+            NULL,
+            NULL
+        },
+        {
+            {
+                "wal_file_init_num",
+                PGC_POSTMASTER,
+                WAL_SETTINGS,
+                gettext_noop("Sets the number of xlog segment files that WAL writer auxiliary thread "
+                             "creates at one time."),
+                NULL,
+                GUC_NOT_IN_SAMPLE
+            },
+            &g_instance.attr.attr_storage.wal_file_init_num,
+            10,
+            1,
+            INT_MAX,
+            NULL,
+            NULL,
+            NULL
+        },				
         {
             {
                 "checkpoint_wait_timeout",
@@ -9944,6 +9996,23 @@ static void init_configure_names_int64()
             NULL,
             NULL
         },
+        {
+            {
+                "xlog_idle_flushes_before_sleep",
+                PGC_POSTMASTER,
+                WAL_SETTINGS,
+                gettext_noop("Number of idle xlog flushes before xlog flusher goes to sleep."),
+                NULL,
+                GUC_NOT_IN_SAMPLE
+            },
+            &g_instance.attr.attr_storage.xlog_idle_flushes_before_sleep,
+            INT64CONST(500000000),
+            INT64CONST(0),
+            INT64CONST(0x7FFFFFFFFFFFFFF),
+            NULL,
+            NULL,
+            NULL
+        },				
         /* End-of-list marker */
         {
             {

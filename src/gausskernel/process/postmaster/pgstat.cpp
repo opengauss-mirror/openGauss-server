@@ -2507,6 +2507,30 @@ static THR_LOCAL char* BackendNspRelnameBuffer = NULL;
 
 PgBackendStatus* PgBackendStatusArray = NULL;
 
+THR_LOCAL XLogStat_Collect *XLogStat_shared = NULL;
+
+Size XLogStatShmemSize(void)
+{
+    return sizeof(XLogStat_Collect);
+}
+
+void XLogStatShmemInit(void)
+{
+    bool found;
+    errno_t rc;
+
+    XLogStat_shared = (XLogStat_Collect *)ShmemInitStruct("XLogStat", XLogStatShmemSize(), &found);
+    XLogStat_shared->remoteFlushWaitCount = 0;
+
+    if (!IsUnderPostmaster) {
+        Assert(!found);
+        rc = memset_s(XLogStat_shared, XLogStatShmemSize(), 0, XLogStatShmemSize());
+        securec_check(rc, "\0", "\0");
+    } else {
+        Assert(found);
+    }
+}
+
 /*
  * ---------
  * pgstat_fetch_waitcount() -
