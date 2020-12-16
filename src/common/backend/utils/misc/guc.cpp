@@ -6661,7 +6661,7 @@ static void init_configure_names_int()
                 NULL
             },
             &g_instance.attr.attr_storage.max_wal_senders,
-            4,
+            16,
             0,
             MAX_BACKENDS,
             NULL,
