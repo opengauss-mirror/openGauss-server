@@ -133,6 +133,8 @@ private:
      */
     uint32_t HaveTasks();
 
+    bool PerformRecovery();
+
     /**
      * @brief Recovers the in process two phase commit related transactions
      * from the checkpoint data file.

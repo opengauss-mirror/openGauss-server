@@ -123,12 +123,12 @@ ConfigItem* ConfigFileParser::MakeConfigValue(
     return result;
 }
 
-ConfigItem* ConfigFileParser::MakeArrayConfigValue(const mot_string& path, int arrayIndex, const mot_string& value)
+ConfigItem* ConfigFileParser::MakeArrayConfigValue(const mot_string& path, uint64_t arrayIndex, const mot_string& value)
 {
     ConfigItem* result = nullptr;
     mot_string key;
-    if (!key.format("%d", arrayIndex)) {
-        MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Load Configuration", "Failed to format array index %d", arrayIndex);
+    if (!key.format("%lu", arrayIndex)) {
+        MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Load Configuration", "Failed to format array index %lu", arrayIndex);
     } else {
         result = MakeConfigValue(path, key, value);
     }

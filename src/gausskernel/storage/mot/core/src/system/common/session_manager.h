@@ -108,6 +108,31 @@ public:
     void ReportActiveSessions();
 
 private:
+    // session initialization phases
+    enum SessionInitPhase {
+        SESSION_INIT_START,
+        ALLOC_THREAD_ID_PHASE,
+        ALLOC_CONNECTION_ID_PHASE,
+        ALLOC_SESSION_ID_PHASE,
+        SETUP_NODE_ID_PHASE,
+        SETUP_MASSTREE_INFO_PHASE,
+        RESERVE_SESSION_MEMORY_PHASE,
+        ALLOC_SESSION_BUFFER_PHASE,
+        INIT_SESSION_PHASE,
+        RESERVE_THREAD_SLOT_PHASE,
+        SESSION_INIT_DONE
+    };
+
+    /**
+     * @brief Helper to clean up if session initialization is failed.
+     * @param connectionId Connection ID.
+     * @param sessionId Session ID.
+     * @param initPhase Initialization phase.
+     * @param[in,out] sessionContext Session context, freed and set to nullptr if it was allocated.
+     */
+    void CleanupFailedSessionContext(
+        ConnectionId connectionId, SessionId sessionId, SessionInitPhase initPhase, SessionContext*& sessionContext);
+
     /** @typedef session map */
     typedef ConcurrentMap<SessionId, SessionContext*> SessionContextMap;
 

@@ -174,6 +174,8 @@ private:
     ErrCodes WriteTableDataFile(Table* table, Buffer* buffer, Sentinel** deletedList, GcManager* gcSession,
         uint16_t threadId, uint32_t& maxSegId, uint64_t& numOps);
 
+    bool FlushBuffer(int fd, Buffer* buffer);
+
     // Workers
     void* m_workers;
 

@@ -56,6 +56,71 @@ bool SessionManager::Initialize(uint32_t nodeCount, uint32_t threadCount)
 void SessionManager::Destroy()
 {}
 
+void SessionManager::CleanupFailedSessionContext(
+    ConnectionId connectionId, SessionId sessionId, SessionInitPhase initPhase, SessionContext*& sessionContext)
+{
+    MOT_ASSERT(initPhase != SESSION_INIT_DONE);
+    MOT_LOG_ERROR("Failed to create session object for thread id %" PRIu16, MOTCurrThreadId);
+    switch (initPhase) {
+        case RESERVE_THREAD_SLOT_PHASE:
+            StatisticsManager::GetInstance().UnreserveThreadSlot();
+
+        // fall through
+        case INIT_SESSION_PHASE:
+            // Remove from link list
+            sessionContext->GetTxnManager()->GcRemoveSession();
+
+            // remove from session map
+            if (!m_sessionContextMap.remove(MOT_GET_CURRENT_SESSION_ID())) {
+                MOT_LOG_WARN("Failed to remove session %u from global session map - not found",
+                    MOT_GET_CURRENT_SESSION_ID());
+            }
+
+        // fall through
+        case ALLOC_SESSION_BUFFER_PHASE:
+            sessionContext->~SessionContext();
+#ifdef MEM_SESSION_ACTIVE
+            MemSessionFree(sessionContext);
+#else
+            free(sessionContext);
+#endif
+            sessionContext = nullptr;
+
+        // fall through
+        case RESERVE_SESSION_MEMORY_PHASE:
+#ifdef MEM_SESSION_ACTIVE
+            MemSessionUnreserve();
+#endif
+
+        // fall through
+        case SETUP_MASSTREE_INFO_PHASE:
+            DestroyMasstreeThreadinfo();
+
+        // fall through
+        // we keep thread-level attribute of NUMA node identifier initialized, since on thread-pooled envelope
+        // other sessions might still use this worker thread
+        case SETUP_NODE_ID_PHASE:
+
+        // fall through
+        case ALLOC_CONNECTION_ID_PHASE:
+            FreeConnectionId(connectionId);
+            MOT_ASSERT(connectionId == MOT_GET_CURRENT_CONNECTION_ID());
+            MOT_ASSERT(sessionId == MOT_GET_CURRENT_SESSION_ID());
+            MOT_SET_CURRENT_CONNECTION_ID(INVALID_CONNECTION_ID);
+            MOT_SET_CURRENT_SESSION_ID(INVALID_SESSION_ID);
+
+        // fall through
+        // we keep thread-level attribute of thread identifier initialized, since on thread-pooled envelope
+        // other sessions might still use this worker thread
+        case ALLOC_THREAD_ID_PHASE:
+
+        // fall through
+        case SESSION_INIT_START:
+        default:
+            break;
+    }
+}
+
 SessionContext* SessionManager::CreateSessionContext(bool isLightSession /* = false */,
     uint64_t reserveMemoryKb /* = 0 */, void* userData /* = nullptr */,
     ConnectionId connectionId /* = INVALID_CONNECTION_ID */)
@@ -71,19 +136,7 @@ SessionContext* SessionManager::CreateSessionContext(bool isLightSession /* = fa
     }
 
     // session initialization is complex, so let's divide it into phases, and cleanup once at the end if required
-    enum SessionInitPhase {
-        SESSION_INIT_START,
-        ALLOC_THREAD_ID_PHASE,
-        ALLOC_CONNECTION_ID_PHASE,
-        ALLOC_SESSION_ID_PHASE,
-        SETUP_NODE_ID_PHASE,
-        SETUP_MASSTREE_INFO_PHASE,
-        RESERVE_SESSION_MEMORY_PHASE,
-        ALLOC_SESSION_BUFFER_PHASE,
-        INIT_SESSION_PHASE,
-        RESERVE_THREAD_SLOT_PHASE,
-        SESSION_INIT_DONE
-    } initPhase = SESSION_INIT_START;
+    SessionInitPhase initPhase = SESSION_INIT_START;
 
     SessionId sessionId = INVALID_SESSION_ID;
     do {  // instead of goto
@@ -224,65 +277,8 @@ SessionContext* SessionManager::CreateSessionContext(bool isLightSession /* = fa
 
     // cleanup if initialization failed
     if (initPhase != SESSION_INIT_DONE) {
-        MOT_LOG_ERROR("Failed to create session object for thread id %" PRIu16, MOTCurrThreadId);
-        switch (initPhase) {
-            case RESERVE_THREAD_SLOT_PHASE:
-                StatisticsManager::GetInstance().UnreserveThreadSlot();
-
-            // fall through
-            case INIT_SESSION_PHASE:
-                // Remove from link list
-                sessionContext->GetTxnManager()->GcRemoveSession();
-
-                // remove from session map
-                if (!m_sessionContextMap.remove(MOT_GET_CURRENT_SESSION_ID())) {
-                    MOT_LOG_WARN("Failed to remove session %u from global session map - not found",
-                        MOT_GET_CURRENT_SESSION_ID());
-                }
-
-            // fall through
-            case ALLOC_SESSION_BUFFER_PHASE:
-                sessionContext->~SessionContext();
-#ifdef MEM_SESSION_ACTIVE
-                MemSessionFree(sessionContext);
-#else
-                free(sessionContext);
-#endif
-                sessionContext = nullptr;
-
-            // fall through
-            case RESERVE_SESSION_MEMORY_PHASE:
-#ifdef MEM_SESSION_ACTIVE
-                MemSessionUnreserve();
-#endif
-
-            // fall through
-            case SETUP_MASSTREE_INFO_PHASE:
-                DestroyMasstreeThreadinfo();
-
-            // fall through
-            // we keep thread-level attribute of NUMA node identifier initialized, since on thread-pooled envelope
-            // other sessions might still use this worker thread
-            case SETUP_NODE_ID_PHASE:
-
-            // fall through
-            case ALLOC_CONNECTION_ID_PHASE:
-                FreeConnectionId(connectionId);
-                MOT_ASSERT(connectionId == MOT_GET_CURRENT_CONNECTION_ID());
-                MOT_ASSERT(sessionId == MOT_GET_CURRENT_SESSION_ID());
-                MOT_SET_CURRENT_CONNECTION_ID(INVALID_CONNECTION_ID);
-                MOT_SET_CURRENT_SESSION_ID(INVALID_SESSION_ID);
-
-            // fall through
-            // we keep thread-level attribute of thread identifier initialized, since on thread-pooled envelope
-            // other sessions might still use this worker thread
-            case ALLOC_THREAD_ID_PHASE:
-
-            // fall through
-            case SESSION_INIT_START:
-            default:
-                break;
-        }
+        // sessionContext will be freed and set to nullptr in CleanupFailedSessionContext
+        CleanupFailedSessionContext(connectionId, sessionId, initPhase, sessionContext);
     }
 
     return sessionContext;

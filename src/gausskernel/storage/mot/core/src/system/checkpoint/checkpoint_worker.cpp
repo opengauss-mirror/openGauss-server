@@ -131,30 +131,27 @@ int CheckpointWorkerPool::Checkpoint(Buffer* buffer, Sentinel* sentinel, int fd,
     int wrote = 0;
     isDeleted = false;
 
-    if (mainRow != nullptr) {
-        bool headerLocked = sentinel->TryLock(threadId);
-        if (headerLocked == false) {
-            if (mainRow->GetTwoPhaseMode() == true) {
-                MOT_LOG_DEBUG("checkpoint: row %p is 2pc", mainRow);
-                return wrote;
-            }
-            sentinel->Lock(threadId);
-        }
-        stableRow = sentinel->GetStable();
-        if (mainRow->IsRowDeleted()) {
-            if (stableRow) {
-                // Truly deleted and was not removed by txn manager
-                isDeleted = true;
-            } else {
-                MOT_LOG_DEBUG("Detected Deleted row without Stable Row!");
-            }
-        }
-    } else {
+    if (mainRow == nullptr) {
         return 0;
     }
 
-    if (unlikely(stableRow == nullptr)) {
-        stableRow = sentinel->GetStable();
+    bool headerLocked = sentinel->TryLock(threadId);
+    if (headerLocked == false) {
+        if (mainRow->GetTwoPhaseMode() == true) {
+            MOT_LOG_DEBUG("checkpoint: row %p is 2pc", mainRow);
+            return wrote;
+        }
+        sentinel->Lock(threadId);
+    }
+
+    stableRow = sentinel->GetStable();
+    if (mainRow->IsRowDeleted()) {
+        if (stableRow) {
+            // Truly deleted and was not removed by txn manager
+            isDeleted = true;
+        } else {
+            MOT_LOG_DEBUG("Detected Deleted row without Stable Row!");
+        }
     }
 
     bool statusBit = sentinel->GetStableStatus();
@@ -166,26 +163,21 @@ int CheckpointWorkerPool::Checkpoint(Buffer* buffer, Sentinel* sentinel, int fd,
         if (statusBit == !m_na) { /* has stable version */
             if (stableRow == nullptr) {
                 break;
-            } else {
-                if (!Write(buffer, stableRow, fd)) {
-                    wrote = -1;
-                } else {
-                    if (isDeleted == false) {
-                        CheckpointUtils::DestroyStableRow(stableRow);
-                        sentinel->SetStable(nullptr);
-                    }
-                    wrote = 1;
-                }
-                break;
             }
+
+            if (!Write(buffer, stableRow, fd)) {
+                wrote = -1;
+            } else {
+                if (isDeleted == false) {
+                    CheckpointUtils::DestroyStableRow(stableRow);
+                    sentinel->SetStable(nullptr);
+                }
+                wrote = 1;
+            }
+            break;
         } else { /* no stable version */
             if (stableRow == nullptr) {
                 if (deleted) {
-                    wrote = 0;
-                    break;
-                }
-                if (mainRow == nullptr) {
-                    MOT_LOG_ERROR("CheckpointWorkerPool::checkpoint - null main row!");
                     wrote = 0;
                     break;
                 }
@@ -196,10 +188,11 @@ int CheckpointWorkerPool::Checkpoint(Buffer* buffer, Sentinel* sentinel, int fd,
                     wrote = 1;
                 }
                 break;
-            } else { /* should not happen! */
-                wrote = -1;
-                m_cpManager.OnError(ErrCodes::CALC, "Calc logic error - stable row");
             }
+
+            /* should not happen! */
+            wrote = -1;
+            m_cpManager.OnError(ErrCodes::CALC, "Calc logic error - stable row");
         }
     } while (0);
 
@@ -208,9 +201,7 @@ int CheckpointWorkerPool::Checkpoint(Buffer* buffer, Sentinel* sentinel, int fd,
         sentinel->SetStable(nullptr);
     }
 
-    if (mainRow != nullptr) {
-        sentinel->Release();
-    }
+    sentinel->Release();
     return wrote;
 }
 
@@ -464,6 +455,17 @@ CheckpointWorkerPool::ErrCodes CheckpointWorkerPool::WriteTableMetadataFile(Tabl
     return ErrCodes::SUCCESS;
 }
 
+bool CheckpointWorkerPool::FlushBuffer(int fd, Buffer* buffer)
+{
+    if (buffer->Size() > 0) {  // there is data in the buffer that needs to be written
+        if (CheckpointUtils::WriteFile(fd, (char*)buffer->Data(), buffer->Size()) != buffer->Size()) {
+            return false;
+        }
+        buffer->Reset();
+    }
+    return true;
+}
+
 CheckpointWorkerPool::ErrCodes CheckpointWorkerPool::WriteTableDataFile(Table* table, Buffer* buffer,
     Sentinel** deletedList, GcManager* gcSession, uint16_t threadId, uint32_t& maxSegId, uint64_t& numOps)
 {
@@ -515,16 +517,15 @@ CheckpointWorkerPool::ErrCodes CheckpointWorkerPool::WriteTableDataFile(Table* t
             currFileOps++;
             curSegLen += table->GetTupleSize() + sizeof(CheckpointUtils::EntryHeader);
             if (m_checkpointSegsize > 0 && curSegLen >= m_checkpointSegsize) {
-                if (buffer->Size() > 0) {  // there is data in the buffer that needs to be written
-                    if (CheckpointUtils::WriteFile(fd, (char*)buffer->Data(), buffer->Size()) != buffer->Size()) {
-                        MOT_LOG_ERROR(
-                            "CheckpointWorkerPool::WriteTableDataFile: failed to write data file %u for table %u",
-                            maxSegId,
-                            tableId);
-                        errCode = ErrCodes::FILE_IO;
-                        break;
-                    }
-                    buffer->Reset();
+                if (!FlushBuffer(fd, buffer)) {
+                    MOT_LOG_ERROR(
+                        "CheckpointWorkerPool::WriteTableDataFile: failed to write remaining buffer data (%u bytes) to "
+                            "data file %u for table %u",
+                        buffer->Size(),
+                        maxSegId,
+                        tableId);
+                    errCode = ErrCodes::FILE_IO;
+                    break;
                 }
 
                 /* FinishFile will reset the fd to -1 on success. */
@@ -575,16 +576,15 @@ CheckpointWorkerPool::ErrCodes CheckpointWorkerPool::WriteTableDataFile(Table* t
         return errCode;
     }
 
-    if (buffer->Size() > 0) {  // there is data in the buffer that needs to be written
-        if (CheckpointUtils::WriteFile(fd, (char*)buffer->Data(), buffer->Size()) != buffer->Size()) {
-            MOT_LOG_ERROR(
-                "CheckpointWorkerPool::WriteTableDataFile: failed to write (remaining) data file %u for table %u",
-                maxSegId,
-                tableId);
-            (void)CheckpointUtils::CloseFile(fd);
-            return ErrCodes::FILE_IO;
-        }
-        buffer->Reset();
+    if (!FlushBuffer(fd, buffer)) {
+        MOT_LOG_ERROR(
+            "CheckpointWorkerPool::WriteTableDataFile: failed to write remaining buffer data (%u bytes) to "
+                "data file %u for table %u",
+            buffer->Size(),
+            maxSegId,
+            tableId);
+        (void)CheckpointUtils::CloseFile(fd);
+        return ErrCodes::FILE_IO;
     }
 
     /* FinishFile will reset the fd to -1 on success. */
