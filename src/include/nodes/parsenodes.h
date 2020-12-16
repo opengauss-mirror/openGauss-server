@@ -1783,6 +1783,7 @@ typedef struct VariableSetStmt {
 typedef struct VariableShowStmt {
     NodeTag type;
     char* name;
+    char* likename;
 } VariableShowStmt;
 
 /* ----------------------
