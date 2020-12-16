@@ -575,6 +575,7 @@ endif
 	$(INSTALL_DATA) $(srcdir)/../common/backend/libpq/pg_ident.conf.sample '$(DESTDIR)$(datadir)/pg_ident.conf.sample'
 	$(INSTALL_DATA) $(srcdir)/../common/backend/utils/misc/postgresql.conf.sample '$(DESTDIR)$(datadir)/postgresql.conf.sample'
 	$(INSTALL_DATA) $(srcdir)/storage/access/transam/recovery.conf.sample '$(DESTDIR)$(datadir)/recovery.conf.sample'
+	$(INSTALL_DATA) $(srcdir)/../include/storage/mot/jit_def.h '$(DESTDIR)$(includedir_server)/storage/mot/jit_def.h'
 
 	cd $(KERBEROS_LIB_PATH) && tar -cpf - ./* | ( cd $(DESTDIR)$(libdir); tar -xpf -  )
 	mkdir -p '$(DESTDIR)$(libdir)/../temp/'
