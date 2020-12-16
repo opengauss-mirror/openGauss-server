@@ -10644,7 +10644,7 @@ static void init_configure_names_string()
                 GUC_SUPERUSER_ONLY
             },
             &g_instance.attr.attr_common.Alarm_component,
-            "/opt/huawei/snas/bin/snas_cm_cmd",
+            "/opt/snas/bin/snas_cm_cmd",
             NULL,
             NULL,
             NULL
