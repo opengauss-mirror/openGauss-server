@@ -90,3 +90,10 @@ server signaled
 Total instances: 1. Failed instances: 0.
 Success to perform gs_guc!
 
+\! @abs_bindir@/gs_guc set -D @abs_srcdir@/tmp_check/datanode1/ -c "intervalstyle=a"
+expected instance path: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+gs_guc set: intervalstyle=a: [@abs_srcdir@/tmp_check/datanode1/postgresql.conf]
+
+Total instances: 1. Failed instances: 0.
+Success to perform gs_guc!
+
