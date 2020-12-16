@@ -864,60 +864,117 @@ static bool HasAvailableMemory()
     return false;
 }
 
+static void EAccessToString(StringBuffer* stringBuffer, int prot, int flags, int fd)
+{
+    struct stat st;
+    int openMode = -1;
+
+    // Check if a file descriptor refers to a non-regular file
+    // Or MAP_PRIVATE was requested, but fd is not open for reading
+    // Or MAP_SHARED was requested and PROT_WRITE is set, but fd is not open in read/write (O_RDWR) mode.
+    // Or PROT_WRITE is set, but the file is append-only.
+    if (fstat(fd, &st) == 0 && !S_ISREG(st.st_mode)) {
+        StringBufferAppend(stringBuffer, "File descriptor %d refers to non-regular file", fd);
+        return;
+    }
+
+    // check if MAP_PRIVATE was requested, but fd is not open for reading.
+#ifdef MAP_PRIVATE
+    if (flags & MAP_PRIVATE) {
+        openMode = fcntl(fd, F_GETFD, 0);
+        if (openMode >= 0 && (openMode & O_ACCMODE) == O_WRONLY) {
+            StringBufferAppend(
+                stringBuffer, "MAP_PRIVATE was requested, but the file descriptor is not open for reading");
+            return;
+        }
+    }
+#endif
+
+    // Check if MAP_SHARED was requested and PROT_WRITE is set, but fd is not open in read/write (O_RDWR) mode.
+    // Or just PROT_WRITE is set, but the file is append-only.
+#ifdef PROT_WRITE
+    if (prot & PROT_WRITE) {
+        openMode = fcntl(fd, F_GETFD, 0);
+        if (openMode >= 0) {
+#ifdef MAP_SHARED
+            if (flags & MAP_SHARED) {
+                if ((openMode & O_ACCMODE) != O_RDWR) {
+                    StringBufferAppend(
+                        stringBuffer, "The file descriptor is not open for both reading and writing");
+                    return;
+                }
+            }
+#endif
+
+            // check if PROT_WRITE is set, but the file is append-only
+            if (openMode & O_APPEND) {
+                StringBufferAppend(stringBuffer, "The file descriptor is open for append");
+                return;
+            }
+        }
+    }
+#endif
+    StringBufferAppend(stringBuffer, "Unknown access error");
+}
+
+static void EInvalToString(StringBuffer* stringBuffer, void* address, size_t length, int prot, int flags, off_t offset)
+{
+    if (length == 0) {
+        StringBufferAppend(stringBuffer, "The mapped length is zero");
+        return;
+    }
+    if ((flags & MAP_PRIVATE) && (flags & MAP_SHARED)) {
+        StringBufferAppend(stringBuffer, "You must specify exactly one of MAP_PRIVATE or MAP_SHARED");
+        return;
+    }
+    if (!(flags & MAP_PRIVATE) && !(flags & MAP_SHARED)) {
+        StringBufferAppend(stringBuffer, "You must specify exactly one of MAP_PRIVATE or MAP_SHARED");
+        return;
+    }
+
+    int pageSize = sysconf(_SC_PAGESIZE);
+    if (pageSize > 0) {
+        unsigned mask = (pageSize - 1);
+        if ((uintptr_t)address & mask) {
+            StringBufferAppend(stringBuffer, "Address %p is not aligned to page size %d", address, pageSize);
+            return;
+        }
+        if ((unsigned long)length & mask) {
+            StringBufferAppend(
+                stringBuffer, "Mapped length %zu is not aligned to page size %d", length, pageSize);
+            return;
+        }
+        if ((unsigned long)offset & mask) {
+            StringBufferAppend(stringBuffer, "Offset %zu is not aligned to page size %d", offset, pageSize);
+            return;
+        }
+    }
+    StringBufferAppend(stringBuffer, "Unknown invalid value error");
+}
+
+static void ETxtBsyToString(StringBuffer* stringBuffer, int flags, int fd)
+{
+#ifdef MAP_DENYWRITE
+    if (flags & MAP_DENYWRITE) {
+        int openMode = fcntl(fd, F_GETFD, 0);
+        if (openMode >= 0) {
+            if (((openMode & O_ACCMODE) == O_WRONLY) || ((openMode & O_ACCMODE) == O_RDWR)) {
+                StringBufferAppend(stringBuffer,
+                    "The mapping flag MAP_DENYWRITE is incompatible with the open mode of the file descriptor");
+                return;
+            }
+        }
+    }
+#endif
+    StringBufferAppend(stringBuffer, "Unknown text file busy error");
+}
+
 static void MotSysNumaMMapErrorToString(
     StringBuffer* stringBuffer, int errorCode, void* address, size_t length, int prot, int flags, int fd, off_t offset)
 {
-    struct stat st;
-    int pageSize = -1;
-    int openMode = -1;
     switch (errorCode) {
         case EACCES:
-            // Check if a file descriptor refers to a non-regular file
-            // Or MAP_PRIVATE was requested, but fd is not open for reading
-            // Or MAP_SHARED was requested and PROT_WRITE is set, but fd is not open in read/write (O_RDWR) mode.
-            // Or PROT_WRITE is set, but the file is append-only.
-            if (fstat(fd, &st) == 0 && !S_ISREG(st.st_mode)) {
-                StringBufferAppend(stringBuffer, "File descriptor %d refers to non-regular file", fd);
-                break;
-            }
-
-            // check if MAP_PRIVATE was requested, but fd is not open for reading.
-#ifdef MAP_PRIVATE
-            if (flags & MAP_PRIVATE) {
-                openMode = fcntl(fd, F_GETFD, 0);
-                if (openMode >= 0 && (openMode & O_ACCMODE) == O_WRONLY) {
-                    StringBufferAppend(
-                        stringBuffer, "MAP_PRIVATE was requested, but the file descriptor is not open for reading");
-                    break;
-                }
-            }
-#endif
-
-            // Check if MAP_SHARED was requested and PROT_WRITE is set, but fd is not open in read/write (O_RDWR) mode.
-            // Or just PROT_WRITE is set, but the file is append-only.
-#ifdef PROT_WRITE
-            if (prot & PROT_WRITE) {
-                openMode = fcntl(fd, F_GETFD, 0);
-                if (openMode >= 0) {
-#ifdef MAP_SHARED
-                    if (flags & MAP_SHARED) {
-                        if ((openMode & O_ACCMODE) != O_RDWR) {
-                            StringBufferAppend(
-                                stringBuffer, "The file descriptor is not open for both reading and writing");
-                            break;
-                        }
-                    }
-#endif
-
-                    // check if PROT_WRITE is set, but the file is append-only
-                    if (openMode & O_APPEND) {
-                        StringBufferAppend(stringBuffer, "The file descriptor is open for append");
-                        break;
-                    }
-                }
-            }
-#endif
-            StringBufferAppend(stringBuffer, "Unknown access error");
+            EAccessToString(stringBuffer, prot, flags, fd);
             break;
 
         case EAGAIN:
@@ -932,37 +989,7 @@ static void MotSysNumaMMapErrorToString(
             break;
 
         case EINVAL:
-            if (length == 0) {
-                StringBufferAppend(stringBuffer, "The mapped length is zero");
-                break;
-            }
-            if ((flags & MAP_PRIVATE) && (flags & MAP_SHARED)) {
-                StringBufferAppend(stringBuffer, "You must specify exactly one of MAP_PRIVATE or MAP_SHARED");
-                break;
-            }
-            if (!(flags & MAP_PRIVATE) && !(flags & MAP_SHARED)) {
-                StringBufferAppend(stringBuffer, "You must specify exactly one of MAP_PRIVATE or MAP_SHARED");
-                break;
-            }
-
-            pageSize = sysconf(_SC_PAGESIZE);
-            if (pageSize > 0) {
-                unsigned mask = (pageSize - 1);
-                if ((uintptr_t)address & mask) {
-                    StringBufferAppend(stringBuffer, "Address %p is not aligned to page size %d", address, pageSize);
-                    break;
-                }
-                if ((unsigned long)length & mask) {
-                    StringBufferAppend(
-                        stringBuffer, "Mapped length %zu is not aligned to page size %d", length, pageSize);
-                    break;
-                }
-                if ((unsigned long)offset & mask) {
-                    StringBufferAppend(stringBuffer, "Offset %zu is not aligned to page size %d", offset, pageSize);
-                    break;
-                }
-            }
-            StringBufferAppend(stringBuffer, "Unknown invalid value error");
+            EInvalToString(stringBuffer, address, length, prot, flags, offset);
             break;
 
         case ENFILE:
@@ -1000,19 +1027,7 @@ static void MotSysNumaMMapErrorToString(
             break;
 
         case ETXTBSY:
-#ifdef MAP_DENYWRITE
-            if (flags & MAP_DENYWRITE) {
-                openMode = fcntl(fd, F_GETFD, 0);
-                if (openMode >= 0) {
-                    if (((openMode & O_ACCMODE) == O_WRONLY) || ((openMode & O_ACCMODE) == O_RDWR)) {
-                        StringBufferAppend(stringBuffer,
-                            "The mapping flag MAP_DENYWRITE is incompatible with the open mode of the file descriptor");
-                        return;
-                    }
-                }
-            }
-#endif
-            StringBufferAppend(stringBuffer, "Unknown text file busy error");
+            ETxtBsyToString(stringBuffer, flags, fd);
             break;
 
         default:

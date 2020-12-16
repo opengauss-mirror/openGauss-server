@@ -27,6 +27,7 @@
 
 #include "redo_log_buffer.h"
 #include "bitmapset.h"
+#include "txn_ddl_access.h"
 
 namespace MOT {
 class MOTConfiguration;
@@ -182,6 +183,9 @@ public:
     }
 
 private:
+    /* Map of Index ID to DDLAccess. */
+    typedef std::map<uint64_t, TxnDDLAccess::DDLAccess*> IdxDDLAccessMap;
+
     /**
      * @brief When the buffer is full, flush its contents to the log
      */
@@ -191,6 +195,21 @@ private:
      * @brief Resets the redo log buffer
      */
     void ResetBuffer();
+
+    /**
+     * @brief Writes the whole transaction's DDLs into the redo buffer
+     * @param[out] idxDDLMap Map of Index ID to DDLAccess.
+     * @return The status of the operation.
+     */
+    RC SerializeTransactionDDLs(IdxDDLAccessMap& idxDDLMap);
+
+    RC SerializeDropIndex(TxnDDLAccess::DDLAccess* ddlAccess, bool hasDML, IdxDDLAccessMap& idxDDLMap);
+
+    /**
+     * @brief Writes the whole transaction's DMLs into the redo buffer
+     * @return The status of the operation.
+     */
+    RC SerializeTransactionDMLs();
 
     /* Member variables */
     RedoLogHandler* m_redoLogHandler;

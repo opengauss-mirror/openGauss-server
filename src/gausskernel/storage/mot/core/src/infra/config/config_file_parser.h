@@ -77,7 +77,7 @@ public:
      * @param value The value of the configuration item.
      * @return The resulting configuration item, or null pointer if failed.
      */
-    static ConfigItem* MakeArrayConfigValue(const mot_string& path, int arrayIndex, const mot_string& value);
+    static ConfigItem* MakeArrayConfigValue(const mot_string& path, uint64_t arrayIndex, const mot_string& value);
 
     /**
      * @brief Creates a signed integer configuration value.

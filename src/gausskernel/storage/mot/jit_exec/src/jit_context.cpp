@@ -289,6 +289,118 @@ extern bool ReFetchIndices(JitContext* jitContext)
     return true;
 }
 
+static bool PrepareJitContextJoinData(JitContext* jitContext)
+{
+    // allocate inner loop search key for JOIN commands
+    if ((jitContext->m_innerSearchKey == nullptr) && IsJoinCommand(jitContext->m_commandType)) {
+        MOT_LOG_TRACE(
+            "Preparing inner search key  for JOIN command from index %s", jitContext->m_innerIndex->GetName().c_str());
+        jitContext->m_innerSearchKey = PrepareJitSearchKey(jitContext, jitContext->m_innerIndex);
+        if (jitContext->m_innerSearchKey == nullptr) {
+            MOT_LOG_TRACE(
+                "Failed to allocate reusable inner search key for JIT context, aborting jitted code execution");
+            return false;  // safe cleanup during destroy
+        }
+
+        MOT_LOG_TRACE("Prepared inner search key %p (%u bytes) for JOIN command from index %s",
+            jitContext->m_innerSearchKey,
+            jitContext->m_innerSearchKey->GetKeyLength(),
+            jitContext->m_innerIndex->GetName().c_str());
+    }
+
+    // allocate inner loop end-iterator search key for JOIN commands
+    if ((jitContext->m_innerEndIteratorKey == nullptr) && IsJoinCommand(jitContext->m_commandType)) {
+        MOT_LOG_TRACE("Preparing inner end iterator key for JOIN command from index %s",
+            jitContext->m_innerIndex->GetName().c_str());
+        jitContext->m_innerEndIteratorKey = PrepareJitSearchKey(jitContext, jitContext->m_innerIndex);
+        if (jitContext->m_innerEndIteratorKey == nullptr) {
+            MOT_LOG_TRACE(
+                "Failed to allocate reusable inner end iterator key for JIT context, aborting jitted code execution");
+            return false;  // safe cleanup during destroy
+        }
+
+        MOT_LOG_TRACE("Prepared inner end iterator key %p (%u bytes) for JOIN command from index %s",
+            jitContext->m_innerEndIteratorKey,
+            jitContext->m_innerEndIteratorKey->GetKeyLength(),
+            jitContext->m_innerIndex->GetName().c_str());
+    }
+
+    // preparing outer row copy for JOIN commands
+    if ((jitContext->m_outerRowCopy == nullptr) && IsJoinCommand(jitContext->m_commandType)) {
+        MOT_LOG_TRACE("Preparing outer row copy for JOIN command");
+        jitContext->m_outerRowCopy = jitContext->m_table->CreateNewRow();
+        if (jitContext->m_outerRowCopy == nullptr) {
+            MOT_LOG_TRACE("Failed to allocate reusable outer row copy for JIT context, aborting jitted code execution");
+            return false;  // safe cleanup during destroy
+        }
+    }
+
+    return true;
+}
+
+static bool PrepareJitContextSubQueryData(JitContext* jitContext)
+{
+    // allocate sub-query search keys and generate tuple table slot array using session top memory context
+    MemoryContext oldCtx = CurrentMemoryContext;
+    CurrentMemoryContext = u_sess->top_mem_cxt;
+    for (uint32_t i = 0; i < jitContext->m_subQueryCount; ++i) {
+        JitContext::SubQueryData* subQueryData = &jitContext->m_subQueryData[i];
+        if (subQueryData->m_tupleDesc == nullptr) {
+            MOT_LOG_TRACE("Preparing sub-query %u tuple descriptor", i);
+            List* targetList = GetSubQueryTargetList(jitContext->m_queryString, i);
+            if (targetList == nullptr) {
+                MOT_LOG_TRACE("Failed to locate sub-query %u target list", i);
+                CurrentMemoryContext = oldCtx;
+                return false;  // safe cleanup during destroy
+            }
+
+            subQueryData->m_tupleDesc = ExecCleanTypeFromTL(targetList, false);
+            if (subQueryData->m_tupleDesc == nullptr) {
+                MOT_LOG_TRACE("Failed to create sub-query %u tuple descriptor from target list", i);
+                CurrentMemoryContext = oldCtx;
+                return false;  // safe cleanup during destroy
+            }
+        }
+
+        if (subQueryData->m_slot == nullptr) {
+            MOT_ASSERT(subQueryData->m_tupleDesc != nullptr);
+            MOT_LOG_TRACE("Preparing sub-query %u result slot", i);
+            subQueryData->m_slot = MakeSingleTupleTableSlot(subQueryData->m_tupleDesc);
+            if (subQueryData->m_slot == nullptr) {
+                MOT_LOG_TRACE("Failed to generate sub-query %u tuple table slot", i);
+                CurrentMemoryContext = oldCtx;
+                return false;  // safe cleanup during destroy
+            }
+        }
+
+        if (subQueryData->m_searchKey == nullptr) {
+            MOT_LOG_TRACE(
+                "Preparing sub-query %u search key from index %s", i, subQueryData->m_index->GetName().c_str());
+            subQueryData->m_searchKey = PrepareJitSearchKey(jitContext, subQueryData->m_index);
+            if (subQueryData->m_searchKey == nullptr) {
+                MOT_LOG_TRACE("Failed to generate sub-query %u search key", i);
+                CurrentMemoryContext = oldCtx;
+                return false;  // safe cleanup during destroy
+            }
+        }
+
+        if ((subQueryData->m_commandType == JIT_COMMAND_AGGREGATE_RANGE_SELECT) &&
+            (subQueryData->m_endIteratorKey == nullptr)) {
+            MOT_LOG_TRACE("Preparing sub-query %u end-iterator search key from index %s",
+                i,
+                subQueryData->m_index->GetName().c_str());
+            subQueryData->m_endIteratorKey = PrepareJitSearchKey(jitContext, subQueryData->m_index);
+            if (subQueryData->m_endIteratorKey == nullptr) {
+                MOT_LOG_TRACE("Failed to generate sub-query %u end-iterator search key", i);
+                CurrentMemoryContext = oldCtx;
+                return false;  // safe cleanup during destroy
+            }
+        }
+    }
+    CurrentMemoryContext = oldCtx;
+    return true;
+}
+
 extern bool PrepareJitContext(JitContext* jitContext)
 {
     // allocate argument-is-null array
@@ -316,12 +428,12 @@ extern bool PrepareJitContext(JitContext* jitContext)
         if (jitContext->m_searchKey == nullptr) {
             MOT_LOG_TRACE("Failed to allocate reusable search key for JIT context, aborting jitted code execution");
             return false;  // safe cleanup during destroy
-        } else {
-            MOT_LOG_TRACE("Prepared search key %p (%u bytes) from index %s",
-                jitContext->m_searchKey,
-                jitContext->m_searchKey->GetKeyLength(),
-                jitContext->m_index->GetName().c_str());
         }
+
+        MOT_LOG_TRACE("Prepared search key %p (%u bytes) from index %s",
+            jitContext->m_searchKey,
+            jitContext->m_searchKey->GetKeyLength(),
+            jitContext->m_index->GetName().c_str());
     }
 
     // allocate bitmap-set object for incremental-redo when executing UPDATE command
@@ -356,115 +468,25 @@ extern bool PrepareJitContext(JitContext* jitContext)
             MOT_LOG_TRACE(
                 "Failed to allocate reusable end iterator key for JIT context, aborting jitted code execution");
             return false;  // safe cleanup during destroy
-        } else {
-            MOT_LOG_TRACE("Prepared end iterator key %p (%u bytes) for range update/select command from index %s",
-                jitContext->m_endIteratorKey,
-                jitContext->m_endIteratorKey->GetKeyLength(),
-                jitContext->m_index->GetName().c_str());
         }
+
+        MOT_LOG_TRACE("Prepared end iterator key %p (%u bytes) for range update/select command from index %s",
+            jitContext->m_endIteratorKey,
+            jitContext->m_endIteratorKey->GetKeyLength(),
+            jitContext->m_index->GetName().c_str());
     }
 
-    // allocate inner loop search key for JOIN commands
-    if ((jitContext->m_innerSearchKey == nullptr) && IsJoinCommand(jitContext->m_commandType)) {
-        MOT_LOG_TRACE(
-            "Preparing inner search key  for JOIN command from index %s", jitContext->m_innerIndex->GetName().c_str());
-        jitContext->m_innerSearchKey = PrepareJitSearchKey(jitContext, jitContext->m_innerIndex);
-        if (jitContext->m_innerSearchKey == nullptr) {
-            MOT_LOG_TRACE(
-                "Failed to allocate reusable inner search key for JIT context, aborting jitted code execution");
-            return false;  // safe cleanup during destroy
-        } else {
-            MOT_LOG_TRACE("Prepared inner search key %p (%u bytes) for JOIN command from index %s",
-                jitContext->m_innerSearchKey,
-                jitContext->m_innerSearchKey->GetKeyLength(),
-                jitContext->m_innerIndex->GetName().c_str());
-        }
-    }
-
-    // allocate inner loop end-iterator search key for JOIN commands
-    if ((jitContext->m_innerEndIteratorKey == nullptr) && IsJoinCommand(jitContext->m_commandType)) {
-        MOT_LOG_TRACE("Preparing inner end iterator key for JOIN command from index %s",
-            jitContext->m_innerIndex->GetName().c_str());
-        jitContext->m_innerEndIteratorKey = PrepareJitSearchKey(jitContext, jitContext->m_innerIndex);
-        if (jitContext->m_innerEndIteratorKey == nullptr) {
-            MOT_LOG_TRACE(
-                "Failed to allocate reusable inner end iterator key for JIT context, aborting jitted code execution");
-            return false;  // safe cleanup during destroy
-        } else {
-            MOT_LOG_TRACE("Prepared inner end iterator key %p (%u bytes) for JOIN command from index %s",
-                jitContext->m_innerEndIteratorKey,
-                jitContext->m_innerEndIteratorKey->GetKeyLength(),
-                jitContext->m_innerIndex->GetName().c_str());
-        }
-    }
-
-    // preparing outer row copy for JOIN commands
-    if ((jitContext->m_outerRowCopy == nullptr) && IsJoinCommand(jitContext->m_commandType)) {
-        MOT_LOG_TRACE("Preparing outer row copy for JOIN command");
-        jitContext->m_outerRowCopy = jitContext->m_table->CreateNewRow();
-        if (jitContext->m_outerRowCopy == nullptr) {
-            MOT_LOG_TRACE("Failed to allocate reusable outer row copy for JIT context, aborting jitted code execution");
-            return false;  // safe cleanup during destroy
-        }
+    if (!PrepareJitContextJoinData(jitContext)) {
+        MOT_LOG_TRACE("Failed to allocate join related data for JIT context, aborting jitted code execution");
+        return false;  // safe cleanup during destroy
     }
 
     // prepare sub-query data for COMPOUND commands
     if (jitContext->m_commandType == JIT_COMMAND_COMPOUND_SELECT) {
-        // allocate sub-query search keys and generate tuple table slot array using session top memory context
-        MemoryContext oldCtx = CurrentMemoryContext;
-        CurrentMemoryContext = u_sess->top_mem_cxt;
-        for (uint32_t i = 0; i < jitContext->m_subQueryCount; ++i) {
-            JitContext::SubQueryData* subQueryData = &jitContext->m_subQueryData[i];
-            if (subQueryData->m_tupleDesc == nullptr) {
-                MOT_LOG_TRACE("Preparing sub-query %u tuple descriptor", i);
-                List* targetList = GetSubQueryTargetList(jitContext->m_queryString, i);
-                if (targetList == nullptr) {
-                    MOT_LOG_TRACE("Failed to locate sub-query %u target list", i);
-                    CurrentMemoryContext = oldCtx;
-                    return false;  // safe cleanup during destroy
-                } else {
-                    subQueryData->m_tupleDesc = ExecCleanTypeFromTL(targetList, false);
-                    if (subQueryData->m_tupleDesc == nullptr) {
-                        MOT_LOG_TRACE("Failed to create sub-query %u tuple descriptor from target list", i);
-                        CurrentMemoryContext = oldCtx;
-                        return false;  // safe cleanup during destroy
-                    }
-                }
-            }
-            if (subQueryData->m_slot == nullptr) {
-                MOT_ASSERT(subQueryData->m_tupleDesc != nullptr);
-                MOT_LOG_TRACE("Preparing sub-query %u result slot", i);
-                subQueryData->m_slot = MakeSingleTupleTableSlot(subQueryData->m_tupleDesc);
-                if (subQueryData->m_slot == nullptr) {
-                    MOT_LOG_TRACE("Failed to generate sub-query %u tuple table slot", i);
-                    CurrentMemoryContext = oldCtx;
-                    return false;  // safe cleanup during destroy
-                }
-            }
-            if (subQueryData->m_searchKey == nullptr) {
-                MOT_LOG_TRACE(
-                    "Preparing sub-query %u search key from index %s", i, subQueryData->m_index->GetName().c_str());
-                subQueryData->m_searchKey = PrepareJitSearchKey(jitContext, subQueryData->m_index);
-                if (subQueryData->m_searchKey == nullptr) {
-                    MOT_LOG_TRACE("Failed to generate sub-query %u search key", i);
-                    CurrentMemoryContext = oldCtx;
-                    return false;  // safe cleanup during destroy
-                }
-            }
-            if ((subQueryData->m_commandType == JIT_COMMAND_AGGREGATE_RANGE_SELECT) &&
-                (subQueryData->m_endIteratorKey == nullptr)) {
-                MOT_LOG_TRACE("Preparing sub-query %u end-iterator search key from index %s",
-                    i,
-                    subQueryData->m_index->GetName().c_str());
-                subQueryData->m_endIteratorKey = PrepareJitSearchKey(jitContext, subQueryData->m_index);
-                if (subQueryData->m_endIteratorKey == nullptr) {
-                    MOT_LOG_TRACE("Failed to generate sub-query %u end-iterator search key", i);
-                    CurrentMemoryContext = oldCtx;
-                    return false;  // safe cleanup during destroy
-                }
-            }
+        if (!PrepareJitContextSubQueryData(jitContext)) {
+            MOT_LOG_TRACE("Failed to sub-query data for JIT context, aborting jitted code execution");
+            return false;  // safe cleanup during destroy
         }
-        CurrentMemoryContext = oldCtx;
     }
 
     return true;

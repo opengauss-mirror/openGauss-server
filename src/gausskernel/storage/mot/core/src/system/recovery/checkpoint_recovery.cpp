@@ -49,14 +49,14 @@ bool CheckpointRecovery::Recover()
     if (CheckpointControlFile::GetCtrlFile()->GetId() == CheckpointControlFile::invalidId) {
         m_checkpointId = CheckpointControlFile::invalidId;  // no mot control was found.
     } else {
-        if (IsCheckpointValid(CheckpointControlFile::GetCtrlFile()->GetId())) {
-            m_checkpointId = CheckpointControlFile::GetCtrlFile()->GetId();
-            m_lsn = CheckpointControlFile::GetCtrlFile()->GetLsn();
-            m_lastReplayLsn = CheckpointControlFile::GetCtrlFile()->GetLastReplayLsn();
-        } else {
-            MOT_LOG_ERROR("CheckpointRecovery:: no valid checkpoint exist");
+        if (!IsCheckpointValid(CheckpointControlFile::GetCtrlFile()->GetId())) {
+            MOT_LOG_ERROR("CheckpointRecovery: no valid checkpoint exist");
             return false;
         }
+
+        m_checkpointId = CheckpointControlFile::GetCtrlFile()->GetId();
+        m_lsn = CheckpointControlFile::GetCtrlFile()->GetLsn();
+        m_lastReplayLsn = CheckpointControlFile::GetCtrlFile()->GetLastReplayLsn();
     }
 
     if (m_checkpointId != CheckpointControlFile::invalidId) {
@@ -93,32 +93,9 @@ bool CheckpointRecovery::Recover()
             return false;
         }
 
-        MOT_LOG_INFO("CheckpointRecovery: starting to recover %lu tables from checkpoint id: %lu",
-            m_tableIds.size(),
-            m_checkpointId);
-
-        for (auto it = m_tableIds.begin(); it != m_tableIds.end(); ++it) {
-            if (!RecoverTableMetadata(*it)) {
-                MOT_LOG_ERROR("CheckpointRecovery: recovery of table %lu's metadata failed", *it);
-                return false;
-            }
-        }
-
-        std::vector<std::thread> threadPool;
-        for (uint32_t i = 0; i < m_numWorkers; ++i) {
-            threadPool.push_back(std::thread(CheckpointRecoveryWorker, this));
-        }
-
-        MOT_LOG_DEBUG("CheckpointRecovery:: waiting for all tasks to finish");
-        while (HaveTasks() && m_stopWorkers == false) {
-            sleep(1);
-        }
-
-        MOT_LOG_DEBUG("CheckpointRecovery: tasks finished (%s)", m_errorSet ? "error" : "ok");
-        for (auto& worker : threadPool) {
-            if (worker.joinable()) {
-                worker.join();
-            }
+        if (!PerformRecovery()) {
+            MOT_LOG_ERROR("CheckpointRecovery: perform checkpoint recovery failed");
+            return false;
         }
 
         if (m_errorSet) {
@@ -144,6 +121,39 @@ bool CheckpointRecovery::Recover()
 
     m_tableIds.clear();
     MOTEngine::GetInstance()->GetCheckpointManager()->RemoveOldCheckpoints(m_checkpointId);
+    return true;
+}
+
+bool CheckpointRecovery::PerformRecovery()
+{
+    MOT_LOG_INFO("CheckpointRecovery: starting to recover %lu tables from checkpoint id: %lu",
+        m_tableIds.size(),
+        m_checkpointId);
+
+    for (auto it = m_tableIds.begin(); it != m_tableIds.end(); ++it) {
+        if (!RecoverTableMetadata(*it)) {
+            MOT_LOG_ERROR("CheckpointRecovery: failed to recover table metadata for table %u", *it);
+            return false;
+        }
+    }
+
+    std::vector<std::thread> threadPool;
+    for (uint32_t i = 0; i < m_numWorkers; ++i) {
+        threadPool.push_back(std::thread(CheckpointRecoveryWorker, this));
+    }
+
+    MOT_LOG_DEBUG("CheckpointRecovery: waiting for all tasks to finish");
+    while (HaveTasks() && m_stopWorkers == false) {
+        sleep(1);
+    }
+
+    MOT_LOG_DEBUG("CheckpointRecovery: tasks finished (%s)", m_errorSet ? "error" : "ok");
+    for (auto& worker : threadPool) {
+        if (worker.joinable()) {
+            worker.join();
+        }
+    }
+
     return true;
 }
 

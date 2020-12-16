@@ -909,23 +909,12 @@ void MOTAdaptor::OpenCursor(Relation rel, MOTFdwStateSt* festate)
     } while (0);
 }
 
-static MOT::RC TableFieldType(const ColumnDef* colDef, MOT::MOT_CATALOG_FIELD_TYPES& type, int16* typeLen, bool& isBlob)
+static void VarLenFieldType(
+    Form_pg_type typeDesc, Oid typoid, int32_t colLen, int16* typeLen, bool& isBlob, MOT::RC& res)
 {
-    MOT::RC res = MOT::RC_OK;
-    Oid typoid;
-    Type tup;
-    Form_pg_type typeDesc;
-    int32_t colLen;
-
-    if (colDef->typname->arrayBounds != nullptr)
-        return MOT::RC_UNSUPPORTED_COL_TYPE_ARR;
-
-    tup = typenameType(nullptr, colDef->typname, &colLen);
-    typeDesc = ((Form_pg_type)GETSTRUCT(tup));
-    typoid = HeapTupleGetOid(tup);
-    *typeLen = typeDesc->typlen;
-
-    if (*typeLen < 0) {
+    isBlob = false;
+    res = MOT::RC_OK;
+    if (typeDesc->typlen < 0) {
         *typeLen = colLen;
         switch (typeDesc->typstorage) {
             case 'p':
@@ -952,6 +941,27 @@ static MOT::RC TableFieldType(const ColumnDef* colDef, MOT::MOT_CATALOG_FIELD_TY
                 break;
         }
     }
+}
+
+static MOT::RC TableFieldType(const ColumnDef* colDef, MOT::MOT_CATALOG_FIELD_TYPES& type, int16* typeLen, bool& isBlob)
+{
+    MOT::RC res = MOT::RC_OK;
+    Oid typoid;
+    Type tup;
+    Form_pg_type typeDesc;
+    int32_t colLen;
+
+    if (colDef->typname->arrayBounds != nullptr) {
+        return MOT::RC_UNSUPPORTED_COL_TYPE_ARR;
+    }
+
+    tup = typenameType(nullptr, colDef->typname, &colLen);
+    typeDesc = ((Form_pg_type)GETSTRUCT(tup));
+    typoid = HeapTupleGetOid(tup);
+    *typeLen = typeDesc->typlen;
+
+    // Get variable-length field length.
+    VarLenFieldType(typeDesc, typoid, colLen, typeLen, isBlob, res);
 
     switch (typoid) {
         case CHAROID:
@@ -1020,97 +1030,101 @@ static MOT::RC TableFieldType(const ColumnDef* colDef, MOT::MOT_CATALOG_FIELD_TY
             res = MOT::RC_UNSUPPORTED_COL_TYPE;
     }
 
-    if (tup)
+    if (tup) {
         ReleaseSysCache(tup);
+    }
 
     return res;
 }
 
-MOT::RC MOTAdaptor::CreateIndex(IndexStmt* index, ::TransactionId tid)
+void MOTAdaptor::ValidateCreateIndex(IndexStmt* stmt, MOT::Table* table, MOT::TxnManager* txn)
 {
-    MOT::RC res;
-    EnsureSafeThreadAccessInline();
-    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
-    txn->SetTransactionId(tid);
-    MOT::Table* table = txn->GetTableByExternalId(index->relation->foreignOid);
-
-    if (table == nullptr) {
-        ereport(ERROR,
-            (errmodule(MOD_MOT),
-                errcode(ERRCODE_UNDEFINED_TABLE),
-                errmsg("Table not found for oid %u", index->relation->foreignOid)));
-        return MOT::RC_ERROR;
-    }
-
-    if (index->primary) {
+    if (stmt->primary) {
         if (!table->IsTableEmpty(txn->GetThdId())) {
             ereport(ERROR,
                 (errmodule(MOD_MOT),
                     errcode(ERRCODE_FDW_ERROR),
                     errmsg(
                         "Table %s is not empty, create primary index is not allowed", table->GetTableName().c_str())));
-            return MOT::RC_ERROR;
+            return;
         }
     } else if (table->GetNumIndexes() == MAX_NUM_INDEXES) {
         ereport(ERROR,
             (errmodule(MOD_MOT),
                 errcode(ERRCODE_FDW_TOO_MANY_INDEXES),
                 errmsg("Can not create index, max number of indexes %u reached", MAX_NUM_INDEXES)));
-        return MOT::RC_ERROR;
+        return;
     }
 
-    elog(LOG,
-        "creating %s index %s (OID: %u), for table: %s",
-        (index->primary ? "PRIMARY" : "SECONDARY"),
-        index->idxname,
-        index->indexOid,
-        index->relation->relname);
-    uint64_t keyLength = 0;
-    MOT::Index* ix = nullptr;
-    MOT::IndexOrder index_order = MOT::IndexOrder::INDEX_ORDER_SECONDARY;
-    MOT::IndexingMethod indexing_method;
-    MOT::IndexTreeFlavor flavor;
-
-    if (strcmp(index->accessMethod, "btree") == 0) {
-        // Use the default index tree flavor from configuration file
-        indexing_method = MOT::IndexingMethod::INDEXING_METHOD_TREE;
-        flavor = MOT::GetGlobalConfiguration().m_indexTreeFlavor;
-    } else {
+    if (strcmp(stmt->accessMethod, "btree") != 0) {
         ereport(ERROR, (errmodule(MOD_MOT), errmsg("MOT supports indexes of type BTREE only (btree or btree_art)")));
-        return MOT::RC_ERROR;
+        return;
     }
 
-    if (list_length(index->indexParams) > (int)MAX_KEY_COLUMNS) {
+    if (list_length(stmt->indexParams) > (int)MAX_KEY_COLUMNS) {
         ereport(ERROR,
             (errmodule(MOD_MOT),
                 errcode(ERRCODE_FDW_TOO_MANY_INDEX_COLUMNS),
                 errmsg("Can't create index"),
                 errdetail(
-                    "Number of columns exceeds %d max allowed %u", list_length(index->indexParams), MAX_KEY_COLUMNS)));
+                    "Number of columns exceeds %d max allowed %u", list_length(stmt->indexParams), MAX_KEY_COLUMNS)));
+        return;
+    }
+}
+
+MOT::RC MOTAdaptor::CreateIndex(IndexStmt* stmt, ::TransactionId tid)
+{
+    MOT::RC res;
+    EnsureSafeThreadAccessInline();
+    MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__);
+    txn->SetTransactionId(tid);
+    MOT::Table* table = txn->GetTableByExternalId(stmt->relation->foreignOid);
+
+    if (table == nullptr) {
+        ereport(ERROR,
+            (errmodule(MOD_MOT),
+                errcode(ERRCODE_UNDEFINED_TABLE),
+                errmsg("Table not found for oid %u", stmt->relation->foreignOid)));
         return MOT::RC_ERROR;
     }
 
+    ValidateCreateIndex(stmt, table, txn);
+
+    elog(LOG,
+        "creating %s index %s (OID: %u), for table: %s",
+        (stmt->primary ? "PRIMARY" : "SECONDARY"),
+        stmt->idxname,
+        stmt->indexOid,
+        stmt->relation->relname);
+    uint64_t keyLength = 0;
+    MOT::Index* index = nullptr;
+    MOT::IndexOrder index_order = MOT::IndexOrder::INDEX_ORDER_SECONDARY;
+
+    // Use the default index tree flavor from configuration file
+    MOT::IndexingMethod indexing_method = MOT::IndexingMethod::INDEXING_METHOD_TREE;
+    MOT::IndexTreeFlavor flavor = MOT::GetGlobalConfiguration().m_indexTreeFlavor;
+
     // check if we have primary and delete previous definition
-    if (index->primary) {
+    if (stmt->primary) {
         index_order = MOT::IndexOrder::INDEX_ORDER_PRIMARY;
     }
 
-    ix = MOT::IndexFactory::CreateIndex(index_order, indexing_method, flavor);
-    if (ix == nullptr) {
+    index = MOT::IndexFactory::CreateIndex(index_order, indexing_method, flavor);
+    if (index == nullptr) {
         report_pg_error(MOT::RC_ABORT);
         return MOT::RC_ABORT;
     }
-    ix->SetExtId(index->indexOid);
-    ix->SetNumTableFields((uint32_t)table->GetFieldCount());
+    index->SetExtId(stmt->indexOid);
+    index->SetNumTableFields((uint32_t)table->GetFieldCount());
     int count = 0;
 
     ListCell* lc = nullptr;
-    foreach (lc, index->indexParams) {
+    foreach (lc, stmt->indexParams) {
         IndexElem* ielem = (IndexElem*)lfirst(lc);
 
         uint64_t colid = table->GetFieldId((ielem->name != nullptr ? ielem->name : ielem->indexcolname));
         if (colid == (uint64_t)-1) {  // invalid column
-            delete ix;
+            delete index;
             ereport(ERROR,
                 (errmodule(MOD_MOT),
                     errcode(ERRCODE_INVALID_COLUMN_DEFINITION),
@@ -1123,7 +1137,7 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* index, ::TransactionId tid)
 
         // Temp solution for NULLs, do not allow index creation on column that does not carry not null flag
         if (!MOT::GetGlobalConfiguration().m_allowIndexOnNullableColumn && !col->m_isNotNull) {
-            delete ix;
+            delete index;
             ereport(ERROR,
                 (errmodule(MOD_MOT),
                     errcode(ERRCODE_FDW_INDEX_ON_NULLABLE_COLUMN_NOT_ALLOWED),
@@ -1134,7 +1148,7 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* index, ::TransactionId tid)
 
         // Temp solution, we have to support DECIMAL and NUMERIC indexes as well
         if (col->m_type == MOT::MOT_CATALOG_FIELD_TYPES::MOT_TYPE_DECIMAL) {
-            delete ix;
+            delete index;
             ereport(ERROR,
                 (errmodule(MOD_MOT),
                     errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -1143,7 +1157,7 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* index, ::TransactionId tid)
             return MOT::RC_ERROR;
         }
         if (col->m_keySize > MAX_KEY_SIZE) {
-            delete ix;
+            delete index;
             ereport(ERROR,
                 (errmodule(MOD_MOT),
                     errcode(ERRCODE_INVALID_COLUMN_DEFINITION),
@@ -1153,21 +1167,21 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* index, ::TransactionId tid)
         }
         keyLength += col->m_keySize;
 
-        ix->SetLenghtKeyFields(count, colid, col->m_keySize);
+        index->SetLenghtKeyFields(count, colid, col->m_keySize);
         count++;
     }
 
-    ix->SetNumIndexFields(count);
+    index->SetNumIndexFields(count);
 
-    if ((res = ix->IndexInit(keyLength, index->unique, index->idxname, nullptr)) != MOT::RC_OK) {
-        delete ix;
+    if ((res = index->IndexInit(keyLength, stmt->unique, stmt->idxname, nullptr)) != MOT::RC_OK) {
+        delete index;
         report_pg_error(res);
         return res;
     }
 
-    res = txn->CreateIndex(table, ix, index->primary);
+    res = txn->CreateIndex(table, index, stmt->primary);
     if (res != MOT::RC_OK) {
-        delete ix;
+        delete index;
         if (res == MOT::RC_TABLE_EXCEEDS_MAX_INDEXES) {
             ereport(ERROR,
                 (errmodule(MOD_MOT),
@@ -1175,7 +1189,7 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* index, ::TransactionId tid)
                     errmsg("Can not create index, max number of indexes %u reached", MAX_NUM_INDEXES)));
             return MOT::RC_TABLE_EXCEEDS_MAX_INDEXES;
         } else {
-            report_pg_error(txn->m_err, index->idxname, txn->m_errMsgBuf);
+            report_pg_error(txn->m_err, stmt->idxname, txn->m_errMsgBuf);
             return MOT::RC_UNIQUE_VIOLATION;
         }
     }
@@ -1183,26 +1197,111 @@ MOT::RC MOTAdaptor::CreateIndex(IndexStmt* index, ::TransactionId tid)
     return MOT::RC_OK;
 }
 
-MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* table, ::TransactionId tid)
+void MOTAdaptor::AddTableColumns(MOT::Table* table, List *tableElts, bool& hasBlob)
+{
+    hasBlob = false;
+    ListCell* cell = nullptr;
+    foreach (cell, tableElts) {
+        int16 typeLen = 0;
+        bool isBlob = false;
+        MOT::MOT_CATALOG_FIELD_TYPES colType;
+        ColumnDef* colDef = (ColumnDef*)lfirst(cell);
+
+        if (colDef == nullptr || colDef->typname == nullptr) {
+            delete table;
+            table = nullptr;
+            ereport(ERROR,
+                (errmodule(MOD_MOT),
+                    errcode(ERRCODE_INVALID_COLUMN_DEFINITION),
+                    errmsg("Column definition is not complete"),
+                    errdetail("target table is a foreign table")));
+            break;
+        }
+
+        MOT::RC res = TableFieldType(colDef, colType, &typeLen, isBlob);
+        if (res != MOT::RC_OK) {
+            delete table;
+            table = nullptr;
+            report_pg_error(res, colDef, (void*)(int64)typeLen);
+            break;
+        }
+        hasBlob |= isBlob;
+
+        if (colType == MOT::MOT_CATALOG_FIELD_TYPES::MOT_TYPE_DECIMAL) {
+            if (list_length(colDef->typname->typmods) > 0) {
+                bool canMakeShort = true;
+                int precision = 0;
+                int scale = 0;
+                int count = 0;
+
+                ListCell* c = nullptr;
+                foreach (c, colDef->typname->typmods) {
+                    Node* d = (Node*)lfirst(c);
+                    if (!IsA(d, A_Const)) {
+                        canMakeShort = false;
+                        break;
+                    }
+                    A_Const* ac = (A_Const*)d;
+
+                    if (ac->val.type != T_Integer) {
+                        canMakeShort = false;
+                        break;
+                    }
+
+                    if (count == 0) {
+                        precision = ac->val.val.ival;
+                    } else {
+                        scale = ac->val.val.ival;
+                    }
+
+                    count++;
+                }
+
+                if (canMakeShort) {
+                    int len = 0;
+
+                    len += scale / DEC_DIGITS;
+                    len += (scale % DEC_DIGITS > 0 ? 1 : 0);
+
+                    precision -= scale;
+
+                    len += precision / DEC_DIGITS;
+                    len += (precision % DEC_DIGITS > 0 ? 1 : 0);
+
+                    typeLen = sizeof(MOT::DecimalSt) + len * sizeof(NumericDigit);
+                }
+            }
+        }
+        res = table->AddColumn(colDef->colname, typeLen, colType, colDef->is_not_null);
+        if (res != MOT::RC_OK) {
+            delete table;
+            table = nullptr;
+            report_pg_error(res, colDef, (void*)(int64)typeLen);
+            break;
+        }
+    }
+}
+
+MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* stmt, ::TransactionId tid)
 {
     bool hasBlob = false;
     MOT::Index* primaryIdx = nullptr;
     EnsureSafeThreadAccessInline();
     MOT::TxnManager* txn = GetSafeTxn(__FUNCTION__, tid);
-    MOT::Table* currentTable = nullptr;
+    MOT::Table* table = nullptr;
     MOT::RC res = MOT::RC_ERROR;
     std::string tname("");
     char* dbname = NULL;
 
     do {
-        currentTable = new (std::nothrow) MOT::Table();
-        if (currentTable == nullptr) {
+        table = new (std::nothrow) MOT::Table();
+        if (table == nullptr) {
             ereport(ERROR,
                 (errmodule(MOD_MOT), errcode(ERRCODE_OUT_OF_MEMORY), errmsg("Allocation of table metadata failed")));
             break;
         }
 
-        uint32_t columnCount = list_length(table->base.tableElts);
+        uint32_t columnCount = list_length(stmt->base.tableElts);
 
         // once the columns have been counted, we add one more for the nullable columns
         ++columnCount;
@@ -1210,8 +1309,8 @@ MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* table, ::TransactionId t
         // prepare table name
         dbname = get_database_name(u_sess->proc_cxt.MyDatabaseId);
         if (dbname == nullptr) {
-            delete currentTable;
-            currentTable = nullptr;
+            delete table;
+            table = nullptr;
             ereport(ERROR,
                 (errmodule(MOD_MOT),
                     errcode(ERRCODE_UNDEFINED_DATABASE),
@@ -1220,183 +1319,103 @@ MOT::RC MOTAdaptor::CreateTable(CreateForeignTableStmt* table, ::TransactionId t
         }
         tname.append(dbname);
         tname.append("_");
-        if (table->base.relation->schemaname != nullptr) {
-            tname.append(table->base.relation->schemaname);
+        if (stmt->base.relation->schemaname != nullptr) {
+            tname.append(stmt->base.relation->schemaname);
         } else {
             tname.append("#");
         }
 
         tname.append("_");
-        tname.append(table->base.relation->relname);
+        tname.append(stmt->base.relation->relname);
 
-        if (!currentTable->Init(
-                table->base.relation->relname, tname.c_str(), columnCount, table->base.relation->foreignOid)) {
-            delete currentTable;
-            currentTable = nullptr;
+        if (!table->Init(
+                stmt->base.relation->relname, tname.c_str(), columnCount, stmt->base.relation->foreignOid)) {
+            delete table;
+            table = nullptr;
             report_pg_error(MOT::RC_MEMORY_ALLOCATION_ERROR);
             break;
         }
 
         // the null fields are copied verbatim because we have to give them back at some point
-        res = currentTable->AddColumn(
+        res = table->AddColumn(
             "null_bytes", BITMAPLEN(columnCount - 1), MOT::MOT_CATALOG_FIELD_TYPES::MOT_TYPE_NULLBYTES);
         if (res != MOT::RC_OK) {
-            delete currentTable;
-            currentTable = nullptr;
+            delete table;
+            table = nullptr;
             report_pg_error(MOT::RC_MEMORY_ALLOCATION_ERROR);
             break;
         }
 
-        ListCell* cell = nullptr;
-        foreach (cell, table->base.tableElts) {
-            int16 typeLen = 0;
-            bool isBlob = false;
-            MOT::MOT_CATALOG_FIELD_TYPES colType;
-            ColumnDef* colDef = (ColumnDef*)lfirst(cell);
+        /*
+         * Add all the columns.
+         * NOTE: On failure, table object will be deleted and ereport will be done in AddTableColumns.
+         */
+        AddTableColumns(table, stmt->base.tableElts, hasBlob);
 
-            if (colDef == nullptr || colDef->typname == nullptr) {
-                delete currentTable;
-                currentTable = nullptr;
-                ereport(ERROR,
-                    (errmodule(MOD_MOT),
-                        errcode(ERRCODE_INVALID_COLUMN_DEFINITION),
-                        errmsg("Column definition is not complete"),
-                        errdetail("target table is a foreign table")));
-                break;
-            }
+        table->SetFixedLengthRow(!hasBlob);
 
-            res = TableFieldType(colDef, colType, &typeLen, isBlob);
-            if (res != MOT::RC_OK) {
-                delete currentTable;
-                currentTable = nullptr;
-                report_pg_error(res, colDef, (void*)(int64)typeLen);
-                break;
-            }
-            hasBlob |= isBlob;
-
-            if (colType == MOT::MOT_CATALOG_FIELD_TYPES::MOT_TYPE_DECIMAL) {
-                if (list_length(colDef->typname->typmods) > 0) {
-                    bool canMakeShort = true;
-                    int precision = 0;
-                    int scale = 0;
-                    int count = 0;
-
-                    ListCell* c = nullptr;
-                    foreach (c, colDef->typname->typmods) {
-                        Node* d = (Node*)lfirst(c);
-                        if (!IsA(d, A_Const)) {
-                            canMakeShort = false;
-                            break;
-                        }
-                        A_Const* ac = (A_Const*)d;
-
-                        if (ac->val.type != T_Integer) {
-                            canMakeShort = false;
-                            break;
-                        }
-
-                        if (count == 0) {
-                            precision = ac->val.val.ival;
-                        } else {
-                            scale = ac->val.val.ival;
-                        }
-
-                        count++;
-                    }
-
-                    if (canMakeShort) {
-                        int len = 0;
-
-                        len += scale / DEC_DIGITS;
-                        len += (scale % DEC_DIGITS > 0 ? 1 : 0);
-
-                        precision -= scale;
-
-                        len += precision / DEC_DIGITS;
-                        len += (precision % DEC_DIGITS > 0 ? 1 : 0);
-
-                        typeLen = sizeof(MOT::DecimalSt) + len * sizeof(NumericDigit);
-                    }
-                }
-            }
-            res = currentTable->AddColumn(colDef->colname, typeLen, colType, colDef->is_not_null);
-            if (res != MOT::RC_OK) {
-                delete currentTable;
-                currentTable = nullptr;
-                report_pg_error(res, colDef, (void*)(int64)typeLen);
-                break;
-            }
-        }
-
-        if (res != MOT::RC_OK) {
-            break;
-        }
-
-        currentTable->SetFixedLengthRow(!hasBlob);
-
-        uint32_t tupleSize = currentTable->GetTupleSize();
+        uint32_t tupleSize = table->GetTupleSize();
         if (tupleSize > (unsigned int)MAX_TUPLE_SIZE) {
-            delete currentTable;
-            currentTable = nullptr;
+            delete table;
+            table = nullptr;
             ereport(ERROR,
                 (errmodule(MOD_MOT),
                     errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
                     errmsg("Un-support feature"),
                     errdetail("MOT: Table %s tuple size %u exceeds MAX_TUPLE_SIZE=%u !!!",
-                        table->base.relation->relname,
+                        stmt->base.relation->relname,
                         tupleSize,
                         (unsigned int)MAX_TUPLE_SIZE)));
         }
 
-        if (!currentTable->InitRowPool()) {
-            delete currentTable;
-            currentTable = nullptr;
+        if (!table->InitRowPool()) {
+            delete table;
+            table = nullptr;
             report_pg_error(MOT::RC_MEMORY_ALLOCATION_ERROR);
             break;
         }
 
         elog(LOG,
             "creating table %s (OID: %u), num columns: %u, tuple: %u",
-            currentTable->GetLongTableName().c_str(),
-            table->base.relation->foreignOid,
+            table->GetLongTableName().c_str(),
+            stmt->base.relation->foreignOid,
             columnCount,
             tupleSize);
 
-        res = txn->CreateTable(currentTable);
+        res = txn->CreateTable(table);
         if (res != MOT::RC_OK) {
-            delete currentTable;
-            currentTable = nullptr;
+            delete table;
+            table = nullptr;
             report_pg_error(res);
             break;
         }
 
         // add default PK index
-        MOT::RC rc = MOT::RC_OK;
         primaryIdx = MOT::IndexFactory::CreatePrimaryIndexEx(MOT::IndexingMethod::INDEXING_METHOD_TREE,
             DEFAULT_TREE_FLAVOR,
             8,
-            currentTable->GetLongTableName(),
-            rc,
+            table->GetLongTableName(),
+            res,
             nullptr);
-        if (rc != MOT::RC_OK) {
-            delete currentTable;
-            currentTable = nullptr;
-            report_pg_error(rc);
+        if (res != MOT::RC_OK) {
+            delete table;
+            table = nullptr;
+            report_pg_error(res);
             break;
         }
-        primaryIdx->SetExtId(table->base.relation->foreignOid + 1);
+        primaryIdx->SetExtId(stmt->base.relation->foreignOid + 1);
         primaryIdx->SetNumTableFields(columnCount);
         primaryIdx->SetNumIndexFields(1);
         primaryIdx->SetLenghtKeyFields(0, -1, 8);
         primaryIdx->SetFakePrimary(true);
 
         // Add default primary index
-        res = txn->CreateIndex(currentTable, primaryIdx, true);
+        res = txn->CreateIndex(table, primaryIdx, true);
     } while (0);
 
     if (res != MOT::RC_OK) {
-        if (currentTable != nullptr) {
-            txn->DropTable(currentTable);
+        if (table != nullptr) {
+            txn->DropTable(table);
         }
         if (primaryIdx != nullptr) {
             delete primaryIdx;

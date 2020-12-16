@@ -464,22 +464,6 @@ struct JitJoinExpr {
     int _inner_column_id;
 };
 
-// Forward declarations
-class ExpressionVisitor;
-
-MOT::Table* getRealTable(const Query* query, int table_ref_id, int column_id);
-int getRealColumnId(const Query* query, int table_ref_id, int column_id, const MOT::Table* table);
-JitExpr* parseExpr(Query* query, Expr* expr, int arg_pos, int depth);
-void freeExpr(JitExpr* expr);
-bool visitSearchExpressions(Query* query, MOT::Table* table, MOT::Index* index, Expr* expr, bool include_pkey,
-    ExpressionVisitor* visitor, bool include_join_exprs, JitColumnExprArray* pkey_exprs = nullptr);
-bool getSearchExpressions(Query* query, MOT::Table* table, MOT::Index* index, bool include_pkey,
-    JitColumnExprArray* search_exprs, int* count, bool use_join_clause);
-bool getRangeSearchExpressions(
-    Query* query, MOT::Table* table, MOT::Index* index, JitIndexScan* index_scan, JoinClauseType join_clause_type);
-bool getTargetExpressions(Query* query, JitColumnExprArray* target_exprs);
-bool getSelectExpressions(Query* query, JitSelectExprArray* select_exprs);
-
 // Parent class for all expression visitors
 class ExpressionVisitor {
 public:
@@ -516,15 +500,7 @@ public:
     }
 
     bool OnExpression(Expr* expr, int columnType, int tableColumnId, MOT::Table* table, JitWhereOperatorClass opClass,
-        bool joinExpr) final
-    {
-        if (opClass != JIT_WOC_EQUALS) {
-            MOT_LOG_TRACE("ExpressionCounter::onExpression(): Skipping non-equals operator");
-            return true;  // this is not an error condition
-        }
-        ++(*_count);
-        return true;
-    }
+        bool joinExpr) final;
 
 private:
     int* _count;
@@ -545,43 +521,14 @@ public:
     }
 
     bool OnExpression(Expr* expr, int columnType, int tableColumnId, MOT::Table* table, JitWhereOperatorClass opClass,
-        bool joinExpr) final
-    {
-        if (opClass != JIT_WOC_EQUALS) {
-            MOT_LOG_TRACE("ExpressionCollector::onExpression(): Skipping non-equals operator");
-            return true;  // this is not an error condition
-        } else if (*_expr_count < _expr_array->_count) {
-            JitExpr* jit_expr = parseExpr(_query, expr, 0, 0);
-            if (jit_expr == nullptr) {
-                MOT_LOG_TRACE("ExpressionCollector::onExpression(): Failed to parse expression %d", *_expr_count);
-                Cleanup();
-                return false;
-            }
-            _expr_array->_exprs[*_expr_count]._table_column_id = tableColumnId;
-            _expr_array->_exprs[*_expr_count]._table = table;
-            _expr_array->_exprs[*_expr_count]._expr = jit_expr;
-            _expr_array->_exprs[*_expr_count]._column_type = columnType;
-            _expr_array->_exprs[*_expr_count]._join_expr = joinExpr;
-            ++(*_expr_count);
-            return true;
-        } else {
-            MOT_REPORT_ERROR(
-                MOT_ERROR_INTERNAL, "Prepare JIT Plan", "Exceeded expression count %d", _expr_array->_count);
-            return false;
-        }
-    }
+        bool joinExpr) final;
 
 private:
     Query* _query;
     JitColumnExprArray* _expr_array;
     int* _expr_count;
 
-    void Cleanup()
-    {
-        for (int i = 0; i < *_expr_count; ++i) {
-            freeExpr(_expr_array->_exprs[*_expr_count]._expr);
-        }
-    }
+    void Cleanup();
 };
 
 // Expression visitor that collects expressions for possibly open range scans
@@ -610,140 +557,12 @@ public:
         _index_scan = nullptr;
     }
 
-    inline bool Init()
-    {
-        bool result = false;
-        _max_index_ops = _index->GetNumFields() + 1;
-        size_t alloc_size = sizeof(IndexOpClass) * _max_index_ops;
-        _index_ops = (IndexOpClass*)MOT::MemSessionAlloc(alloc_size);
-        if (_index_ops == nullptr) {
-            MOT_REPORT_ERROR(MOT_ERROR_OOM,
-                "Prepare JIT Range Scan Plan",
-                "Failed to allocate %u bytes for %d index operations",
-                (unsigned)alloc_size,
-                _max_index_ops);
-        } else {
-            result = true;
-        }
-        return result;
-    }
+    bool Init();
 
     bool OnExpression(Expr* expr, int columnType, int tableColumnId, MOT::Table* table, JitWhereOperatorClass opClass,
-        bool joinExpr) final
-    {
-        if (_index_op_count >= _index_scan->_search_exprs._count) {
-            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
-                "Prepare JIT Plan",
-                "Exceeded expression count %d, while collecting range scan expressions",
-                _index_scan->_search_exprs._count);
-            return false;
-        } else if (_index_op_count == _max_index_ops) {
-            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
-                "Prepare JIT Plan",
-                "Exceeded index column count %d, while collecting range scan expressions",
-                _max_index_ops);
-            return false;
-        } else {
-            JitExpr* jit_expr = parseExpr(_query, expr, 0, 0);
-            if (jit_expr == nullptr) {
-                MOT_LOG_TRACE(
-                    "RangeScanExpressionCollector::onExpression(): Failed to parse expression %d", _index_op_count);
-                Cleanup();
-                return false;
-            }
-            _index_scan->_search_exprs._exprs[_index_op_count]._table_column_id = tableColumnId;
-            _index_scan->_search_exprs._exprs[_index_op_count]._table = table;
-            _index_scan->_search_exprs._exprs[_index_op_count]._expr = jit_expr;
-            _index_scan->_search_exprs._exprs[_index_op_count]._column_type = columnType;
-            _index_scan->_search_exprs._exprs[_index_op_count]._join_expr = joinExpr;
-            _index_ops[_index_op_count]._index_column_id = MapTableColumnToIndex(_table, _index, tableColumnId);
-            _index_ops[_index_op_count]._op_class = opClass;
-            ++_index_op_count;
-            return true;
-        }
-    }
+        bool joinExpr) final;
 
-    void EvaluateScanType()
-    {
-        _index_scan->_scan_type = JIT_INDEX_SCAN_TYPE_INVALID;
-        JitIndexScanType scan_type = JIT_INDEX_SCAN_TYPE_INVALID;
-
-        // if two expressions refer to the same column, we regard one of them as filter
-        // if an expression is removed from index scan, it will automatically be collected as filter
-        // (see pkey_exprs argument in @ref visitSearchOpExpression)
-        if (!RemoveDuplicates()) {
-            MOT_LOG_TRACE("RangeScanExpressionCollector(): Disqualifying query - failed to remove duplicates");
-            return;
-        }
-
-        // if no expression was collected, this is an invalid scan (we do not support full scans yet)
-        int column_count = _index_op_count;
-        if (_index_op_count == 0) {
-            MOT_LOG_TRACE("RangeScanExpressionCollector(): no expression was collected, assuming full scan");
-            _index_scan->_scan_type = JIT_INDEX_SCAN_FULL;
-            _index_scan->_column_count = 0;
-            _index_scan->_search_exprs._count = 0;
-            return;
-        }
-
-        // first step: sort in-place all collected operators
-        if (_index_op_count > 1) {
-            std::sort(&_index_ops[0], &_index_ops[_index_op_count - 1], IndexOpCmp);
-        }
-
-        // now verify all but last two are equals operator
-        for (int i = 0; i < _index_op_count - 2; ++i) {
-            if (_index_ops[i]._op_class != JIT_WOC_EQUALS) {
-                MOT_LOG_TRACE("RangeScanExpressionCollector(): Disqualifying query - encountered non-equals operator "
-                              "at premature index column %d",
-                    _index_ops[i]._index_column_id);
-                return;
-            }
-        }
-
-        // now carefully inspect last two operators to determine expected scan type
-        if (_index_op_count >= 2) {
-            if (_index_ops[_index_op_count - 2]._op_class == JIT_WOC_EQUALS) {
-                if (_index_ops[_index_op_count - 1]._op_class == JIT_WOC_EQUALS) {
-                    if (_index->GetUnique() && (_index_op_count == _index->GetNumFields())) {
-                        scan_type = JIT_INDEX_SCAN_POINT;
-                    } else {
-                        scan_type = JIT_INDEX_SCAN_CLOSED;
-                    }
-                } else {
-                    scan_type = JIT_INDEX_SCAN_SEMI_OPEN;
-                    _index_scan->_last_dim_op1 = _index_ops[_index_op_count - 1]._op_class;
-                }
-            } else if (_index_ops[_index_op_count - 1]._op_class == JIT_WOC_EQUALS) {
-                MOT_LOG_TRACE("RangeScanExpressionCollector(): Disqualifying query - invalid open scan specifying last "
-                              "operator as equals, while previous one is not");
-                return;
-            } else {
-                scan_type = JIT_INDEX_SCAN_OPEN;
-                column_count = _index_op_count - 1;
-                _index_scan->_last_dim_op1 = _index_ops[_index_op_count - 2]._op_class;
-                _index_scan->_last_dim_op2 = _index_ops[_index_op_count - 1]._op_class;
-            }
-        } else if (_index_op_count == 1) {
-            if (_index_ops[0]._op_class == JIT_WOC_EQUALS) {
-                if (_index->GetUnique() && (_index_op_count == _index->GetNumFields())) {
-                    scan_type = JIT_INDEX_SCAN_POINT;
-                } else {
-                    scan_type = JIT_INDEX_SCAN_CLOSED;
-                }
-            } else {
-                scan_type = JIT_INDEX_SCAN_SEMI_OPEN;
-                _index_scan->_last_dim_op1 = _index_ops[0]._op_class;
-            }
-        }
-
-        // final step: verify we have no holes in the columns according to the expected scan type
-        if (!ScanHasHoles(scan_type)) {
-            _index_scan->_scan_type = scan_type;
-            _index_scan->_column_count = column_count;
-            _index_scan->_search_exprs._count = _index_op_count;  // update real number of participating expressions
-        }
-    }
+    void EvaluateScanType();
 
 private:
     Query* _query;
@@ -759,150 +578,19 @@ private:
     int _index_op_count;
     JitIndexScan* _index_scan;
 
-    void Cleanup()
-    {
-        for (int i = 0; i < _index_op_count; ++i) {
-            freeExpr(_index_scan->_search_exprs._exprs[i]._expr);
-        }
-        _index_scan->_search_exprs._count = 0;
-        _index_op_count = 0;
-    }
+    bool DetermineScanType(JitIndexScanType& scanType, int& columnCount);
 
-    bool RemoveDuplicates()
-    {
-        int result = RemoveSingleDuplicate();
-        while (result > 0) {
-            result = RemoveSingleDuplicate();
-        }
-        return (result == 0);
-    }
+    void Cleanup();
 
-    int RemoveSingleDuplicate()
-    {
-        // scan and stop after first removal
-        for (int i = 1; i < _index_op_count; ++i) {
-            for (int j = 0; j < i; ++j) {
-                if (_index_ops[i]._index_column_id == _index_ops[j]._index_column_id) {
-                    MOT_LOG_TRACE("RangeScanExpressionCollector(): Found duplicate column ref at %d and %d", i, j);
-                    if ((_index_ops[i]._op_class != JIT_WOC_EQUALS) && (_index_ops[j]._op_class != JIT_WOC_EQUALS)) {
-                        MOT_LOG_DEBUG("RangeScanExpressionCollector(): Skipping probable open scan operators while "
-                                      "removing duplicates");
-                        continue;
-                    }
-                    // now we need to decide which one to remove,
-                    // our consideration is to keep equals operators and then join expressions
-                    int victim = -1;
-                    if ((_index_ops[i]._op_class == JIT_WOC_EQUALS) || (_index_ops[j]._op_class == JIT_WOC_EQUALS)) {
-                        // we keep the equals operator for index scan, and leave the other as a filter
-                        MOT_LOG_TRACE("RangeScanExpressionCollector(): Rejecting query due to duplicate index column "
-                                      "reference, one with EQUALS, one without");
-                        if (_index_ops[i]._op_class != JIT_WOC_EQUALS) {
-                            victim = i;
-                        } else {
-                            victim = j;
-                        }
-                    } else if (_index_scan->_search_exprs._exprs[i]._join_expr &&
-                               !_index_scan->_search_exprs._exprs[j]._join_expr) {
-                        victim = j;
-                    } else if (!_index_scan->_search_exprs._exprs[i]._join_expr &&
-                               _index_scan->_search_exprs._exprs[j]._join_expr) {
-                        victim = i;
-                    } else if (_index_scan->_search_exprs._exprs[i]._join_expr &&
-                               _index_scan->_search_exprs._exprs[j]._join_expr) {
-                        // both are join expressions, this is unacceptable, so we abort
-                        MOT_LOG_TRACE("RangeScanExpressionCollector(): Disqualifying query - duplicate JOIN expression "
-                                      "on index %s in index column %d",
-                            _index->GetName().c_str(),
-                            _index_ops[i]._index_column_id);
-                        return -1;  // signal error
-                    } else {
-                        // both items are not join expressions, both refer to index columns, so we arbitrarily drop one
-                        // of them
-                        victim = j;
-                    }
-                    // switch victim with last item
-                    if (_index_scan->_search_exprs._exprs[victim]._expr != nullptr) {
-                        freeExpr(_index_scan->_search_exprs._exprs[victim]._expr);
-                    }
-                    _index_scan->_search_exprs._exprs[victim] = _index_scan->_search_exprs._exprs[_index_op_count - 1];
-                    --_index_op_count;
-                    --_index_scan->_search_exprs._count;
-                    return 1;
-                }
-            }
-        }
+    bool RemoveDuplicates();
 
-        // nothing changed
-        return 0;
-    }
+    int RemoveSingleDuplicate();
 
-    static int IntCmp(int lhs, int rhs)
-    {
-        int result = 0;
-        if (lhs < rhs) {
-            result = -1;
-        } else if (lhs > rhs) {
-            result = 1;
-        }
-        return result;
-    }
+    static int IntCmp(int lhs, int rhs);
 
-    static bool IndexOpCmp(const IndexOpClass& lhs, const IndexOpClass& rhs)
-    {
-        int result = IntCmp(lhs._index_column_id, rhs._index_column_id);
-        if (result == 0) {
-            // make sure equals appears before other operators in case column id is equal
-            result = IntCmp(lhs._op_class, rhs._op_class);
-        }
-        return result < 0;
-    }
+    static bool IndexOpCmp(const IndexOpClass& lhs, const IndexOpClass& rhs);
 
-    bool ScanHasHoles(JitIndexScanType scan_type) const
-    {
-        MOT_ASSERT(_index_op_count >= 1);
-
-        // closed and semi-open scans expect to see all columns in increasing order beginning from zero
-        int column_count = _index_op_count - 1;
-        if (scan_type != JIT_INDEX_SCAN_OPEN) {
-            column_count = _index_op_count;
-        }
-
-        // full prefix must begin with index column zero
-        if (_index_ops[0]._index_column_id != 0) {
-            MOT_LOG_TRACE(
-                "RangeScanExpressionCollector(): Disqualifying query - Index scan does not begin with index column 0");
-            return true;
-        }
-
-        // check each operation relates to the next index column
-        for (int i = 1; i < column_count; ++i) {
-            int prev_column = _index_ops[i - 1]._index_column_id;
-            int next_column = _index_ops[i]._index_column_id;
-            if (next_column != (prev_column + 1)) {
-                MOT_LOG_TRACE("RangeScanExpressionCollector(): Disqualifying query - found hole in closed or semi-open "
-                              "range scan from index column %d to %d",
-                    prev_column,
-                    next_column);
-                return true;
-            }
-        }
-
-        // in open scan we expect two last columns to be equal
-        if (scan_type == JIT_INDEX_SCAN_OPEN) {
-            MOT_ASSERT(_index_op_count >= 2);
-            int prev_column = _index_ops[_index_op_count - 2]._index_column_id;
-            int next_column = _index_ops[_index_op_count - 1]._index_column_id;
-            if (next_column != prev_column) {
-                MOT_LOG_TRACE("RangeScanExpressionCollector(): Disqualifying query - last two columns in open index "
-                              "scan are not equals: %d, %d",
-                    prev_column,
-                    next_column);
-                return true;
-            }
-        }
-
-        return false;
-    }
+    bool ScanHasHoles(JitIndexScanType scan_type) const;
 };
 
 // Expression visitor that counts number of filters
@@ -940,49 +628,14 @@ public:
         _filter_count = nullptr;
     }
 
-    bool OnFilterExpr(int filterOp, int filterOpFuncId, Expr* lhs, Expr* rhs) final
-    {
-        JitExpr* jit_lhs = parseExpr(_query, lhs, 0, 0);
-        if (jit_lhs == nullptr) {
-            MOT_LOG_TRACE("FilterCollector::onFilterExpr(): Failed to parse LHS expression in filter expression %d",
-                *_filter_count);
-            Cleanup();
-            return false;
-        }
-        JitExpr* jit_rhs = parseExpr(_query, rhs, 1, 0);
-        if (jit_rhs == nullptr) {
-            MOT_LOG_TRACE("FilterCollector::onFilterExpr(): Failed to parse RHS expression in filter expression %d",
-                *_filter_count);
-            freeExpr(jit_lhs);
-            Cleanup();
-            return false;
-        }
-        if (*_filter_count < _filter_array->_filter_count) {
-            _filter_array->_scan_filters[*_filter_count]._filter_op = filterOp;
-            _filter_array->_scan_filters[*_filter_count]._filter_op_funcid = filterOpFuncId;
-            _filter_array->_scan_filters[*_filter_count]._lhs_operand = jit_lhs;
-            _filter_array->_scan_filters[*_filter_count]._rhs_operand = jit_rhs;
-            ++(*_filter_count);
-            return true;
-        } else {
-            MOT_REPORT_ERROR(
-                MOT_ERROR_INTERNAL, "Prepare JIT Plan", "Exceeded filter count %d", _filter_array->_filter_count);
-            return false;
-        }
-    }
+    bool OnFilterExpr(int filterOp, int filterOpFuncId, Expr* lhs, Expr* rhs) final;
 
 private:
     Query* _query;
     JitFilterArray* _filter_array;
     int* _filter_count;
 
-    void Cleanup()
-    {
-        for (int i = 0; i < *_filter_count; ++i) {
-            freeExpr(_filter_array->_scan_filters[*_filter_count]._lhs_operand);
-            freeExpr(_filter_array->_scan_filters[*_filter_count]._rhs_operand);
-        }
-    }
+    void Cleanup();
 };
 
 // Expression visitor that fetches a single sub-link
@@ -1000,36 +653,24 @@ public:
     }
 
     bool OnExpression(Expr* expr, int columnType, int tableColumnId, MOT::Table* table, JitWhereOperatorClass opClass,
-        bool joinExpr) final
-    {
-        if (opClass != JIT_WOC_EQUALS) {
-            MOT_LOG_TRACE("SubLinkFetcher::onExpression(): Skipping non-equals operator");
-            return true;  // this is not an error condition
-        }
-        if (expr->type == T_SubLink) {
-            if (++_count > 1) {
-                MOT_LOG_TRACE("SubLinkFetcher::onExpression(): encountered more than one sub-link");
-                return false;  // already have a sub-link, we disqualify query
-            }
-            SubLink* subLink = (SubLink*)expr;
-            if (subLink->subLinkType != EXPR_SUBLINK) {
-                MOT_LOG_TRACE("SubLinkFetcher::onExpression(): unsupported sub-link type");
-                return false;  // unsupported sub-link type, we disqualify query
-            }
-            if (subLink->testexpr != nullptr) {
-                MOT_LOG_TRACE("SubLinkFetcher::onExpression(): unsupported sub-link outer test expression");
-                return false;  // unsupported sub-link type, we disqualify query
-            }
-            MOT_ASSERT(_subLink == nullptr);
-            _subLink = subLink;
-        }
-        return true;
-    }
+        bool joinExpr) final;
 
 private:
     SubLink* _subLink;
     int _count;
 };
+
+MOT::Table* getRealTable(const Query* query, int table_ref_id, int column_id);
+int getRealColumnId(const Query* query, int table_ref_id, int column_id, const MOT::Table* table);
+void freeExpr(JitExpr* expr);
+bool visitSearchExpressions(Query* query, MOT::Table* table, MOT::Index* index, Expr* expr, bool include_pkey,
+    ExpressionVisitor* visitor, bool include_join_exprs, JitColumnExprArray* pkey_exprs = nullptr);
+bool getSearchExpressions(Query* query, MOT::Table* table, MOT::Index* index, bool include_pkey,
+    JitColumnExprArray* search_exprs, int* count, bool use_join_clause);
+bool getRangeSearchExpressions(
+    Query* query, MOT::Table* table, MOT::Index* index, JitIndexScan* index_scan, JoinClauseType join_clause_type);
+bool getTargetExpressions(Query* query, JitColumnExprArray* target_exprs);
+bool getSelectExpressions(Query* query, JitSelectExprArray* select_exprs);
 }  // namespace JitExec
 
 #endif /* JIT_PLAN_EXPR_H */

@@ -965,6 +965,51 @@ static void MOTBeginForeignModify(
     festate->m_currTxn->SetTxnIsoLevel(u_sess->utils_cxt.XactIsoLevel);
 }
 
+static TupleTableSlot* IterateForeignScanStopAtFirst(
+    ForeignScanState* node, MOTFdwStateSt* festate, TupleTableSlot* slot)
+{
+    MOT::RC rc = MOT::RC_OK;
+    ForeignScan* fscan = (ForeignScan*)node->ss.ps.plan;
+    festate->m_execExprs = (List*)ExecInitExpr((Expr*)fscan->fdw_exprs, (PlanState*)node);
+    festate->m_econtext = node->ss.ps.ps_ExprContext;
+    MOTAdaptor::CreateKeyBuffer(node->ss.ss_currentRelation, festate, 0);
+    MOT::Sentinel* Sentinel =
+        festate->m_bestIx->m_ix->IndexReadSentinel(&festate->m_stateKey[0], festate->m_currTxn->GetThdId());
+    MOT::Row* currRow = festate->m_currTxn->RowLookup(festate->m_internalCmdOper, Sentinel, rc);
+
+    if (currRow != NULL) {
+        MOTAdaptor::UnpackRow(
+            slot, festate->m_table, festate->m_attrsUsed, const_cast<uint8_t*>(currRow->GetData()));
+        node->ss.is_scan_end = true;
+        fscan->scan.scan_qual_optimized = true;
+        ExecStoreVirtualTuple(slot);
+        if (festate->m_ctidNum > 0) {
+            HeapTuple resultTup = ExecFetchSlotTuple(slot);
+            MOTRecConvertSt cv;
+            cv.m_u.m_ptr = (uint64_t)currRow->GetPrimarySentinel();
+            resultTup->t_self = cv.m_u.m_self;
+            HeapTupleSetXmin(resultTup, InvalidTransactionId);
+            HeapTupleSetXmax(resultTup, InvalidTransactionId);
+            HeapTupleHeaderSetCmin(resultTup->t_data, InvalidTransactionId);
+        }
+        festate->m_rowsFound++;
+        return slot;
+    }
+    if (rc != MOT::RC_OK) {
+        if (MOT_IS_SEVERE()) {
+            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "MOTIterateForeignScan", "Failed to lookup row");
+            MOT_LOG_ERROR_STACK("Failed to lookup row");
+        }
+        CleanQueryStatesOnError(festate->m_currTxn);
+        report_pg_error(rc,
+            (void*)(festate->m_currTxn->m_errIx != nullptr ? festate->m_currTxn->m_errIx->GetName().c_str()
+                                                           : "unknown"),
+            (void*)festate->m_currTxn->m_errMsgBuf);
+        return nullptr;
+    }
+    return nullptr;
+}
+
 /*
  *
  */
@@ -985,45 +1030,7 @@ static TupleTableSlot* MOTIterateForeignScan(ForeignScanState* node)
     (void)ExecClearTuple(slot);
 
     if (stopAtFirst) {
-        ForeignScan* fscan = (ForeignScan*)node->ss.ps.plan;
-        festate->m_execExprs = (List*)ExecInitExpr((Expr*)fscan->fdw_exprs, (PlanState*)node);
-        festate->m_econtext = node->ss.ps.ps_ExprContext;
-        MOTAdaptor::CreateKeyBuffer(node->ss.ss_currentRelation, festate, 0);
-        MOT::Sentinel* Sentinel =
-            festate->m_bestIx->m_ix->IndexReadSentinel(&festate->m_stateKey[0], festate->m_currTxn->GetThdId());
-        currRow = festate->m_currTxn->RowLookup(festate->m_internalCmdOper, Sentinel, rc);
-
-        if (currRow != NULL) {
-            MOTAdaptor::UnpackRow(
-                slot, festate->m_table, festate->m_attrsUsed, const_cast<uint8_t*>(currRow->GetData()));
-            node->ss.is_scan_end = true;
-            fscan->scan.scan_qual_optimized = true;
-            ExecStoreVirtualTuple(slot);
-            if (festate->m_ctidNum > 0) {
-                HeapTuple resultTup = ExecFetchSlotTuple(slot);
-                MOTRecConvertSt cv;
-                cv.m_u.m_ptr = (uint64_t)currRow->GetPrimarySentinel();
-                resultTup->t_self = cv.m_u.m_self;
-                HeapTupleSetXmin(resultTup, InvalidTransactionId);
-                HeapTupleSetXmax(resultTup, InvalidTransactionId);
-                HeapTupleHeaderSetCmin(resultTup->t_data, InvalidTransactionId);
-            }
-            festate->m_rowsFound++;
-            return slot;
-        }
-        if (rc != MOT::RC_OK) {
-            if (MOT_IS_SEVERE()) {
-                MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "MOTIterateForeignScan", "Failed to lookup row");
-                MOT_LOG_ERROR_STACK("Failed to lookup row");
-            }
-            CleanQueryStatesOnError(festate->m_currTxn);
-            report_pg_error(rc,
-                (void*)(festate->m_currTxn->m_errIx != nullptr ? festate->m_currTxn->m_errIx->GetName().c_str()
-                                                               : "unknown"),
-                (void*)festate->m_currTxn->m_errMsgBuf);
-            return nullptr;
-        }
-        return nullptr;
+        return IterateForeignScanStopAtFirst(node, festate, slot);
     }
 
     if (!festate->m_cursorOpened) {

@@ -741,6 +741,56 @@ static void MakeChunkResident(MemRawChunkHeader* chunk)
     }
 }
 
+static MemRawChunkHeader* AllocateChunkFromKernel(MemRawChunkPool* chunkPool, size_t allocSize, size_t align)
+{
+    MemRawChunkHeader* chunk = nullptr;
+    if (chunkPool->m_allocType == MEM_ALLOC_GLOBAL) {
+        if (g_memGlobalCfg.m_chunkAllocPolicy == MEM_ALLOC_POLICY_LOCAL) {
+            // allocate from specific local node
+            chunk = (MemRawChunkHeader*)MemNumaAllocAlignedLocal(allocSize, align, chunkPool->m_node);
+        } else if (g_memGlobalCfg.m_chunkAllocPolicy == MEM_ALLOC_POLICY_CHUNK_INTERLEAVED) {
+            // allocate chunk from next node (round robin)
+            chunk = (MemRawChunkHeader*)NumaAllocInterleavedChunk(allocSize, align);
+        } else if (g_memGlobalCfg.m_chunkAllocPolicy == MEM_ALLOC_POLICY_PAGE_INTERLEAVED) {
+            // allocate chunk from all nodes (interleaved on page boundary)
+            chunk = (MemRawChunkHeader*)MemNumaAllocAlignedGlobal(allocSize, align);
+        } else if (g_memGlobalCfg.m_chunkAllocPolicy == MEM_ALLOC_POLICY_NATIVE) {
+            // allocate from kernel using malloc()
+            int res = posix_memalign((void**)&chunk, align, allocSize);
+            if (res != 0) {
+                MOT_REPORT_SYSTEM_ERROR_CODE(
+                    res, posix_memalign, "Chunk Allocation", "Failed to allocate aligned 2MB chunk");
+                chunk = nullptr;
+            }
+        } else {
+            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
+                "Chunk Allocation",
+                "Invalid chunk allocation policy: %u",
+                (unsigned)g_memGlobalCfg.m_chunkAllocPolicy);
+            return nullptr;
+        }
+        if (chunk) {
+            MemoryStatisticsProvider::m_provider->AddGlobalChunksReserved(allocSize);
+        }
+    } else {
+        if (g_memGlobalCfg.m_chunkAllocPolicy == MEM_ALLOC_POLICY_NATIVE) {
+            int res = posix_memalign((void**)&chunk, align, allocSize);
+            if (res != 0) {
+                MOT_REPORT_SYSTEM_ERROR_CODE(
+                    res, posix_memalign, "Chunk Allocation", "Failed to allocate aligned 2MB chunk");
+                chunk = nullptr;
+            }
+        } else {
+            chunk = (MemRawChunkHeader*)MemNumaAllocAlignedLocal(allocSize, align, chunkPool->m_node);
+        }
+        if (chunk) {
+            MemoryStatisticsProvider::m_provider->AddLocalChunksReserved(allocSize);
+            DetailedMemoryStatisticsProvider::m_provider->AddLocalChunksReserved(chunkPool->m_node, allocSize);
+        }
+    }
+    return chunk;
+}
+
 static MemRawChunkHeader* AllocateChunk(MemRawChunkPool* chunkPool)
 {
     if (chunkPool->m_asyncReserveData) {
@@ -765,50 +815,7 @@ static MemRawChunkHeader* AllocateChunk(MemRawChunkPool* chunkPool)
             "Allocating chunk for chunk pool %s on node %d from kernel", chunkPool->m_poolName, chunkPool->m_node);
         size_t allocSize = MEM_CHUNK_SIZE_MB * MEGA_BYTE;
         size_t align = allocSize;
-        if (chunkPool->m_allocType == MEM_ALLOC_GLOBAL) {
-            if (g_memGlobalCfg.m_chunkAllocPolicy == MEM_ALLOC_POLICY_LOCAL) {
-                // allocate from specific local node
-                chunk = (MemRawChunkHeader*)MemNumaAllocAlignedLocal(allocSize, align, chunkPool->m_node);
-            } else if (g_memGlobalCfg.m_chunkAllocPolicy == MEM_ALLOC_POLICY_CHUNK_INTERLEAVED) {
-                // allocate chunk from next node (round robin)
-                chunk = (MemRawChunkHeader*)NumaAllocInterleavedChunk(allocSize, align);
-            } else if (g_memGlobalCfg.m_chunkAllocPolicy == MEM_ALLOC_POLICY_PAGE_INTERLEAVED) {
-                // allocate chunk from all nodes (interleaved on page boundary)
-                chunk = (MemRawChunkHeader*)MemNumaAllocAlignedGlobal(allocSize, align);
-            } else if (g_memGlobalCfg.m_chunkAllocPolicy == MEM_ALLOC_POLICY_NATIVE) {
-                // allocate from kernel using malloc()
-                int res = posix_memalign((void**)&chunk, align, allocSize);
-                if (res != 0) {
-                    MOT_REPORT_SYSTEM_ERROR_CODE(
-                        res, posix_memalign, "Chunk Allocation", "Failed to allocate aligned 2MB chunk");
-                    chunk = NULL;
-                }
-            } else {
-                MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
-                    "Chunk Allocation",
-                    "Invalid chunk allocation policy: %u",
-                    (unsigned)g_memGlobalCfg.m_chunkAllocPolicy);
-                return NULL;
-            }
-            if (chunk) {
-                MemoryStatisticsProvider::m_provider->AddGlobalChunksReserved(allocSize);
-            }
-        } else {
-            if (g_memGlobalCfg.m_chunkAllocPolicy == MEM_ALLOC_POLICY_NATIVE) {
-                int res = posix_memalign((void**)&chunk, align, allocSize);
-                if (res != 0) {
-                    MOT_REPORT_SYSTEM_ERROR_CODE(
-                        res, posix_memalign, "Chunk Allocation", "Failed to allocate aligned 2MB chunk");
-                    chunk = NULL;
-                }
-            } else {
-                chunk = (MemRawChunkHeader*)MemNumaAllocAlignedLocal(allocSize, align, chunkPool->m_node);
-            }
-            if (chunk) {
-                MemoryStatisticsProvider::m_provider->AddLocalChunksReserved(allocSize);
-                DetailedMemoryStatisticsProvider::m_provider->AddLocalChunksReserved(chunkPool->m_node, allocSize);
-            }
-        }
+        chunk = AllocateChunkFromKernel(chunkPool, allocSize, align);
         if (chunk) {
             if (chunkPool->m_reserveMode == MEM_RESERVE_PHYSICAL) {
                 MakeChunkResident(chunk);

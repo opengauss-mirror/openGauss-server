@@ -60,7 +60,7 @@ bool OccTransactionManager::Init()
     return result;
 }
 
-bool OccTransactionManager::QuickVersionCheck(const Access* access)
+bool OccTransactionManager::CheckVersion(const Access* access)
 {
     // We always validate on committed rows!
     const Row* row = access->GetRowFromHeader();
@@ -71,7 +71,7 @@ bool OccTransactionManager::QuickHeaderValidation(const Access* access)
 {
     if (access->m_type != INS) {
         // For WR/DEL/RD_FOR_UPDATE lets verify CSN
-        return QuickVersionCheck(access);
+        return CheckVersion(access);
     } else {
         // Lets verify the inserts
         // For upgrade we verify  the row
@@ -157,59 +157,70 @@ RC OccTransactionManager::LockRows(TxnManager* txMan, uint32_t& numRowsLock)
     return rc;
 }
 
-RC OccTransactionManager::LockHeaders(TxnManager* txMan, uint32_t& numSentinelsLock)
+bool OccTransactionManager::LockHeadersNoWait(TxnManager* txMan, uint32_t& numSentinelsLock)
 {
-    RC rc = RC_OK;
     uint64_t sleepTime = 1;
     uint64_t thdId = txMan->GetThdId();
     TxnOrderedSet_t& orderedSet = txMan->m_accessMgr->GetOrderedRowSet();
     numSentinelsLock = 0;
-    if (m_validationNoWait) {
-        while (numSentinelsLock != m_writeSetSize) {
-            for (const auto& raPair : orderedSet) {
-                const Access* ac = raPair.second;
-                if (ac->m_type == RD) {
-                    continue;
-                }
-                Sentinel* sent = ac->m_origSentinel;
-                if (!sent->TryLock(thdId)) {
-                    break;
-                }
-                numSentinelsLock++;
-                if (ac->m_params.IsPrimaryUpgrade()) {
-                    ac->m_auxRow->m_rowHeader.Lock();
-                }
-                // New insert row is already committed!
-                // Check if row has changed in sentinel
-                if (!QuickHeaderValidation(ac)) {
-                    rc = RC_ABORT;
-                    goto final;
-                }
+    while (numSentinelsLock != m_writeSetSize) {
+        for (const auto& raPair : orderedSet) {
+            const Access* ac = raPair.second;
+            if (ac->m_type == RD) {
+                continue;
             }
+            Sentinel* sent = ac->m_origSentinel;
+            if (!sent->TryLock(thdId)) {
+                break;
+            }
+            numSentinelsLock++;
+            if (ac->m_params.IsPrimaryUpgrade()) {
+                ac->m_auxRow->m_rowHeader.Lock();
+            }
+            // New insert row is already committed!
+            // Check if row has changed in sentinel
+            if (!QuickHeaderValidation(ac)) {
+                return false;
+            }
+        }
 
-            if (numSentinelsLock != m_writeSetSize) {
-                ReleaseHeaderLocks(txMan, numSentinelsLock);
-                numSentinelsLock = 0;
-                if (m_preAbort) {
-                    for (const auto& acPair : orderedSet) {
-                        const Access* ac = acPair.second;
-                        if (!QuickHeaderValidation(ac)) {
-                            return RC_ABORT;
-                        }
+        if (numSentinelsLock != m_writeSetSize) {
+            ReleaseHeaderLocks(txMan, numSentinelsLock);
+            numSentinelsLock = 0;
+            if (m_preAbort) {
+                for (const auto& acPair : orderedSet) {
+                    const Access* ac = acPair.second;
+                    if (!QuickHeaderValidation(ac)) {
+                        return false;
                     }
-                }
-                if (sleepTime > LOCK_TIME_OUT) {
-                    rc = RC_ABORT;
-                    goto final;
-                } else {
-                    if (IsHighContention() == false) {
-                        CpuCyclesLevelTime::Sleep(5);
-                    } else {
-                        usleep(m_dynamicSleep);
-                    }
-                    sleepTime = sleepTime << 1;
                 }
             }
+            if (sleepTime > LOCK_TIME_OUT) {
+                return false;
+            } else {
+                if (IsHighContention() == false) {
+                    CpuCyclesLevelTime::Sleep(5);
+                } else {
+                    usleep(m_dynamicSleep);
+                }
+                sleepTime = sleepTime << 1;
+            }
+        }
+    }
+
+    return true;
+}
+
+RC OccTransactionManager::LockHeaders(TxnManager* txMan, uint32_t& numSentinelsLock)
+{
+    RC rc = RC_OK;
+    uint64_t thdId = txMan->GetThdId();
+    TxnOrderedSet_t& orderedSet = txMan->m_accessMgr->GetOrderedRowSet();
+    numSentinelsLock = 0;
+    if (m_validationNoWait) {
+        if (!LockHeadersNoWait(txMan, numSentinelsLock)) {
+            rc = RC_ABORT;
+            goto final;
         }
     } else {
         for (const auto& raPair : orderedSet) {
@@ -223,8 +234,8 @@ RC OccTransactionManager::LockHeaders(TxnManager* txMan, uint32_t& numSentinelsL
             if (ac->m_params.IsPrimaryUpgrade()) {
                 ac->m_auxRow->m_rowHeader.Lock();
             }
-            // New insert row is already commited!
-            // Check if row has chainged in sentinel
+            // New insert row is already committed!
+            // Check if row has chained in sentinel
             if (!QuickHeaderValidation(ac)) {
                 rc = RC_ABORT;
                 goto final;
@@ -235,30 +246,34 @@ final:
     return rc;
 }
 
-RC OccTransactionManager::ValidateOcc(TxnManager* txMan)
+bool OccTransactionManager::PreAllocStableRow(TxnManager* txMan)
 {
-    uint32_t numSentinelLock = 0;
-    m_rowsLocked = false;
-    int isolationLevel = txMan->GetTxnIsoLevel();
-    TxnAccess* tx = txMan->m_accessMgr.Get();
-    RC rc = RC_OK;
-    const uint32_t rowCount = tx->m_rowCnt;
+    if (GetGlobalConfiguration().m_enableCheckpoint) {
+        GetCheckpointManager()->BeginCommit(txMan);
 
-    m_writeSetSize = 0;
-    m_rowsSetSize = 0;
-    m_deleteSetSize = 0;
-    m_insertSetSize = 0;
-    m_txnCounter++;
-
-    if (rowCount == 0) {
-        // READONLY
-        return rc;
+        TxnOrderedSet_t& orderedSet = txMan->m_accessMgr->GetOrderedRowSet();
+        for (const auto& raPair : orderedSet) {
+            const Access* access = raPair.second;
+            if (access->m_type == RD) {
+                continue;
+            }
+            if (access->m_params.IsPrimarySentinel()) {
+                if (!GetCheckpointManager()->PreAllocStableRow(txMan, access->GetRowFromHeader(), access->m_type)) {
+                    GetCheckpointManager()->FreePreAllocStableRows(txMan);
+                    GetCheckpointManager()->EndCommit(txMan);
+                    return false;
+                }
+            }
+        }
     }
+    return true;
+}
 
-    uint32_t readSetSize = 0;
-    TxnOrderedSet_t& orderedSet = tx->GetOrderedRowSet();
-    MOT_ASSERT(rowCount == orderedSet.size());
-    /* 1.Perform Quick Version check */
+bool OccTransactionManager::QuickVersionCheck(TxnManager* txMan, uint32_t& readSetSize)
+{
+    int isolationLevel = txMan->GetTxnIsoLevel();
+    TxnOrderedSet_t& orderedSet = txMan->m_accessMgr->GetOrderedRowSet();
+    readSetSize = 0;
     for (const auto& raPair : orderedSet) {
         const Access* ac = raPair.second;
         if (ac->m_params.IsPrimarySentinel()) {
@@ -290,10 +305,40 @@ RC OccTransactionManager::ValidateOcc(TxnManager* txMan)
 
         if (m_preAbort) {
             if (!QuickHeaderValidation(ac)) {
-                rc = RC_ABORT;
-                goto final;
+                return false;
             }
         }
+    }
+    return true;
+}
+
+RC OccTransactionManager::ValidateOcc(TxnManager* txMan)
+{
+    uint32_t numSentinelLock = 0;
+    m_rowsLocked = false;
+    TxnAccess* tx = txMan->m_accessMgr.Get();
+    RC rc = RC_OK;
+    const uint32_t rowCount = tx->m_rowCnt;
+
+    m_writeSetSize = 0;
+    m_rowsSetSize = 0;
+    m_deleteSetSize = 0;
+    m_insertSetSize = 0;
+    m_txnCounter++;
+
+    if (rowCount == 0) {
+        // READONLY
+        return rc;
+    }
+
+    uint32_t readSetSize = 0;
+    TxnOrderedSet_t& orderedSet = tx->GetOrderedRowSet();
+    MOT_ASSERT(rowCount == orderedSet.size());
+
+    /* Perform Quick Version check */
+    if (!QuickVersionCheck(txMan, readSetSize)) {
+        rc = RC_ABORT;
+        goto final;
     }
 
     MOT_LOG_DEBUG("Validate OCC rowCnt=%u RD=%u WR=%u\n", tx->m_rowCnt, tx->m_rowCnt - m_writeSetSize, m_writeSetSize);
@@ -302,35 +347,23 @@ RC OccTransactionManager::ValidateOcc(TxnManager* txMan)
         goto final;
     }
 
-    // validate rows in the read set and write set
+    // Validate rows in the read set and write set
     if (readSetSize > 0) {
         if (!ValidateReadSet(txMan)) {
             rc = RC_ABORT;
             goto final;
         }
     }
+
     if (!ValidateWriteSet(txMan)) {
         rc = RC_ABORT;
         goto final;
     }
 
-    if (GetGlobalConfiguration().m_enableCheckpoint) {
-        GetCheckpointManager()->BeginCommit(txMan);
-
-        for (const auto& raPair : orderedSet) {
-            const Access* access = raPair.second;
-            if (access->m_type == RD) {
-                continue;
-            }
-            if (access->m_params.IsPrimarySentinel()) {
-                if (!GetCheckpointManager()->PreAllocStableRow(txMan, access->GetRowFromHeader(), access->m_type)) {
-                    GetCheckpointManager()->FreePreAllocStableRows(txMan);
-                    GetCheckpointManager()->EndCommit(txMan);
-                    rc = RC_MEMORY_ALLOCATION_ERROR;
-                    goto final;
-                }
-            }
-        }
+    // Pre-allocate stable row according to the checkpoint state.
+    if (!PreAllocStableRow(txMan)) {
+        rc = RC_MEMORY_ALLOCATION_ERROR;
+        goto final;
     }
 
 final:
@@ -352,19 +385,10 @@ void OccTransactionManager::RollbackInserts(TxnManager* txMan)
     return txMan->UndoInserts();
 }
 
-void OccTransactionManager::WriteChanges(TxnManager* txMan)
+void OccTransactionManager::ApplyWrite(TxnManager* txMan)
 {
-    if (m_writeSetSize == 0 && m_insertSetSize == 0) {
-        return;
-    }
-
-    LockRows(txMan, m_rowsSetSize);
-    MOTConfiguration& cfg = GetGlobalConfiguration();
-
-    TxnOrderedSet_t& orderedSet = txMan->m_accessMgr->GetOrderedRowSet();
-
-    // Stable rows for checkpoint needs to be created (copied from original row) before modifying the global rows.
-    if (cfg.m_enableCheckpoint) {
+    if (GetGlobalConfiguration().m_enableCheckpoint) {
+        TxnOrderedSet_t& orderedSet = txMan->m_accessMgr->GetOrderedRowSet();
         for (const auto& raPair : orderedSet) {
             const Access* access = raPair.second;
             if (access->m_type == RD) {
@@ -377,6 +401,20 @@ void OccTransactionManager::WriteChanges(TxnManager* txMan)
             }
         }
     }
+}
+
+void OccTransactionManager::WriteChanges(TxnManager* txMan)
+{
+    if (m_writeSetSize == 0 && m_insertSetSize == 0) {
+        return;
+    }
+
+    LockRows(txMan, m_rowsSetSize);
+
+    // Stable rows for checkpoint needs to be created (copied from original row) before modifying the global rows.
+    ApplyWrite(txMan);
+
+    TxnOrderedSet_t& orderedSet = txMan->m_accessMgr->GetOrderedRowSet();
 
     // Update CSN with all relevant information on global rows
     // For deletes invalidate sentinels - rows still locked!

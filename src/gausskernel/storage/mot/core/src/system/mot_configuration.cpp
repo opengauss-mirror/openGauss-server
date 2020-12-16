@@ -1357,6 +1357,64 @@ uint64_t MOTConfiguration::ParseMemoryUnit(const char* memoryValue, uint64_t def
     return memoryValueBytes;
 }
 
+static inline bool IsTimeUnitDays(mot_string& suffix)
+{
+    if ((suffix.compare_no_case("d") == 0) || (suffix.compare_no_case("days") == 0) ||
+        (suffix.compare_no_case("day") == 0)) {
+        return true;
+    }
+    return false;
+}
+
+static inline bool IsTimeUnitHours(mot_string& suffix)
+{
+    if ((suffix.compare_no_case("h") == 0) || (suffix.compare_no_case("hours") == 0) ||
+        (suffix.compare_no_case("hour") == 0)) {
+        return true;
+    }
+    return false;
+}
+
+static inline bool IsTimeUnitMinutes(mot_string& suffix)
+{
+    if ((suffix.compare_no_case("m") == 0) || (suffix.compare_no_case("mins") == 0) ||
+        (suffix.compare_no_case("minutes") == 0) || (suffix.compare_no_case("min") == 0) ||
+        (suffix.compare_no_case("minute") == 0)) {
+        return true;
+    }
+    return false;
+}
+
+static inline bool IsTimeUnitSeconds(mot_string& suffix)
+{
+    if ((suffix.compare_no_case("s") == 0) || (suffix.compare_no_case("secs") == 0) ||
+        (suffix.compare_no_case("seconds") == 0) || (suffix.compare_no_case("sec") == 0) ||
+        (suffix.compare_no_case("second") == 0)) {
+        return true;
+    }
+    return false;
+}
+
+static inline bool IsTimeUnitMilliSeconds(mot_string& suffix)
+{
+    if ((suffix.compare_no_case("ms") == 0) || (suffix.compare_no_case("millis") == 0) ||
+        (suffix.compare_no_case("milliseconds") == 0) || (suffix.compare_no_case("milli") == 0) ||
+        (suffix.compare_no_case("millisecond") == 0)) {
+        return true;
+    }
+    return false;
+}
+
+static inline bool IsTimeUnitMicroSeconds(mot_string& suffix)
+{
+    if ((suffix.compare_no_case("us") == 0) || (suffix.compare_no_case("micros") == 0) ||
+        (suffix.compare_no_case("microseconds") == 0) || (suffix.compare_no_case("micro") == 0) ||
+        (suffix.compare_no_case("microsecond") == 0)) {
+        return true;
+    }
+    return false;
+}
+
 uint64_t MOTConfiguration::ParseTimeValueMicros(const char* timeValue, uint64_t defaultValue, const char* cfgPath)
 {
     uint64_t timeValueMicors = defaultValue;
@@ -1367,35 +1425,25 @@ uint64_t MOTConfiguration::ParseTimeValueMicros(const char* timeValue, uint64_t 
     } else if (*endptr == 0) {
         MOT_LOG_WARN("Invalid %s time value format: %s (expecting unit type after value)", cfgPath, timeValue);
     } else {
-        // get unit type and convert to mega-bytes
+        // get unit type and convert to milli-seconds
         mot_string suffix(endptr);
         suffix.trim();
-        if ((suffix.compare_no_case("d") == 0) || (suffix.compare_no_case("days") == 0) ||
-            (suffix.compare_no_case("day") == 0)) {
+        if (IsTimeUnitDays(suffix)) {
             MOT_LOG_TRACE("Loaded %s: %u days", cfgPath, value);
             timeValueMicors = ((uint64_t)value) * 24ull * 60ull * 60ull * 1000ull * 1000ull;
-        } else if ((suffix.compare_no_case("h") == 0) || (suffix.compare_no_case("hours") == 0) ||
-                   (suffix.compare_no_case("hour") == 0)) {
+        } else if (IsTimeUnitHours(suffix)) {
             MOT_LOG_TRACE("Loaded %s: %u hours", cfgPath, value);
             timeValueMicors = ((uint64_t)value) * 60ull * 60ull * 1000ull * 1000ull;
-        } else if ((suffix.compare_no_case("m") == 0) || (suffix.compare_no_case("mins") == 0) ||
-                   (suffix.compare_no_case("minutes") == 0) || (suffix.compare_no_case("min") == 0) ||
-                   (suffix.compare_no_case("minute") == 0)) {
+        } else if (IsTimeUnitMinutes(suffix)) {
             MOT_LOG_TRACE("Loaded %s: %u minutes", cfgPath, value);
             timeValueMicors = ((uint64_t)value) * 60ull * 1000ull * 1000ull;
-        } else if ((suffix.compare_no_case("s") == 0) || (suffix.compare_no_case("secs") == 0) ||
-                   (suffix.compare_no_case("seconds") == 0) || (suffix.compare_no_case("sec") == 0) ||
-                   (suffix.compare_no_case("second") == 0)) {
+        } else if (IsTimeUnitSeconds(suffix)) {
             MOT_LOG_TRACE("Loaded %s: %u seconds", cfgPath, value);
             timeValueMicors = ((uint64_t)value) * 1000ull * 1000ull;
-        } else if ((suffix.compare_no_case("ms") == 0) || (suffix.compare_no_case("millis") == 0) ||
-                   (suffix.compare_no_case("milliseconds") == 0) || (suffix.compare_no_case("milli") == 0) ||
-                   (suffix.compare_no_case("millisecond") == 0)) {
+        } else if (IsTimeUnitMilliSeconds(suffix)) {
             MOT_LOG_TRACE("Loaded %s: %u milli-seconds", cfgPath, value);
             timeValueMicors = ((uint64_t)value) * 1000ull;
-        } else if ((suffix.compare_no_case("us") == 0) || (suffix.compare_no_case("micros") == 0) ||
-                   (suffix.compare_no_case("microseconds") == 0) || (suffix.compare_no_case("micro") == 0) ||
-                   (suffix.compare_no_case("microsecond") == 0)) {
+        } else if (IsTimeUnitMicroSeconds(suffix)) {
             MOT_LOG_TRACE("Loaded %s: %u micro-seconds", cfgPath, value);
             timeValueMicors = ((uint64_t)value);
         } else {

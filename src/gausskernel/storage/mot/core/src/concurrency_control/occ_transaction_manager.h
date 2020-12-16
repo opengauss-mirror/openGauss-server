@@ -149,21 +149,31 @@ private:
      * true, cc may fail during the verification (i.e. it may produce
      * false positive reports).
      */
-    bool QuickVersionCheck(const Access* access);
+    bool CheckVersion(const Access* access);
 
-    /** @brief Validate Header for insert   */
+    /** @brief Validate Header for insert */
     bool QuickHeaderValidation(const Access* access);
+
+    bool QuickVersionCheck(TxnManager* txMan, uint32_t& readSetSize);
+
+    bool LockHeadersNoWait(TxnManager* txMan, uint32_t& numSentinelsLock);
 
     void ReleaseHeaderLocks(TxnManager* txMan, uint32_t numOfLocks);
 
-    /** release all the locked rows    */
+    /** @brief Release all the locked rows */
     void ReleaseRowsLocks(TxnManager* txMan, uint32_t numOfLocks);
 
-    /** @var validate the read set   */
+    /** @brief Validate the read set */
     bool ValidateReadSet(TxnManager* txMan);
 
-    /** @brief validate the write set   */
+    /** @brief Validate the write set */
     bool ValidateWriteSet(TxnManager* txMan);
+
+    /** @brief Pre-allocates stable row according to the checkpoint state. */
+    bool PreAllocStableRow(TxnManager* txMan);
+
+    /** @brief Sets stable row according to the checkpoint state. */
+    void ApplyWrite(TxnManager* txMan);
 
     /** @var transaction counter   */
     uint32_t m_txnCounter;
