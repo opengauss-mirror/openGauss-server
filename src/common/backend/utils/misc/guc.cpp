@@ -9806,7 +9806,8 @@ static void init_configure_names_real()
                 PGC_SIGHUP,
                 CONN_AUTH_SECURITY,
                 gettext_noop("password lock time"),
-                NULL
+                NULL,
+                GUC_UNIT_DAY
             },
             &u_sess->attr.attr_security.Password_lock_time,
             1.0,
@@ -14267,161 +14268,11 @@ bool parse_int(const char* value, int* result, int flags, const char** hintmsg)
          * Note: the multiple-switch coding technique here is a bit tedious,
          * but seems necessary to avoid intermediate-value overflows.
          */
+        int64 temp = val;
         if (flags & GUC_UNIT_MEMORY) {
-            /* Set hint for use if no match or trailing garbage */
-            if (hintmsg != NULL) {
-                *hintmsg = gettext_noop("Valid units for this parameter are \"kB\", \"MB\", and \"GB\".");
-            }
-
-#if BLCKSZ < 1024 || BLCKSZ > (1024 * 1024)
-#error BLCKSZ must be between 1KB and 1MB
-#endif
-#if XLOG_BLCKSZ < 1024 || XLOG_BLCKSZ > (1024 * 1024)
-#error XLOG_BLCKSZ must be between 1KB and 1MB
-#endif
-
-            if (strncmp(endptr, "kB", 2) == 0) {
-                endptr += 2;
-
-                switch (flags & GUC_UNIT_MEMORY) {
-                    case GUC_UNIT_BLOCKS:
-                        val /= (BLCKSZ / 1024);
-                        break;
-
-                    case GUC_UNIT_XBLOCKS:
-                        val /= (XLOG_BLCKSZ / 1024);
-                        break;
-                    default:
-                        break;
-                }
-            } else if (strncmp(endptr, "MB", 2) == 0) {
-                endptr += 2;
-
-                switch (flags & GUC_UNIT_MEMORY) {
-                    case GUC_UNIT_KB:
-                        val *= KB_PER_MB;
-                        break;
-
-                    case GUC_UNIT_BLOCKS:
-                        val *= KB_PER_MB / (BLCKSZ / 1024);
-                        break;
-
-                    case GUC_UNIT_XBLOCKS:
-                        val *= KB_PER_MB / (XLOG_BLCKSZ / 1024);
-                        break;
-                    default:
-                        break;
-                }
-            } else if (strncmp(endptr, "GB", 2) == 0) {
-                endptr += 2;
-
-                switch (flags & GUC_UNIT_MEMORY) {
-                    case GUC_UNIT_KB:
-                        val *= KB_PER_GB;
-                        break;
-
-                    case GUC_UNIT_BLOCKS:
-                        val *= KB_PER_GB / (BLCKSZ / 1024);
-                        break;
-
-                    case GUC_UNIT_XBLOCKS:
-                        val *= KB_PER_GB / (XLOG_BLCKSZ / 1024);
-                        break;
-                    default:
-                        break;
-                }
-            }
+            temp = (int64)memory_unit_convert(&endptr, val, flags, hintmsg);
         } else if (flags & GUC_UNIT_TIME) {
-            /* Set hint for use if no match or trailing garbage */
-            if (hintmsg != NULL) {
-                *hintmsg = gettext_noop("Valid units for this parameter are \"ms\", \"s\", \"min\", \"h\", and \"d\".");
-            }
-            if (strncmp(endptr, "ms", 2) == 0) {
-                endptr += 2;
-
-                switch (flags & GUC_UNIT_TIME) {
-                    case GUC_UNIT_S:
-                        val /= MS_PER_S;
-                        break;
-
-                    case GUC_UNIT_MIN:
-                        val /= MS_PER_MIN;
-                        break;
-                    case GUC_UNIT_HOUR:
-                        val /= MS_PER_H;
-                        break;
-                    default:
-                        break;
-                }
-            } else if (strncmp(endptr, "s", 1) == 0) {
-                endptr += 1;
-                switch (flags & GUC_UNIT_TIME) {
-                    case GUC_UNIT_MS:
-                        val *= MS_PER_S;
-                        break;
-
-                    case GUC_UNIT_MIN:
-                        val /= S_PER_MIN;
-                        break;
-                    case GUC_UNIT_HOUR:
-                        val /= S_PER_H;
-                        break;
-                    default:
-                        break;
-                }
-            } else if (strncmp(endptr, "min", 3) == 0) {
-                endptr += 3;
-                switch (flags & GUC_UNIT_TIME) {
-                    case GUC_UNIT_MS:
-                        val *= MS_PER_MIN;
-                        break;
-
-                    case GUC_UNIT_S:
-                        val *= S_PER_MIN;
-                        break;
-                    case GUC_UNIT_HOUR:
-                        val /= MIN_PER_H;
-                        break;
-                    default:
-                        break;
-                }
-            } else if (strncmp(endptr, "h", 1) == 0) {
-                endptr += 1;
-                switch (flags & GUC_UNIT_TIME) {
-                    case GUC_UNIT_MS:
-                        val *= MS_PER_H;
-                        break;
-
-                    case GUC_UNIT_S:
-                        val *= S_PER_H;
-                        break;
-
-                    case GUC_UNIT_MIN:
-                        val *= MIN_PER_H;
-                        break;
-                    default:
-                        break;
-                }
-            } else if (strncmp(endptr, "d", 1) == 0) {
-                endptr += 1;
-                switch (flags & GUC_UNIT_TIME) {
-                    case GUC_UNIT_MS:
-                        val *= MS_PER_D;
-                        break;
-
-                    case GUC_UNIT_S:
-                        val *= S_PER_D;
-                        break;
-
-                    case GUC_UNIT_MIN:
-                        val *= MIN_PER_D;
-                        break;
-                    case GUC_UNIT_HOUR:
-                        val *= H_PER_D;
-                    default:
-                        break;
-                }
-            }
+            temp = (int64)time_unit_convert(&endptr, val, flags, hintmsg);
         }
 
         /* allow whitespace after unit */
@@ -14449,6 +14300,7 @@ bool parse_int(const char* value, int* result, int flags, const char** hintmsg)
 
     return true;
 }
+
 
 /*
  * Try to parse value as an 64-bit integer.  The accepted format is
@@ -14504,7 +14356,7 @@ bool parse_int64(const char* value, int64* result, const char** hintmsg)
  * If the string parses okay, return true, else false.
  * If okay and result is not NULL, return the value in *result.
  */
-bool parse_real(const char* value, double* result)
+bool parse_real(const char* value, double* result, int flags, const char** hintmsg)
 {
     double val;
     char* endptr = NULL;
@@ -14531,7 +14383,25 @@ bool parse_real(const char* value, double* result)
     }
 
     if (*endptr != '\0') {
-        return false;
+        /*
+         * Note: the multiple-switch coding technique here is a bit tedious,
+         * but seems necessary to avoid intermediate-value overflows.
+         */
+        if (flags & GUC_UNIT_MEMORY) {
+            val = memory_unit_convert(&endptr, val, flags, hintmsg);
+        } else if (flags & GUC_UNIT_TIME) {
+            val = time_unit_convert(&endptr, val, flags, hintmsg);
+        }
+
+        /* allow whitespace after unit */
+        while (isspace((unsigned char)*endptr)) {
+            endptr++;
+        }
+
+        if (*endptr != '\0') {
+            return false; /* appropriate hint, if any, already set */
+        }
+
     }
 
     if (result != NULL) {
@@ -14539,6 +14409,187 @@ bool parse_real(const char* value, double* result)
     }
 
     return true;
+}
+
+/* 
+ * The reference is used because auto-increment of formal parameters does not change the value of the actual parameter.
+ * As a result, an error is reported.
+ */
+double memory_unit_convert(char** endptr, double value, int flags, const char** hintmsg)
+{
+    double val = value;
+
+    /* Set hint for use if no match or trailing garbage */
+    if (hintmsg != NULL) {
+        *hintmsg = gettext_noop("Valid units for this parameter are \"kB\", \"MB\", and \"GB\".");
+    }
+
+#if BLCKSZ < 1024 || BLCKSZ > (1024 * 1024)
+#error BLCKSZ must be between 1KB and 1MB
+#endif
+#if XLOG_BLCKSZ < 1024 || XLOG_BLCKSZ > (1024 * 1024)
+#error XLOG_BLCKSZ must be between 1KB and 1MB
+#endif
+
+    if (strncmp(*endptr, "kB", 2) == 0) {
+        *endptr += 2;
+
+        switch (flags & GUC_UNIT_MEMORY) {
+            case GUC_UNIT_BLOCKS:
+                val /= (BLCKSZ / 1024);
+                break;
+
+            case GUC_UNIT_XBLOCKS:
+                val /= (XLOG_BLCKSZ / 1024);
+                break;
+            default:
+                break;
+        }
+    } else if (strncmp(*endptr, "MB", 2) == 0) {
+        *endptr += 2;
+
+        switch (flags & GUC_UNIT_MEMORY) {
+            case GUC_UNIT_KB:
+                val *= KB_PER_MB;
+                break;
+
+            case GUC_UNIT_BLOCKS:
+                val *= KB_PER_MB / ((double)BLCKSZ / 1024);
+                break;
+
+            case GUC_UNIT_XBLOCKS:
+                val *= KB_PER_MB / ((double)XLOG_BLCKSZ / 1024);
+                break;
+            default:
+                break;
+        }
+    } else if (strncmp(*endptr, "GB", 2) == 0) {
+        *endptr += 2;
+
+        switch (flags & GUC_UNIT_MEMORY) {
+            case GUC_UNIT_KB:
+                val *= KB_PER_GB;
+                break;
+
+            case GUC_UNIT_BLOCKS:
+                val *= KB_PER_GB / ((double)BLCKSZ / 1024);
+                break;
+
+            case GUC_UNIT_XBLOCKS:
+                val *= KB_PER_GB / ((double)XLOG_BLCKSZ / 1024);
+                break;
+            default:
+                break;
+        }
+    }
+    return val;
+}
+double time_unit_convert(char** endptr, double value, int flags, const char** hintmsg)
+{
+    double val = value;
+
+    /* Set hint for use if no match or trailing garbage */
+    if (hintmsg != NULL) {
+        *hintmsg = gettext_noop("Valid units for this parameter are \"ms\", \"s\", \"min\", \"h\", and \"d\".");
+    }
+    if (strncmp(*endptr, "ms", 2) == 0) {
+        *endptr += 2;
+
+        switch (flags & GUC_UNIT_TIME) {
+            case GUC_UNIT_S:
+                val /= MS_PER_S;
+                break;
+            case GUC_UNIT_MIN:
+                val /= MS_PER_MIN;
+                break;
+            case GUC_UNIT_HOUR:
+                val /= MS_PER_H;
+                break;
+            case GUC_UNIT_DAY:
+                val /= MS_PER_D;
+                break;
+            default:
+                break;
+        }
+    } else if (strncmp(*endptr, "s", 1) == 0) {
+        *endptr += 1;
+        switch (flags & GUC_UNIT_TIME) {
+            case GUC_UNIT_MS:
+                val *= MS_PER_S;
+                break;
+
+            case GUC_UNIT_MIN:
+                val /= S_PER_MIN;
+                break;
+            case GUC_UNIT_HOUR:
+                val /= S_PER_H;
+                break;
+            case GUC_UNIT_DAY:
+                val /= S_PER_D;
+                break;
+            default:
+                break;
+        }
+    } else if (strncmp(*endptr, "min", 3) == 0) {
+        *endptr += 3;
+        switch (flags & GUC_UNIT_TIME) {
+            case GUC_UNIT_MS:
+                val *= MS_PER_MIN;
+                break;
+
+            case GUC_UNIT_S:
+                val *= S_PER_MIN;
+                break;
+            case GUC_UNIT_HOUR:
+                val /= MIN_PER_H;
+                break;
+            case GUC_UNIT_DAY:
+                val /= MIN_PER_D;
+                break;
+            default:
+                break;
+        }
+    } else if (strncmp(*endptr, "h", 1) == 0) {
+        *endptr += 1;
+        switch (flags & GUC_UNIT_TIME) {
+            case GUC_UNIT_MS:
+                val *= MS_PER_H;
+                break;
+
+            case GUC_UNIT_S:
+                val *= S_PER_H;
+                break;
+
+            case GUC_UNIT_MIN:
+                val *= MIN_PER_H;
+                break;
+            case GUC_UNIT_DAY:
+                val /= H_PER_D;
+                break;
+            default:
+                break;
+        }
+    } else if (strncmp(*endptr, "d", 1) == 0) {
+        *endptr += 1;
+        switch (flags & GUC_UNIT_TIME) {
+            case GUC_UNIT_MS:
+                        val *= MS_PER_D;
+                break;
+
+            case GUC_UNIT_S:
+                val *= S_PER_D;
+                break;
+
+            case GUC_UNIT_MIN:
+                val *= MIN_PER_D;
+                break;
+            case GUC_UNIT_HOUR:
+                val *= H_PER_D;
+            default:
+                break;
+        }
+    }
+    return val;
 }
 
 /*
@@ -14819,8 +14870,9 @@ bool validate_conf_option(struct config_generic * record, const char *name, cons
                 struct config_real *conf = (struct config_real *) record;
                 double  tmpnewval;
                 double* newval = (newvalue == NULL ? &tmpnewval : (double*)newvalue);
+                const char *hintmsg = NULL;
 
-                if (!parse_real(value, newval)) {
+                if (!parse_real(value, newval, conf->gen.flags, &hintmsg)) {
                     ereport(elevel,
                             (errcode(ERRCODE_INVALID_PARAMETER_VALUE),
                              errmsg("parameter \"%s\" requires a numeric value", name)));
@@ -17073,7 +17125,7 @@ void GetConfigOptionByNum(int varnum, const char** values, bool* noshow)
     values[1] = _show_option(conf, false);
 
     /* unit */
-    if (conf->vartype == PGC_INT) {
+    if (conf->vartype == PGC_INT || conf->vartype == PGC_REAL) {
         char buf[8];
 
         switch (conf->flags & (GUC_UNIT_MEMORY | GUC_UNIT_TIME)) {
@@ -17107,6 +17159,10 @@ void GetConfigOptionByNum(int varnum, const char** values, bool* noshow)
 
             case GUC_UNIT_HOUR:
                 values[2] = "hour";
+                break;
+
+            case GUC_UNIT_DAY:
+                values[2] = "d";
                 break;
 
             default:
@@ -17480,15 +17536,15 @@ static char* _show_option(struct config_generic* record, bool use_units)
                  */
                 int64 result = *conf->variable;
                 const char* unit = NULL;
+				int flags = record->flags;
 
                 if (use_units && result > 0 && (record->flags & GUC_UNIT_MEMORY)) {
-                    switch (record->flags & GUC_UNIT_MEMORY) {
+                    switch (flags & GUC_UNIT_MEMORY) {
                         case GUC_UNIT_BLOCKS:
-                            result *= BLCKSZ / 1024;
+                            result *= (double)BLCKSZ / 1024;
                             break;
-
                         case GUC_UNIT_XBLOCKS:
-                            result *= XLOG_BLCKSZ / 1024;
+                            result *= (double)XLOG_BLCKSZ / 1024;
                             break;
                         default:
                             break;
@@ -17504,16 +17560,18 @@ static char* _show_option(struct config_generic* record, bool use_units)
                         unit = "kB";
                     }
                 } else if (use_units && result > 0 && (record->flags & GUC_UNIT_TIME)) {
-                    switch (record->flags & GUC_UNIT_TIME) {
+                    switch (flags & GUC_UNIT_TIME) {
                         case GUC_UNIT_S:
                             result *= MS_PER_S;
                             break;
-
                         case GUC_UNIT_MIN:
                             result *= MS_PER_MIN;
                             break;
                         case GUC_UNIT_HOUR:
                             result *= MS_PER_H;
+                            break;
+                        case GUC_UNIT_DAY:
+                            result *= MS_PER_D;
                             break;
                         default:
                             break;
@@ -17562,7 +17620,69 @@ static char* _show_option(struct config_generic* record, bool use_units)
             if (conf->show_hook) {
                 val = (*conf->show_hook)();
             } else {
-                rc = snprintf_s(buffer, sizeof(buffer), sizeof(buffer) - 1, "%g", *conf->variable);
+                double result = *conf->variable;
+                const char* unit = NULL;
+                int flags = record->flags;
+
+                if (use_units && result > 0 && (record->flags & GUC_UNIT_MEMORY)) {
+                    switch (flags & GUC_UNIT_MEMORY) {
+                        case GUC_UNIT_BLOCKS:
+                            result *= (double)BLCKSZ / 1024;
+                            break;
+                        case GUC_UNIT_XBLOCKS:
+                            result *= (double)XLOG_BLCKSZ / 1024;
+                            break;
+                        default:
+                            break;
+                    }
+
+                    if (result / KB_PER_GB >= 1.0) {
+                        result /= KB_PER_GB;
+                        unit = "GB";
+                    } else if (result / KB_PER_MB >= 1.0) {
+                        result /= KB_PER_MB;
+                        unit = "MB";
+                    } else {
+                        unit = "kB";
+                    }
+                } else if (use_units && result > 0 && (record->flags & GUC_UNIT_TIME)) {
+                	switch (flags & GUC_UNIT_TIME) {
+                        case GUC_UNIT_S:
+                            result *= MS_PER_S;
+                            break;
+                        case GUC_UNIT_MIN:
+                            result *= MS_PER_MIN;
+                            break;
+                        case GUC_UNIT_HOUR:
+                            result *= MS_PER_H;
+                            break;
+                        case GUC_UNIT_DAY:
+                            result *= MS_PER_D;
+                            break;
+                        default:
+                            break;
+                    }
+
+                    if (result / MS_PER_D >= 1.0) {
+                        result /= MS_PER_D;
+                        unit = "d";
+                    } else if (result / MS_PER_H >= 1.0) {
+                        result /= MS_PER_H;
+                        unit = "h";
+                    } else if (result / MS_PER_MIN >= 1.0) {
+                        result /= MS_PER_MIN;
+                        unit = "min";
+                    } else if (result / MS_PER_S >= 1.0) {
+                        result /= MS_PER_S;
+                        unit = "s";
+                    } else {
+                        unit = "ms";
+                    }
+                } else {
+                    unit = "";
+                }
+
+                rc = snprintf_s(buffer, sizeof(buffer), sizeof(buffer) - 1, "%g%s", result, unit);
                 securec_check_ss(rc, "\0", "\0");
                 val = buffer;
             }

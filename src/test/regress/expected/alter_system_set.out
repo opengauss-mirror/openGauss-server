@@ -88,7 +88,7 @@ NOTICE:  please restart the database for the POSTMASTER level parameter to take 
 SHOW password_lock_time;
  password_lock_time 
 --------------------
- 1
+ 1d
 (1 row)
 
 ALTER SYSTEM SET  password_lock_time to 1.1;
@@ -137,7 +137,7 @@ select pg_sleep(2);  -- wait to reload postgres.conf file
 SHOW password_lock_time;
  password_lock_time 
 --------------------
- 1.1
+ 1.1d
 (1 row)
 
 ALTER SYSTEM SET  password_lock_time to 1;
@@ -185,7 +185,7 @@ select pg_sleep(2);  -- wait to reload postgres.conf file
 SHOW password_lock_time;
  password_lock_time 
 --------------------
- 1
+ 1d
 (1 row)
 
 SHOW autovacuum;
@@ -243,7 +243,7 @@ select pg_sleep(2);  -- wait to reload postgres.conf file
 SHOW password_lock_time;
  password_lock_time 
 --------------------
- 1
+ 1d
 (1 row)
 
 SHOW autovacuum;
