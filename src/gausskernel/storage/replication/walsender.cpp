@@ -2906,7 +2906,10 @@ static int WalSndLoop(WalSndSendDataCallback send_data)
             }
         }
 
-        if (sync_config_needed && g_instance.attr.attr_common.config_sync_interval > 0) {
+        if (sync_config_needed &&
+	    (g_instance.attr.attr_common.sync_config_strategy == ALL_NODE ||
+	    (g_instance.attr.attr_common.sync_config_strategy == ONLY_SYNC_NODE &&
+	         t_thrd.walsender_cxt.MyWalSnd->sync_standby_priority > 0))) {
             if (t_thrd.walsender_cxt.walsender_shutdown_requested) {
                 if (!AM_WAL_DB_SENDER && !SendConfigFile(t_thrd.walsender_cxt.gucconf_file))
                     ereport(LOG, (errmsg("failed to send config to the peer when walsender shutdown.")));

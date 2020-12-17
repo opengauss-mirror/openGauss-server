@@ -250,6 +250,12 @@ incremental_checkpoint_timeout = 60s	# range 1s-1h
 				 # The value is best configured less than half of 
 				 # the wal_receiver_timeout and wal_sender_timeout.
 
+# - Synchronous configuration file -
+#sync_config_strategy = all_node  # Configuration file synchronization strategy.
+                                  # ALL_NODE : The standby nodes are allowed to send synchronous requests, and the host are allowed to actively send configuration files to all standby nodes.
+				  # ONLY_SYNC_NODE : The standby nodes are allowed to send synchronization requests, and the host only actively sends configuration files to the standby.
+				  # NONE_NODE : No standby requests are allowed, and the host is not allowed to actively send configuration files to the standby.
+
 # - Sending Server(s) -
 
 # Set these on the master and on any standby that will send replication data.
