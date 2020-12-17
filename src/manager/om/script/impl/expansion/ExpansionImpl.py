@@ -175,9 +175,10 @@ class ExpansionImpl():
         logPath = self.context.clusterInfoDict["logPath"]
         corePath = self.context.clusterInfoDict["corePath"]
         toolPath = self.context.clusterInfoDict["toolPath"]
+        mppdbconfig = ""
         tmpMppdbPath = DefaultValue.getEnv("PGHOST")
-        if not tmpMppdbPath:
-            tmpMppdbPath = toolPath
+        if tmpMppdbPath:
+            mppdbconfig = '<PARAM name="tmpMppdbPath" value="%s" />' % tmpMppdbPath
 
         xmlConfig = """\
 <?xml version="1.0" encoding="UTF-8"?>
@@ -189,7 +190,7 @@ class ExpansionImpl():
         <PARAM name="gaussdbAppPath" value="{appPath}" />
         <PARAM name="gaussdbLogPath" value="{logPath}" />
         <PARAM name="gaussdbToolPath" value="{toolPath}" />
-        <PARAM name="tmpMppdbPath" value="{mppdbPath}" />
+        {mappdbConfig}
         <PARAM name="corePath" value="{corePath}"/>
         <PARAM name="clusterType" value="single-inst"/>
     </CLUSTER>
@@ -210,7 +211,7 @@ class ExpansionImpl():
         """.format(nodeName=nodeName,backIp=backIp,appPath=appPath,
         logPath=logPath,toolPath=toolPath,corePath=corePath,
         sshIp=sshIp,port=port,dataNode=dataNode,azName=self.context.azName,
-        mppdbPath=tmpMppdbPath)
+        mappdbConfig=mppdbconfig)
         return xmlConfig
 
     def changeUser(self):
@@ -221,11 +222,15 @@ class ExpansionImpl():
             GaussLog.exitWithError(ErrorCode.GAUSS_503["GAUSS_50300"] % user)
 
         user_name = pw_record.pw_name
-        user_uid       = pw_record.pw_uid
-        user_gid       = pw_record.pw_gid
-        env = os.environ.copy()
+        user_uid = pw_record.pw_uid
+        user_gid = pw_record.pw_gid
         os.setgid(user_gid)
         os.setuid(user_uid)
+        os.environ["HOME"] = pw_record.pw_dir
+        os.environ["USER"] = user_name
+        os.environ["LOGNAME"] = user_name
+        os.environ["SHELL"] = pw_record.pw_shell
+
 
     def initSshConnect(self, host, user='root'):
         
@@ -620,6 +625,7 @@ retry for %s times" % start_retry_num)
 
         # Single-node database need start cluster after expansion
         if self.isSingleNodeInstance:
+            primaryHost = self.getPrimaryHostName()
             self.logger.debug("Single-Node instance need restart.\n")
             self.commonGsCtl.queryOmCluster(primaryHost, self.envFile)
 
@@ -843,6 +849,43 @@ standby nodes.")
         """
         self.checkUserAndGroupExists()
         self.checkXmlFileAccessToUser()
+        self.validNodeInStandbyList()
+
+    def validNodeInStandbyList(self):
+        """
+        check if the node has been installed in the cluster.
+        """
+        self.logger.debug("Start to check if the nodes in standby list\n")
+
+        curHostName = socket.gethostname()
+        command = "su - %s -c 'source %s;gs_om -t status --detail'" % \
+            (self.user, self.envFile)
+        sshTool = SshTool([curHostName])
+        resultMap, outputCollect = sshTool.getSshStatusOutput(command, 
+        [curHostName], self.envFile)
+        self.logger.debug(outputCollect)
+
+        newHosts = self.context.newHostList
+        standbyHosts = []
+        existHosts = []
+        while len(newHosts) > 0:
+            hostIp = newHosts.pop()
+            nodeName = self.context.backIpNameMap[hostIp]
+            nodeInfo = self.context.clusterInfoDict[nodeName]
+            dataNode = nodeInfo["dataNode"]
+            exist_reg = r"(.*)%s[\s]*%s(.*)" % (nodeName, hostIp)
+            if not re.search(exist_reg, outputCollect):
+                standbyHosts.append(hostIp)
+            else:
+                existHosts.append(hostIp)
+        self.context.newHostList = standbyHosts
+        if len(existHosts) > 0:
+            self.logger.log("The nodes [%s] are already in the cluster. Skip expand these nodes." \
+                % ",".join(existHosts))
+        self.cleanSshToolFile(sshTool)
+        if len(standbyHosts) == 0:
+            self.logger.log("There is no node can be expanded.")
+            sys.exit(0)
     
     def checkXmlFileAccessToUser(self):
         """
