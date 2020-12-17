@@ -134,6 +134,7 @@ General options:
            GaussLog.exitWithError(ErrorCode.GAUSS_357["GAUSS_35701"] % "-h")
         
         clusterInfo = ExpansipnClusterInfo()
+        self.clusterInfo = clusterInfo
         hostNameIpDict = clusterInfo.initFromXml(self.xmlFile)
         clusterDict = clusterInfo.getClusterDirectorys()
         backIpList = clusterInfo.getClusterBackIps()

@@ -583,25 +583,34 @@ retry for %s times" % start_retry_num)
         """
         self.logger.debug("Start to generate and send cluster static file.\n")
 
-        primaryHosts = self.getPrimaryHostName()
-        command = "gs_om -t generateconf -X %s --distribute" % self.context.xmlFile
-        sshTool = SshTool([primaryHosts])
-        resultMap, outputCollect = sshTool.getSshStatusOutput(command, 
-        [primaryHosts], self.envFile)
-        self.logger.debug(outputCollect)
-        self.cleanSshToolFile(sshTool)
+        primaryHost = self.getPrimaryHostName()
+        result = self.commonGsCtl.queryOmCluster(primaryHost, self.envFile)
+        for nodeName in self.context.nodeNameList:
+            nodeInfo = self.context.clusterInfoDict[nodeName]
+            nodeIp = nodeInfo["backIp"]
+            dataNode = nodeInfo["dataNode"]
+            exist_reg = r"(.*)%s[\s]*%s(.*)%s(.*)" % (nodeName, nodeIp, dataNode)
+            if not re.search(exist_reg, result) and nodeIp not in self.context.newHostList:
+                self.logger.debug("The node ip [%s] will not be added to cluster." % nodeIp)
+                dbNode = self.context.clusterInfo.getDbNodeByName(nodeName)
+                self.context.clusterInfo.dbNodes.remove(dbNode)
+        
+        toolPath = self.context.clusterInfoDict["toolPath"]
+        appPath = self.context.clusterInfoDict["appPath"]
 
-        nodeNameList = self.context.nodeNameList
-
-        for hostName in nodeNameList:
-            hostSsh = SshTool([hostName])
-            toolPath = self.context.clusterInfoDict["toolPath"]
-            appPath = self.context.clusterInfoDict["appPath"]
-            srcFile = "%s/script/static_config_files/cluster_static_config_%s" \
-                % (toolPath, hostName)
+        static_config_dir = "%s/script/static_config_files" % toolPath
+        if not os.path.exists(static_config_dir):
+            os.makedirs(static_config_dir)
+        
+        for dbNode in self.context.clusterInfo.dbNodes:
+            hostName = dbNode.name
+            staticConfigPath = "%s/script/static_config_files/cluster_static_config_%s" % \
+                (toolPath, hostName)
+            self.context.clusterInfo.saveToStaticConfig(staticConfigPath, dbNode.id)
+            srcFile = staticConfigPath
             if not os.path.exists(srcFile):
-                GaussLog.exitWithError("Generate static file [%s] not found." \
-                    % srcFile)
+                GaussLog.exitWithError("Generate static file [%s] not found." % srcFile)
+            hostSsh = SshTool([hostName])
             targetFile = "%s/bin/cluster_static_config" % appPath
             hostSsh.scpFiles(srcFile, targetFile, [hostName], self.envFile)
             self.cleanSshToolFile(hostSsh)
@@ -612,10 +621,9 @@ retry for %s times" % start_retry_num)
         # Single-node database need start cluster after expansion
         if self.isSingleNodeInstance:
             self.logger.debug("Single-Node instance need restart.\n")
-            self.commonGsCtl.queryOmCluster(primaryHosts, self.envFile)
+            self.commonGsCtl.queryOmCluster(primaryHost, self.envFile)
 
             # if primary database not normal, restart it
-            primaryHost = self.getPrimaryHostName()
             dataNode = self.context.clusterInfoDict[primaryHost]["dataNode"]
             insType, dbStat = self.commonGsCtl.queryInstanceStatus(primaryHost,
             dataNode, self.envFile)
@@ -633,7 +641,7 @@ retry for %s times" % start_retry_num)
                     self.commonGsCtl.startInstanceWithMode(hostName, dataNode, 
                     MODE_STANDBY, self.envFile)
 
-            self.commonGsCtl.startOmCluster(primaryHosts, self.envFile)
+            self.commonGsCtl.startOmCluster(primaryHost, self.envFile)
 
     def setGUCOnClusterHosts(self, hostNames=[]):
         """
