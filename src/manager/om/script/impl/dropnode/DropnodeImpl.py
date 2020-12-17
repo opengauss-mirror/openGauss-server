@@ -465,7 +465,7 @@ class OperCommon:
         """
         self.logger.log(
             "[gs_dropnode]Start to parse parameter config file on %s." % host)
-        resultDict = {'replStr': '', 'syncStandbyStr': '', 'pghbaStr': ''}
+        resultDict = {'replStr': '', 'syncStandbyStr': '*', 'pghbaStr': ''}
         pgConfName = os.path.join(dirDn, 'postgresql.conf')
         pghbaConfName = os.path.join(dirDn, 'pg_hba.conf')
 
@@ -527,7 +527,9 @@ class OperCommon:
                 output_dn_nospace = list_output1
                 init_no -= 1
                 count_dn += 1
-        if count_dn == 0 or list_output1 == '':
+        if count_dn == 0:
+            return output_result
+        if list_output1 == '':
             return ''
         if list_output1 != '*':
             output_result = output.replace(output_dn, list_output1)
@@ -601,7 +603,7 @@ class OperCommon:
                 sqlvalue += "ALTER SYSTEM SET replconninfo%s = '%s';" % (
                 i, replValue[:-1].split('|')[count])
                 count += 1
-        if not singleLeft and syncStandbyValue != '':
+        if not singleLeft and syncStandbyValue != '*':
             sqlvalue += "ALTER SYSTEM SET synchronous_standby_names = '%s';" \
                         % syncStandbyValue
         if singleLeft:
