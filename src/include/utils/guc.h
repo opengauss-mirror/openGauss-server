@@ -184,6 +184,7 @@ typedef struct {
 #define GUC_UNIT_S 0x2000    /* value is in seconds */
 #define GUC_UNIT_MIN 0x4000  /* value is in minutes */
 #define GUC_UNIT_HOUR 0x5000 /* value is in hour */
+#define GUC_UNIT_DAY 0x6000    /* value is in day */
 #define GUC_UNIT_TIME 0x7000 /* mask for MS, S, MIN */
 
 #define GUC_NOT_WHILE_SEC_REST 0x8000 /* can't set if security restricted */
@@ -242,7 +243,9 @@ extern void BeginReportingGUCOptions(void);
 extern void ParseLongOption(const char* string, char** name, char** value);
 extern bool parse_int(const char* value, int* result, int flags, const char** hintmsg);
 extern bool parse_int64(const char* value, int64* result, const char** hintmsg);
-extern bool parse_real(const char* value, double* result);
+extern bool parse_real(const char* value, double* result, int flags = 0, const char** hintmsg = NULL);
+double time_unit_convert(char** endptr, double value, int flags, const char** hintmsg);
+double memory_unit_convert(char** endptr, double value, int flags, const char** hintmsg);
 extern int set_config_option(const char* name, const char* value, GucContext context, GucSource source,
     GucAction action, bool changeVal, int elevel, bool isReload = false);
 extern void AlterSystemSetConfigFile(AlterSystemStmt * setstmt);
