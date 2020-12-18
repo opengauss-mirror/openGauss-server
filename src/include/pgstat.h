@@ -1610,23 +1610,17 @@ static inline void pgstat_report_waitevent(uint32 wait_event_info)
 static inline void pgstat_report_waitevent_count(uint32 wait_event_info)
 {
     volatile PgBackendStatus* beentry = t_thrd.shemem_ptr_cxt.MyBEEntry;
-
     if (IS_PGSTATE_TRACK_UNDEFINE)
         return;
-
     pgstat_increment_changecount_before(beentry);
     /*
      * Since this is a four-byte field which is always read and written as
      * four-bytes, updates are atomic.
      */
-    uint32 old_wait_event_info = beentry->st_waitevent;
-    beentry->st_waitevent = wait_event_info;
-
-    if (u_sess->attr.attr_common.enable_instr_track_wait && old_wait_event_info != WAIT_EVENT_END &&
-            wait_event_info == WAIT_EVENT_END) {
-        UpdateWaitEventStat(&beentry->waitInfo, old_wait_event_info, 0);
+    if (u_sess->attr.attr_common.enable_instr_track_wait && wait_event_info != WAIT_EVENT_END) {
+        beentry->st_waitevent = WAIT_EVENT_END;
+        UpdateWaitEventStat(&beentry->waitInfo, wait_event_info, 0);
     }
-
     pgstat_increment_changecount_after(beentry);
 }
 
@@ -2442,7 +2436,7 @@ extern bool CalcSQLRowStatCounter(
     PgStat_TableCounts* last_total_counter, PgStat_TableCounts* current_sql_table_counter);
 extern void GetCurrentTotalTableCounter(PgStat_TableCounts* total_table_counter);
 
-typedef struct XLogStat_Collect {
+typedef struct XLogStatCollect {
     double entryScanTime;
     double IOTime;
     double memsetTime;
@@ -2459,9 +2453,9 @@ typedef struct XLogStat_Collect {
     double sendBufferTime;
     double memsetNotificationTime;
     uint32 remoteFlushWaitCount;
-} XLogStat_Collect;
+} XLogStatCollect;
 
-extern THR_LOCAL XLogStat_Collect *XLogStat_shared;
+extern THR_LOCAL XLogStatCollect *g_xlog_stat_shared;
 
 extern void XLogStatShmemInit(void);
 extern Size XLogStatShmemSize(void);

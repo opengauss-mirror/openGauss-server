@@ -355,10 +355,10 @@ static void knl_g_wal_init(knl_g_wal_context *wal_cxt)
     wal_cxt->isWalWriterSleeping = false;
     wal_cxt->criticalEntryMutex = PTHREAD_MUTEX_INITIALIZER;
     wal_cxt->criticalEntryCV = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
-    wal_cxt->XLogFlushWaitTime = 0.0;
     wal_cxt->globalEndPosSegNo = InvalidXLogSegPtr;
-    wal_cxt->walWaitFlushCount3 = 0;
+    wal_cxt->walWaitFlushCount = 0;
     wal_cxt->lastWalStatusEntryFlushed = -1;
+    wal_cxt->lastLRCScanned = WAL_SCANNED_LRC_INIT;
 }
 
 static void knl_g_mot_init(knl_g_mot_context* mot_cxt)
