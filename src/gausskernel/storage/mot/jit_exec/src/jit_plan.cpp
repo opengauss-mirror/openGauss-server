@@ -1092,6 +1092,27 @@ static JitPlan* JitPrepareRangeSelectPlan(Query* query, MOT::Table* table, JoinC
     return (JitPlan*)plan;
 }
 
+static JitPlan* JitPrepareSimplePointQueryPlan(Query* query, MOT::Table* table)
+{
+    JitPlan* plan = nullptr;
+    // point query does not expect sort clause or aggregate clause
+    if (!CheckQueryAttributes(query, false, false, false)) {
+        MOT_LOG_TRACE("JitPrepareSimplePlan(): Disqualifying point query - Invalid query attributes");
+    } else if (query->commandType == CMD_UPDATE) {
+        plan = JitPrepareUpdatePlan(query, table);
+    } else if (query->commandType == CMD_DELETE) {
+        plan = JitPrepareDeletePlan(query, table);
+    } else if (query->commandType == CMD_SELECT) {
+        plan = JitPrepareSelectPlan(query, table);
+    } else {
+        MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
+            "Prepare Simple Point-query JIT Plan",
+            "Unexpected command type: %d",
+            (int)query->commandType);
+    }
+    return plan;
+}
+
 static JitPlan* JitPrepareSimplePlan(Query* query)
 {
     JitPlan* plan = nullptr;
@@ -1119,21 +1140,7 @@ static JitPlan* JitPrepareSimplePlan(Query* query)
                 &count)) {  // count all equals operators that relate to the index (disregard other filters)
             MOT_LOG_TRACE("JitPrepareSimplePlan(): Failed to determine if this is a point query");
         } else if (count == index->GetNumFields()) {  // a point query
-            // point query does not expect sort clause or aggregate clause
-            if (!CheckQueryAttributes(query, false, false, false)) {
-                MOT_LOG_TRACE("JitPrepareSimplePlan(): Disqualifying point query - Invalid query attributes");
-            } else if (query->commandType == CMD_UPDATE) {
-                plan = JitPrepareUpdatePlan(query, table);
-            } else if (query->commandType == CMD_DELETE) {
-                plan = JitPrepareDeletePlan(query, table);
-            } else if (query->commandType == CMD_SELECT) {
-                plan = JitPrepareSelectPlan(query, table);
-            } else {
-                MOT_REPORT_ERROR(MOT_ERROR_INTERNAL,
-                    "Prepare Simple Point-query JIT Plan",
-                    "Unexpected command type: %d",
-                    (int)query->commandType);
-            }
+            plan = JitPrepareSimplePointQueryPlan(query, table);
         } else {
             if (query->commandType == CMD_UPDATE) {
                 if (!CheckQueryAttributes(

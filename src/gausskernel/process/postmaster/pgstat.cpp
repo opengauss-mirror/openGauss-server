@@ -2507,11 +2507,11 @@ static THR_LOCAL char* BackendNspRelnameBuffer = NULL;
 
 PgBackendStatus* PgBackendStatusArray = NULL;
 
-THR_LOCAL XLogStat_Collect *XLogStat_shared = NULL;
+THR_LOCAL XLogStatCollect *g_xlog_stat_shared = NULL;
 
 Size XLogStatShmemSize(void)
 {
-    return sizeof(XLogStat_Collect);
+    return sizeof(XLogStatCollect);
 }
 
 void XLogStatShmemInit(void)
@@ -2519,12 +2519,12 @@ void XLogStatShmemInit(void)
     bool found;
     errno_t rc;
 
-    XLogStat_shared = (XLogStat_Collect *)ShmemInitStruct("XLogStat", XLogStatShmemSize(), &found);
-    XLogStat_shared->remoteFlushWaitCount = 0;
+    g_xlog_stat_shared = (XLogStatCollect *)ShmemInitStruct("XLogStat", XLogStatShmemSize(), &found);
+    g_xlog_stat_shared->remoteFlushWaitCount = 0;
 
     if (!IsUnderPostmaster) {
         Assert(!found);
-        rc = memset_s(XLogStat_shared, XLogStatShmemSize(), 0, XLogStatShmemSize());
+        rc = memset_s(g_xlog_stat_shared, XLogStatShmemSize(), 0, XLogStatShmemSize());
         securec_check(rc, "\0", "\0");
     } else {
         Assert(found);

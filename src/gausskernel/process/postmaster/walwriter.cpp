@@ -63,16 +63,8 @@
 
 #include "gssignal/gs_signal.h"
 
-THR_LOCAL int WalWriterDelay = 0;
-THR_LOCAL int SLEEP_TIME_OUT_MS = 300; /* WAL writer sleep timeout in millisecond. */
-
-/*
- * Number of do-nothing loops before lengthening the delay time, and the
- * multiplier to apply to WalWriterDelay when we do decide to hibernate.
- * (Perhaps these need to be configurable?)
- */
-#define LOOPS_UNTIL_HIBERNATE 50
-#define HIBERNATE_FACTOR 25
+#define NANOSECONDS_PER_MILLISECOND 1000000L
+#define NANOSECONDS_PER_SECOND 1000000000L
 
 typedef struct WALCallbackItem {
     struct WALCallbackItem* next;
@@ -86,6 +78,8 @@ static void WalSigHupHandler(SIGNAL_ARGS);
 static void WalShutdownHandler(SIGNAL_ARGS);
 static void walwriter_sigusr1_handler(SIGNAL_ARGS);
 
+THR_LOCAL const int g_sleep_timeout_ms = 300; /* WAL writer sleep timeout in millisecond. */
+
 /*
  * Main entry point for walwriter process
  *
@@ -96,8 +90,6 @@ void WalWriterMain(void)
 {
     sigjmp_buf local_sigjmp_buf;
     MemoryContext walwriter_context;
-    int left_till_hibernate;
-    bool hibernating = false;
     sigset_t old_sig_mask;
     bool wrote_something = true;
     long times_wrote_nothing = 0;
@@ -261,8 +253,6 @@ void WalWriterMain(void)
     /*
      * Reset hibernation state after any error.
      */
-    left_till_hibernate = LOOPS_UNTIL_HIBERNATE;
-    hibernating = false;
     SetWalWriterSleeping(false);
 
     /*
@@ -278,12 +268,6 @@ void WalWriterMain(void)
      * Loop forever
      */
     for (;;) {
-        long cur_timeout = WalWriterDelay;
-        int rc = 0;
-
-        /* Clear any already-pending wakeups */
-        ResetLatch(&t_thrd.proc->procLatch);
-
         pgstat_report_activity(STATE_RUNNING, NULL);
 
         /*
@@ -312,13 +296,13 @@ void WalWriterMain(void)
             WalInsertStatusEntry *pCriticalEntry = &g_instance.wal_cxt.walInsertStatusTable[GET_NEXT_STATUS_ENTRY(lastFlushedEntry)];
             if (g_instance.wal_cxt.isWalWriterUp && pCriticalEntry->status == WAL_NOT_COPIED) {
                 sleep_times_counter++;
-                pthread_mutex_lock(&g_instance.wal_cxt.criticalEntryMutex);
+                (void)pthread_mutex_lock(&g_instance.wal_cxt.criticalEntryMutex);
                 g_instance.wal_cxt.isWalWriterSleeping = true;
                 while (pCriticalEntry->status == WAL_NOT_COPIED && !t_thrd.walwriter_cxt.shutdown_requested) {
                     (void)clock_gettime(CLOCK_REALTIME, &time_to_wait);
-                    time_to_wait.tv_nsec += 1000000 * SLEEP_TIME_OUT_MS;
-                    if (time_to_wait.tv_nsec >= 1000000000) {
-                        time_to_wait.tv_nsec -= 1000000000;
+                    time_to_wait.tv_nsec += g_sleep_timeout_ms * NANOSECONDS_PER_MILLISECOND;
+                    if (time_to_wait.tv_nsec >= NANOSECONDS_PER_SECOND) {
+                        time_to_wait.tv_nsec -= NANOSECONDS_PER_SECOND;
                         time_to_wait.tv_sec += 1;
                     }
                     int res = pthread_cond_timedwait(&g_instance.wal_cxt.criticalEntryCV,
@@ -336,32 +320,18 @@ void WalWriterMain(void)
                         ereport(WARNING, (errmsg("WAL writer pthread_cond_timedwait returned error code = %d.",
                             errno)));
                     }
+                    /* wakeup other producer if possible to avoid hang */
+                    WakeupWalSemaphore(&g_instance.wal_cxt.walFlushWaitLock->l.sem);
                     CHECK_FOR_INTERRUPTS();
                 }
                 g_instance.wal_cxt.isWalWriterSleeping = false;
-                pthread_mutex_unlock(&g_instance.wal_cxt.criticalEntryMutex);
+                (void)pthread_mutex_unlock(&g_instance.wal_cxt.criticalEntryMutex);
                 time_out_counter = 0;
             }
             times_wrote_nothing = 0;
         }
 
         pgstat_report_activity(STATE_IDLE, NULL);
-        if (cur_timeout > 0) {
-            rc = WaitLatch(&t_thrd.proc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, cur_timeout);
-        }
-
-        /* r
-         * Emergency bailout if postmaster has died.  This is to avoid the
-         * necessity for manual cleanup of all postmaster children.
-         */
-        if (rc & WL_POSTMASTER_DEATH) {
-            g_instance.wal_cxt.isWalWriterUp = false;
-            pg_memory_barrier();
-            /* Stop WalWriterAuxiliary from waiting. */
-            PGSemaphoreReset(&g_instance.wal_cxt.walInitSegLock->l.sem);
-            PGSemaphoreUnlock(&g_instance.wal_cxt.walInitSegLock->l.sem);
-            gs_thread_exit(1);
-        }
     }
 }
 
@@ -382,8 +352,7 @@ static void wal_quickdie(SIGNAL_ARGS)
     g_instance.wal_cxt.isWalWriterUp = false;
     pg_memory_barrier();
     /* Stop WalWriterAuxiliary from waiting. */
-    PGSemaphoreReset(&g_instance.wal_cxt.walInitSegLock->l.sem);
-    PGSemaphoreUnlock(&g_instance.wal_cxt.walInitSegLock->l.sem);
+    WakeupWalSemaphore(&g_instance.wal_cxt.walInitSegLock->l.sem);
 
     /*
      * We DO NOT want to run proc_exit() callbacks -- we're here because
@@ -434,8 +403,7 @@ static void WalShutdownHandler(SIGNAL_ARGS)
     g_instance.wal_cxt.isWalWriterUp = false;
     pg_memory_barrier();
     /* Stop WalWriterAuxiliary from waiting. */
-    PGSemaphoreReset(&g_instance.wal_cxt.walInitSegLock->l.sem);
-    PGSemaphoreUnlock(&g_instance.wal_cxt.walInitSegLock->l.sem);
+    WakeupWalSemaphore(&g_instance.wal_cxt.walInitSegLock->l.sem);
 }
 
 /* SIGUSR1: used for latch wakeups */

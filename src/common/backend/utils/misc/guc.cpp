@@ -9997,7 +9997,7 @@ static void init_configure_names_int64()
                 GUC_NOT_IN_SAMPLE
             },
             &g_instance.attr.attr_storage.xlog_idle_flushes_before_sleep,
-            INT64CONST(500000000),
+            INT64CONST(500),
             INT64CONST(0),
             INT64CONST(0x7FFFFFFFFFFFFFF),
             NULL,
@@ -10635,7 +10635,7 @@ static void init_configure_names_string()
                 GUC_SUPERUSER_ONLY
             },
             &g_instance.attr.attr_common.Alarm_component,
-            "/opt/huawei/snas/bin/snas_cm_cmd",
+            "/opt/snas/bin/snas_cm_cmd",
             NULL,
             NULL,
             NULL

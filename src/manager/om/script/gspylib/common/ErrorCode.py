@@ -1126,9 +1126,9 @@ class ErrorCode():
                        "missing in the command.",
         "GAUSS_35802": "[GAUSS-35802] The IP list of target node: %s"
                        "is not in the current cluster. Please check!",
-        "GAUSS_35803": "[GAUSS-35803] The IP of primary node %s is in the "
+        "GAUSS_35803": "[GAUSS-35803] The IP of local host %s is in the "
                        "target node list. \n"
-                       "The primary node can not be dropped! \n",
+                       "Can not drop local host!\n",
         "GAUSS_35804": "[GAUSS-35804] The dropnode operation can only be executed"
                        " at the primary node. \n ",
         "GAUSS_35805": "[GAUSS-35805] Input %s. Operation aborted. ",
@@ -1136,7 +1136,7 @@ class ErrorCode():
                        "It doesn't meet the requirement.! ",
         "GAUSS_35807": "[GAUSS-35807] The host %s which still exist in the "
                        "cluster can't be connected.\n"
-                       "It doesn't meet the requirement.! ",
+                       "It doesn't meet the requirement! ",
         "GAUSS_35808": "[GAUSS-35808] The %s is running switchover/failover!\n"
                        "The dropnode operation can only be executed when there is"
                        " no such operation!",

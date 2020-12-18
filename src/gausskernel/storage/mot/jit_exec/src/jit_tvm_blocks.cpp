@@ -1100,6 +1100,52 @@ static bool buildClosedRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* indexS
     return result;
 }
 
+static void BuildAscendingSemiOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* indexScan, int* maxArg,
+    JitRangeScanType rangeScanType, JitRangeBoundMode* beginRangeBound, JitRangeBoundMode* endRangeBound,
+    Instruction* outerRow, int subQueryIndex, int offset, int size, JitColumnExpr* lastExpr)
+{
+    if ((indexScan->_last_dim_op1 == JIT_WOC_LESS_THAN) || (indexScan->_last_dim_op1 == JIT_WOC_LESS_EQUALS)) {
+        // this is an upper bound operator on an ascending semi-open scan so we fill the begin key with zeros,
+        // and the end key with the value
+        AddFillKeyPattern(ctx, 0x00, offset, size, JIT_RANGE_ITERATOR_START, rangeScanType, subQueryIndex);
+        buildScanExpression(ctx, lastExpr, maxArg, JIT_RANGE_ITERATOR_END, rangeScanType, outerRow, subQueryIndex);
+        *beginRangeBound = JIT_RANGE_BOUND_INCLUDE;
+        *endRangeBound = (indexScan->_last_dim_op1 == JIT_WOC_LESS_EQUALS) ? JIT_RANGE_BOUND_INCLUDE
+                                                                              : JIT_RANGE_BOUND_EXCLUDE;
+    } else {
+        // this is a lower bound operator on an ascending semi-open scan so we fill the begin key with the
+        // value, and the end key with 0xFF
+        buildScanExpression(ctx, lastExpr, maxArg, JIT_RANGE_ITERATOR_START, rangeScanType, outerRow, subQueryIndex);
+        AddFillKeyPattern(ctx, 0xFF, offset, size, JIT_RANGE_ITERATOR_END, rangeScanType, subQueryIndex);
+        *beginRangeBound = (indexScan->_last_dim_op1 == JIT_WOC_GREATER_EQUALS) ? JIT_RANGE_BOUND_INCLUDE
+                                                                                   : JIT_RANGE_BOUND_EXCLUDE;
+        *endRangeBound = JIT_RANGE_BOUND_INCLUDE;
+    }
+}
+
+static void BuildDescendingSemiOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* indexScan, int* maxArg,
+    JitRangeScanType rangeScanType, JitRangeBoundMode* beginRangeBound, JitRangeBoundMode* endRangeBound,
+    Instruction* outerRow, int subQueryIndex, int offset, int size, JitColumnExpr* lastExpr)
+{
+    if ((indexScan->_last_dim_op1 == JIT_WOC_LESS_THAN) || (indexScan->_last_dim_op1 == JIT_WOC_LESS_EQUALS)) {
+        // this is an upper bound operator on a descending semi-open scan so we fill the begin key with value,
+        // and the end key with zeroes
+        buildScanExpression(ctx, lastExpr, maxArg, JIT_RANGE_ITERATOR_START, rangeScanType, outerRow, subQueryIndex);
+        AddFillKeyPattern(ctx, 0x00, offset, size, JIT_RANGE_ITERATOR_END, rangeScanType, subQueryIndex);
+        *beginRangeBound = (indexScan->_last_dim_op1 == JIT_WOC_LESS_EQUALS) ? JIT_RANGE_BOUND_INCLUDE
+                                                                                : JIT_RANGE_BOUND_EXCLUDE;
+        *endRangeBound = JIT_RANGE_BOUND_INCLUDE;
+    } else {
+        // this is a lower bound operator on a descending semi-open scan so we fill the begin key with 0xFF, and
+        // the end key with the value
+        AddFillKeyPattern(ctx, 0xFF, offset, size, JIT_RANGE_ITERATOR_START, rangeScanType, subQueryIndex);
+        buildScanExpression(ctx, lastExpr, maxArg, JIT_RANGE_ITERATOR_END, rangeScanType, outerRow, subQueryIndex);
+        *beginRangeBound = JIT_RANGE_BOUND_INCLUDE;
+        *endRangeBound = (indexScan->_last_dim_op1 == JIT_WOC_GREATER_EQUALS) ? JIT_RANGE_BOUND_INCLUDE
+                                                                                 : JIT_RANGE_BOUND_EXCLUDE;
+    }
+}
+
 static bool buildSemiOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* index_scan, int* max_arg,
     JitRangeScanType range_scan_type, JitRangeBoundMode* begin_range_bound, JitRangeBoundMode* end_range_bound,
     Instruction* outer_row, int subQueryIndex)
@@ -1145,47 +1191,29 @@ static bool buildSemiOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* inde
         int last_expr_index = index_scan->_search_exprs._count - 1;
         JitColumnExpr* last_expr = &index_scan->_search_exprs._exprs[last_expr_index];
         if (ascending) {
-            if ((index_scan->_last_dim_op1 == JIT_WOC_LESS_THAN) ||
-                (index_scan->_last_dim_op1 == JIT_WOC_LESS_EQUALS)) {
-                // this is an upper bound operator on an ascending semi-open scan so we fill the begin key with zeros,
-                // and the end key with the value
-                AddFillKeyPattern(ctx, 0x00, offset, size, JIT_RANGE_ITERATOR_START, range_scan_type, subQueryIndex);
-                buildScanExpression(
-                    ctx, last_expr, max_arg, JIT_RANGE_ITERATOR_END, range_scan_type, outer_row, subQueryIndex);
-                *begin_range_bound = JIT_RANGE_BOUND_INCLUDE;
-                *end_range_bound = (index_scan->_last_dim_op1 == JIT_WOC_LESS_EQUALS) ? JIT_RANGE_BOUND_INCLUDE
-                                                                                      : JIT_RANGE_BOUND_EXCLUDE;
-            } else {
-                // this is a lower bound operator on an ascending semi-open scan so we fill the begin key with the
-                // value, and the end key with 0xFF
-                buildScanExpression(
-                    ctx, last_expr, max_arg, JIT_RANGE_ITERATOR_START, range_scan_type, outer_row, subQueryIndex);
-                AddFillKeyPattern(ctx, 0xFF, offset, size, JIT_RANGE_ITERATOR_END, range_scan_type, subQueryIndex);
-                *begin_range_bound = (index_scan->_last_dim_op1 == JIT_WOC_GREATER_EQUALS) ? JIT_RANGE_BOUND_INCLUDE
-                                                                                           : JIT_RANGE_BOUND_EXCLUDE;
-                *end_range_bound = JIT_RANGE_BOUND_INCLUDE;
-            }
+            BuildAscendingSemiOpenRangeScan(ctx,
+                index_scan,
+                max_arg,
+                range_scan_type,
+                begin_range_bound,
+                end_range_bound,
+                outer_row,
+                subQueryIndex,
+                offset,
+                size,
+                last_expr);
         } else {
-            if ((index_scan->_last_dim_op1 == JIT_WOC_LESS_THAN) ||
-                (index_scan->_last_dim_op1 == JIT_WOC_LESS_EQUALS)) {
-                // this is an upper bound operator on a descending semi-open scan so we fill the begin key with value,
-                // and the end key with zeroes
-                buildScanExpression(
-                    ctx, last_expr, max_arg, JIT_RANGE_ITERATOR_START, range_scan_type, outer_row, subQueryIndex);
-                AddFillKeyPattern(ctx, 0x00, offset, size, JIT_RANGE_ITERATOR_END, range_scan_type, subQueryIndex);
-                *begin_range_bound = (index_scan->_last_dim_op1 == JIT_WOC_LESS_EQUALS) ? JIT_RANGE_BOUND_INCLUDE
-                                                                                        : JIT_RANGE_BOUND_EXCLUDE;
-                *end_range_bound = JIT_RANGE_BOUND_INCLUDE;
-            } else {
-                // this is a lower bound operator on a descending semi-open scan so we fill the begin key with 0xFF, and
-                // the end key with the value
-                AddFillKeyPattern(ctx, 0xFF, offset, size, JIT_RANGE_ITERATOR_START, range_scan_type, subQueryIndex);
-                buildScanExpression(
-                    ctx, last_expr, max_arg, JIT_RANGE_ITERATOR_END, range_scan_type, outer_row, subQueryIndex);
-                *begin_range_bound = JIT_RANGE_BOUND_INCLUDE;
-                *end_range_bound = (index_scan->_last_dim_op1 == JIT_WOC_GREATER_EQUALS) ? JIT_RANGE_BOUND_INCLUDE
-                                                                                         : JIT_RANGE_BOUND_EXCLUDE;
-            }
+            BuildDescendingSemiOpenRangeScan(ctx,
+                index_scan,
+                max_arg,
+                range_scan_type,
+                begin_range_bound,
+                end_range_bound,
+                outer_row,
+                subQueryIndex,
+                offset,
+                size,
+                last_expr);
         }
 
         // now fill the rest as usual
@@ -1224,6 +1252,109 @@ static bool buildSemiOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* inde
             subQueryIndex);
     }
     return result;
+}
+
+static void BuildAscendingOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* indexScan, int* maxArg,
+    JitRangeScanType rangeScanType, JitRangeBoundMode* beginRangeBound, JitRangeBoundMode* endRangeBound,
+    Instruction* outerRow, int subQueryIndex, JitWhereOperatorClass beforeLastDimOp, JitWhereOperatorClass lastDimOp,
+    JitColumnExpr* beforeLastExpr, JitColumnExpr* lastExpr)
+{
+    if ((beforeLastDimOp == JIT_WOC_LESS_THAN) || (beforeLastDimOp == JIT_WOC_LESS_EQUALS)) {
+        MOT_ASSERT((lastDimOp == JIT_WOC_GREATER_THAN) || (lastDimOp == JIT_WOC_GREATER_EQUALS));
+        // the before-last operator is an upper bound operator on an ascending open scan so we fill the begin
+        // key with the last value, and the end key with the before-last value
+        buildScanExpression(ctx,
+            lastExpr,
+            maxArg,
+            JIT_RANGE_ITERATOR_START,
+            rangeScanType,
+            outerRow,  // lower bound on begin iterator key
+            subQueryIndex);
+        buildScanExpression(ctx,
+            beforeLastExpr,
+            maxArg,
+            JIT_RANGE_ITERATOR_END,
+            rangeScanType,
+            outerRow,  // upper bound on end iterator key
+            subQueryIndex);
+        *beginRangeBound =
+            (lastDimOp == JIT_WOC_GREATER_EQUALS) ? JIT_RANGE_BOUND_INCLUDE : JIT_RANGE_BOUND_EXCLUDE;
+        *endRangeBound =
+            (beforeLastDimOp == JIT_WOC_LESS_EQUALS) ? JIT_RANGE_BOUND_INCLUDE : JIT_RANGE_BOUND_EXCLUDE;
+    } else {
+        MOT_ASSERT((lastDimOp == JIT_WOC_LESS_THAN) || (lastDimOp == JIT_WOC_LESS_EQUALS));
+        // the before-last operator is a lower bound operator on an ascending open scan so we fill the begin key
+        // with the before-last value, and the end key with the last value
+        buildScanExpression(ctx,
+            beforeLastExpr,
+            maxArg,
+            JIT_RANGE_ITERATOR_START,
+            rangeScanType,
+            outerRow,  // lower bound on begin iterator key
+            subQueryIndex);
+        buildScanExpression(ctx,
+            lastExpr,
+            maxArg,
+            JIT_RANGE_ITERATOR_END,
+            rangeScanType,
+            outerRow,  // upper bound on end iterator key
+            subQueryIndex);
+        *beginRangeBound =
+            (beforeLastDimOp == JIT_WOC_GREATER_EQUALS) ? JIT_RANGE_BOUND_INCLUDE : JIT_RANGE_BOUND_EXCLUDE;
+        *endRangeBound = (lastDimOp == JIT_WOC_LESS_EQUALS) ? JIT_RANGE_BOUND_INCLUDE : JIT_RANGE_BOUND_EXCLUDE;
+    }
+}
+
+static void BuildDescendingOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* indexScan, int* maxArg,
+    JitRangeScanType rangeScanType, JitRangeBoundMode* beginRangeBound, JitRangeBoundMode* endRangeBound,
+    Instruction* outerRow, int subQueryIndex, JitWhereOperatorClass beforeLastDimOp, JitWhereOperatorClass lastDimOp,
+    JitColumnExpr* beforeLastExpr, JitColumnExpr* lastExpr)
+{
+    if ((beforeLastDimOp == JIT_WOC_LESS_THAN) || (beforeLastDimOp == JIT_WOC_LESS_EQUALS)) {
+        MOT_ASSERT((lastDimOp == JIT_WOC_GREATER_THAN) || (lastDimOp == JIT_WOC_GREATER_EQUALS));
+        // the before-last operator is an upper bound operator on an descending open scan so we fill the begin
+        // key with the last value, and the end key with the before-last value
+        buildScanExpression(ctx,
+            beforeLastExpr,
+            maxArg,
+            JIT_RANGE_ITERATOR_START,
+            rangeScanType,
+            outerRow,  // upper bound on begin iterator key
+            subQueryIndex);
+        buildScanExpression(ctx,
+            lastExpr,
+            maxArg,
+            JIT_RANGE_ITERATOR_END,
+            rangeScanType,
+            outerRow,  // lower bound on end iterator key
+            subQueryIndex);
+        *beginRangeBound =
+            (beforeLastDimOp == JIT_WOC_LESS_EQUALS) ? JIT_RANGE_BOUND_INCLUDE : JIT_RANGE_BOUND_EXCLUDE;
+        *endRangeBound =
+            (lastDimOp == JIT_WOC_GREATER_EQUALS) ? JIT_RANGE_BOUND_INCLUDE : JIT_RANGE_BOUND_EXCLUDE;
+    } else {
+        MOT_ASSERT((lastDimOp == JIT_WOC_LESS_THAN) || (lastDimOp == JIT_WOC_LESS_EQUALS));
+        // the before-last operator is a lower bound operator on an descending open scan so we fill the begin
+        // key with the last value, and the end key with the before-last value
+        buildScanExpression(ctx,
+            lastExpr,
+            maxArg,
+            JIT_RANGE_ITERATOR_START,
+            rangeScanType,
+            outerRow,  // upper bound on begin iterator key
+            subQueryIndex);
+        buildScanExpression(ctx,
+            beforeLastExpr,
+            maxArg,
+            JIT_RANGE_ITERATOR_END,
+            rangeScanType,
+            outerRow,  // lower bound on end iterator key
+            subQueryIndex);
+        *beginRangeBound =
+            (lastDimOp == JIT_WOC_LESS_EQUALS) ? JIT_RANGE_BOUND_INCLUDE : JIT_RANGE_BOUND_EXCLUDE;
+        *endRangeBound =
+            (beforeLastDimOp == JIT_WOC_GREATER_EQUALS) ? JIT_RANGE_BOUND_INCLUDE : JIT_RANGE_BOUND_EXCLUDE;
+    }
 }
 
 static bool buildOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* index_scan, int* max_arg,
@@ -1269,97 +1400,31 @@ static bool buildOpenRangeScan(JitTvmCodeGenContext* ctx, JitIndexScan* index_sc
         JitColumnExpr* last_expr = &index_scan->_search_exprs._exprs[last_expr_index];
         JitColumnExpr* before_last_expr = &index_scan->_search_exprs._exprs[last_expr_index - 1];
         if (ascending) {
-            if ((before_last_dim_op == JIT_WOC_LESS_THAN) || (before_last_dim_op == JIT_WOC_LESS_EQUALS)) {
-                MOT_ASSERT((last_dim_op == JIT_WOC_GREATER_THAN) || (last_dim_op == JIT_WOC_GREATER_EQUALS));
-                // the before-last operator is an upper bound operator on an ascending open scan so we fill the begin
-                // key with the last value, and the end key with the before-last value
-                buildScanExpression(ctx,
-                    last_expr,
-                    max_arg,
-                    JIT_RANGE_ITERATOR_START,
-                    range_scan_type,
-                    outer_row,  // lower bound on begin iterator key
-                    subQueryIndex);
-                buildScanExpression(ctx,
-                    before_last_expr,
-                    max_arg,
-                    JIT_RANGE_ITERATOR_END,
-                    range_scan_type,
-                    outer_row,  // upper bound on end iterator key
-                    subQueryIndex);
-                *begin_range_bound =
-                    (last_dim_op == JIT_WOC_GREATER_EQUALS) ? JIT_RANGE_BOUND_INCLUDE : JIT_RANGE_BOUND_EXCLUDE;
-                *end_range_bound =
-                    (before_last_dim_op == JIT_WOC_LESS_EQUALS) ? JIT_RANGE_BOUND_INCLUDE : JIT_RANGE_BOUND_EXCLUDE;
-            } else {
-                MOT_ASSERT((last_dim_op == JIT_WOC_LESS_THAN) || (last_dim_op == JIT_WOC_LESS_EQUALS));
-                // the before-last operator is a lower bound operator on an ascending open scan so we fill the begin key
-                // with the before-last value, and the end key with the last value
-                buildScanExpression(ctx,
-                    before_last_expr,
-                    max_arg,
-                    JIT_RANGE_ITERATOR_START,
-                    range_scan_type,
-                    outer_row,  // lower bound on begin iterator key
-                    subQueryIndex);
-                buildScanExpression(ctx,
-                    last_expr,
-                    max_arg,
-                    JIT_RANGE_ITERATOR_END,
-                    range_scan_type,
-                    outer_row,  // upper bound on end iterator key
-                    subQueryIndex);
-                *begin_range_bound =
-                    (before_last_dim_op == JIT_WOC_GREATER_EQUALS) ? JIT_RANGE_BOUND_INCLUDE : JIT_RANGE_BOUND_EXCLUDE;
-                *end_range_bound =
-                    (last_dim_op == JIT_WOC_LESS_EQUALS) ? JIT_RANGE_BOUND_INCLUDE : JIT_RANGE_BOUND_EXCLUDE;
-            }
+            BuildAscendingOpenRangeScan(ctx,
+                index_scan,
+                max_arg,
+                range_scan_type,
+                begin_range_bound,
+                end_range_bound,
+                outer_row,
+                subQueryIndex,
+                before_last_dim_op,
+                last_dim_op,
+                before_last_expr,
+                last_expr);
         } else {
-            if ((before_last_dim_op == JIT_WOC_LESS_THAN) || (before_last_dim_op == JIT_WOC_LESS_EQUALS)) {
-                MOT_ASSERT((last_dim_op == JIT_WOC_GREATER_THAN) || (last_dim_op == JIT_WOC_GREATER_EQUALS));
-                // the before-last operator is an upper bound operator on an descending open scan so we fill the begin
-                // key with the last value, and the end key with the before-last value
-                buildScanExpression(ctx,
-                    before_last_expr,
-                    max_arg,
-                    JIT_RANGE_ITERATOR_START,
-                    range_scan_type,
-                    outer_row,  // upper bound on begin iterator key
-                    subQueryIndex);
-                buildScanExpression(ctx,
-                    last_expr,
-                    max_arg,
-                    JIT_RANGE_ITERATOR_END,
-                    range_scan_type,
-                    outer_row,  // lower bound on end iterator key
-                    subQueryIndex);
-                *begin_range_bound =
-                    (before_last_dim_op == JIT_WOC_LESS_EQUALS) ? JIT_RANGE_BOUND_INCLUDE : JIT_RANGE_BOUND_EXCLUDE;
-                *end_range_bound =
-                    (last_dim_op == JIT_WOC_GREATER_EQUALS) ? JIT_RANGE_BOUND_INCLUDE : JIT_RANGE_BOUND_EXCLUDE;
-            } else {
-                MOT_ASSERT((last_dim_op == JIT_WOC_LESS_THAN) || (last_dim_op == JIT_WOC_LESS_EQUALS));
-                // the before-last operator is a lower bound operator on an descending open scan so we fill the begin
-                // key with the last value, and the end key with the before-last value
-                buildScanExpression(ctx,
-                    last_expr,
-                    max_arg,
-                    JIT_RANGE_ITERATOR_START,
-                    range_scan_type,
-                    outer_row,  // upper bound on begin iterator key
-                    subQueryIndex);
-                buildScanExpression(ctx,
-                    before_last_expr,
-                    max_arg,
-                    JIT_RANGE_ITERATOR_END,
-                    range_scan_type,
-                    outer_row,  // lower bound on end iterator key
-                    subQueryIndex);
-                *begin_range_bound =
-                    (last_dim_op == JIT_WOC_LESS_EQUALS) ? JIT_RANGE_BOUND_INCLUDE : JIT_RANGE_BOUND_EXCLUDE;
-                *end_range_bound =
-                    (before_last_dim_op == JIT_WOC_GREATER_EQUALS) ? JIT_RANGE_BOUND_INCLUDE : JIT_RANGE_BOUND_EXCLUDE;
-            }
+            BuildDescendingOpenRangeScan(ctx,
+                index_scan,
+                max_arg,
+                range_scan_type,
+                begin_range_bound,
+                end_range_bound,
+                outer_row,
+                subQueryIndex,
+                before_last_dim_op,
+                last_dim_op,
+                before_last_expr,
+                last_expr);
         }
 
         // now fill the rest as usual

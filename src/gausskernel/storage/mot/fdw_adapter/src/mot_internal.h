@@ -305,6 +305,17 @@ public:
     static bool m_callbacks_initialized;
 
 private:
+    /**
+     * @brief Adds all the columns.
+     * @param table Table object being created.
+     * @param tableElts Column definitions list.
+     * @param[out] hasBlob Whether any column is a blob.
+     * NOTE: On failure, table object will be deleted and ereport will be done.
+     */
+    static void AddTableColumns(MOT::Table* table, List *tableElts, bool& hasBlob);
+
+    static void ValidateCreateIndex(IndexStmt* index, MOT::Table* table, MOT::TxnManager* txn);
+
     static void VarcharToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, Oid type, uint8_t* data, size_t len,
         KEY_OPER oper, uint8_t fill);
     static void FloatToMOTKey(MOT::Column* col, ExprState* expr, Datum datum, uint8_t* data);
@@ -376,6 +387,7 @@ inline void CleanQueryStatesOnError(MOT::TxnManager* txn)
                 CleanCursors(state);
             }
         }
+        txn->m_queryState.clear();
     }
 }
 

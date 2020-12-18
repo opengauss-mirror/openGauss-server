@@ -34,14 +34,14 @@
 #include "jit_llvm_util.h"
 
 namespace JitExec {
+/** @brief Creates a jitted function for code generation. Builds prototype and entry block. */
+void CreateJittedFunction(JitLlvmCodeGenContext* ctx, const char* function_name);
+
 /** @brief Builds a code segment for checking if soft memory limit has been reached. */
 void buildIsSoftMemoryLimitReached(JitLlvmCodeGenContext* ctx);
 
 /** @brief Builds a code segment for writing a row. */
 void buildWriteRow(JitLlvmCodeGenContext* ctx, llvm::Value* row, bool isPKey, JitLlvmRuntimeCursor* cursor);
-
-/** @brief Creates a jitted function for code generation. Builds prototype and entry block. */
-void CreateJittedFunction(JitLlvmCodeGenContext* ctx, const char* function_name);
 
 /** @brief Adds code to reset the number of rows processed. */
 void buildResetRowsProcessed(JitLlvmCodeGenContext* ctx);
@@ -70,9 +70,6 @@ llvm::Value* buildGetRowFromIterator(JitLlvmCodeGenContext* ctx, llvm::BasicBloc
     MOT::AccessType access_mode, JitIndexScanDirection index_scan_direction, JitLlvmRuntimeCursor* cursor,
     JitRangeScanType range_scan_type, int subQueryIndex = -1);
 
-bool buildScanExpression(JitLlvmCodeGenContext* ctx, JitColumnExpr* expr, int* max_arg,
-    JitRangeIteratorType range_itr_type, JitRangeScanType range_scan_type, llvm::Value* outer_row, int subQueryIndex);
-
 bool buildPointScan(JitLlvmCodeGenContext* ctx, JitColumnExprArray* exprArray, int* maxArg,
     JitRangeScanType rangeScanType, llvm::Value* outerRow, int exprCount = -1, int subQueryIndex = -1);
 
@@ -82,24 +79,6 @@ bool writeRowColumns(
 bool selectRowColumns(JitLlvmCodeGenContext* ctx, llvm::Value* row, JitSelectExprArray* expr_array, int* max_arg,
     JitRangeScanType range_scan_type, int subQueryIndex = -1);
 
-bool buildSemiOpenRangeScan(JitLlvmCodeGenContext* ctx, JitIndexScan* indexScan, int* maxArg,
-    JitRangeScanType rangeScanType, JitRangeBoundMode* beginRangeBound, JitRangeBoundMode* endRangeBound,
-    llvm::Value* outerRow, int subQueryIndex);
-
-bool buildOpenRangeScan(JitLlvmCodeGenContext* ctx, JitIndexScan* index_scan, int* max_arg,
-    JitRangeScanType range_scan_type, JitRangeBoundMode* begin_range_bound, JitRangeBoundMode* end_range_bound,
-    llvm::Value* outer_row, int subQueryIndex);
-
-bool buildRangeScan(JitLlvmCodeGenContext* ctx, JitIndexScan* index_scan, int* max_arg,
-    JitRangeScanType range_scan_type, JitRangeBoundMode* begin_range_bound, JitRangeBoundMode* end_range_bound,
-    llvm::Value* outer_row, int subQueryIndex = -1);
-
-bool buildPrepareStateScan(JitLlvmCodeGenContext* ctx, JitIndexScan* index_scan, int* max_arg,
-    JitRangeScanType range_scan_type, llvm::Value* outer_row);
-
-bool buildPrepareStateRow(JitLlvmCodeGenContext* ctx, MOT::AccessType access_mode, JitIndexScan* index_scan,
-    int* max_arg, JitRangeScanType range_scan_type, llvm::BasicBlock* next_block);
-
 llvm::Value* buildPrepareStateScanRow(JitLlvmCodeGenContext* ctx, JitIndexScan* index_scan,
     JitRangeScanType range_scan_type, MOT::AccessType access_mode, int* max_arg, llvm::Value* outer_row,
     llvm::BasicBlock* next_block, llvm::BasicBlock** loop_block);
@@ -107,14 +86,6 @@ llvm::Value* buildPrepareStateScanRow(JitLlvmCodeGenContext* ctx, JitIndexScan* 
 JitLlvmRuntimeCursor buildRangeCursor(JitLlvmCodeGenContext* ctx, JitIndexScan* indexScan, int* maxArg,
     JitRangeScanType rangeScanType, JitIndexScanDirection indexScanDirection, llvm::Value* outerRow,
     int subQueryIndex = -1);
-
-bool prepareAggregateAvg(JitLlvmCodeGenContext* ctx, const JitAggregate* aggregate);
-
-bool prepareAggregateSum(JitLlvmCodeGenContext* ctx, const JitAggregate* aggregate);
-
-bool prepareAggregateMaxMin(JitLlvmCodeGenContext* ctx, JitAggregate* aggregate);
-
-bool prepareAggregateCount(JitLlvmCodeGenContext* ctx, JitAggregate* aggregate);
 
 bool prepareAggregate(JitLlvmCodeGenContext* ctx, JitAggregate* aggregate);
 

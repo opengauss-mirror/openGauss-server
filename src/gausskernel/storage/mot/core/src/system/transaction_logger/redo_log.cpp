@@ -280,65 +280,70 @@ void RedoLog::WriteToLog()
     }
 }
 
-RC RedoLog::SerializeTransaction()
+RC RedoLog::SerializeDropIndex(TxnDDLAccess::DDLAccess* ddlAccess, bool hasDML, IdxDDLAccessMap& idxDDLMap)
 {
-    RC status = RC_OK;
-    MOT::Index* index;
-    std::map<uint64_t, TxnDDLAccess::DDLAccess*> uixMap;
+    RC status = RC_ERROR;
+    MOT::Index* index = (MOT::Index*)ddlAccess->GetEntry();
+    if (!hasDML || !(!index->IsPrimaryKey() && index->IsUnique())) {
+        status = DropIndex(index);
+    } else {
+        IdxDDLAccessMap::iterator it = idxDDLMap.find(index->GetExtId());
+        if (it != idxDDLMap.end()) {
+            // we create and drop no need for both them
+            MOT_LOG_DEBUG("Erase create index: %s %lu", index->GetName().c_str(), index->GetExtId());
+            idxDDLMap.erase(it);
+            status = RC_OK;
+        } else {
+            idxDDLMap[index->GetExtId()] = ddlAccess;
+            status = DropIndex(index);
+        }
+    }
+    return status;
+}
+
+RC RedoLog::SerializeTransactionDDLs(IdxDDLAccessMap& idxDDLMap)
+{
+    MOT::Index* index = nullptr;
     bool hasDML = (m_txn->m_accessMgr->m_rowCnt > 0 && !m_txn->m_isLightSession);
     TxnDDLAccess* transactionDDLAccess = m_txn->m_txnDdlAccess;
     if (transactionDDLAccess != nullptr && transactionDDLAccess->Size() > 0) {
         RC status = RC_ERROR;
         for (uint16_t i = 0; i < transactionDDLAccess->Size(); i++) {
             Table* truncatedTable = nullptr;
-            TxnDDLAccess::DDLAccess* DDLAccess = transactionDDLAccess->Get(i);
-            if (DDLAccess == nullptr) {
+            TxnDDLAccess::DDLAccess* ddlAccess = transactionDDLAccess->Get(i);
+            if (ddlAccess == nullptr) {
                 return RC_ERROR;
             }
-            DDLAccessType accessType = DDLAccess->GetDDLAccessType();
+            DDLAccessType accessType = ddlAccess->GetDDLAccessType();
             switch (accessType) {
                 case DDL_ACCESS_CREATE_TABLE:
-                    status = CreateTable((Table*)DDLAccess->GetEntry());
+                    status = CreateTable((Table*)ddlAccess->GetEntry());
                     break;
 
                 case DDL_ACCESS_DROP_TABLE:
-                    status = DropTable((Table*)DDLAccess->GetEntry());
+                    status = DropTable((Table*)ddlAccess->GetEntry());
                     break;
 
                 case DDL_ACCESS_CREATE_INDEX:
-                    index = (MOT::Index*)DDLAccess->GetEntry();
+                    index = (MOT::Index*)ddlAccess->GetEntry();
                     if (!hasDML || !(!index->IsPrimaryKey() && index->IsUnique())) {
                         status = CreateIndex(index);
                     } else {
                         // in case of unique secondary skip and send it after DML
                         MOT_LOG_DEBUG("Defer create index: %s %lu", index->GetName().c_str(), index->GetExtId());
-                        uixMap[index->GetExtId()] = DDLAccess;
+                        idxDDLMap[index->GetExtId()] = ddlAccess;
                         status = RC_OK;
                     }
                     break;
 
                 case DDL_ACCESS_DROP_INDEX:
-                    index = (MOT::Index*)DDLAccess->GetEntry();
-                    if (!hasDML || !(!index->IsPrimaryKey() && index->IsUnique())) {
-                        status = DropIndex(index);
-                    } else {
-                        std::map<uint64_t, TxnDDLAccess::DDLAccess*>::iterator it = uixMap.find(index->GetExtId());
-                        if (it != uixMap.end()) {
-                            // we create and drop no need for both them
-                            MOT_LOG_DEBUG("Erase create index: %s %lu", index->GetName().c_str(), index->GetExtId());
-                            uixMap.erase(it);
-                            status = RC_OK;
-                        } else {
-                            uixMap[index->GetExtId()] = DDLAccess;
-                            status = DropIndex(index);
-                        }
-                    }
+                    status = SerializeDropIndex(ddlAccess, hasDML, idxDDLMap);
                     break;
                 case DDL_ACCESS_TRUNCATE_TABLE:
                     // in case of truncate table the DDLAccess entry holds the
                     // the old indexes. We need to serialize the tableId. In this
                     // case we take it from the ddl access Oid.
-                    truncatedTable = GetTableManager()->GetTableByExternal(DDLAccess->GetOid());
+                    truncatedTable = GetTableManager()->GetTableByExternal(ddlAccess->GetOid());
                     if (truncatedTable == nullptr) {
                         // This should not happen. Truncate table is protected
                         // by lock. While doing truncate table, the table cannot
@@ -358,11 +363,12 @@ RC RedoLog::SerializeTransaction()
         }
     }
 
-    if (m_txn->m_isLightSession) {
-        MOT_LOG_DEBUG("Serialize DDL light session finished");
-        return RC_OK;
-    }
+    return RC_OK;
+}
 
+RC RedoLog::SerializeTransactionDMLs()
+{
+    RC status = RC_OK;
     for (uint32_t index = 0; index < m_txn->m_accessMgr->m_rowCnt; index++) {
         Access* access = m_txn->m_accessMgr->GetAccessPtr(index);
         if (access != nullptr) {
@@ -398,16 +404,40 @@ RC RedoLog::SerializeTransaction()
         }
     }
 
+    return RC_OK;
+}
+
+RC RedoLog::SerializeTransaction()
+{
+    IdxDDLAccessMap idxDDLMap;
+    RC status = SerializeTransactionDDLs(idxDDLMap);
+    if (status != RC_OK) {
+        MOT_LOG_ERROR("Failed to serialize DDLs: %d", status);
+        return status;
+    }
+
+    if (m_txn->m_isLightSession) {
+        MOT_LOG_DEBUG("Serialize DDL light session finished");
+        return RC_OK;
+    }
+
+    status = SerializeTransactionDMLs();
+    if (status != RC_OK) {
+        MOT_LOG_ERROR("Failed to serialize DMLs: %d", status);
+        return status;
+    }
+
     // create operations for unique indexes
-    std::map<uint64_t, TxnDDLAccess::DDLAccess*>::iterator it = uixMap.begin();
-    while (it != uixMap.end()) {
+    IdxDDLAccessMap::iterator it = idxDDLMap.begin();
+    while (it != idxDDLMap.end()) {
         DDLAccessType accessType = it->second->GetDDLAccessType();
         switch (accessType) {
-            case DDL_ACCESS_CREATE_INDEX:
-                index = (MOT::Index*)it->second->GetEntry();
+            case DDL_ACCESS_CREATE_INDEX: {
+                MOT::Index* index = (MOT::Index*)it->second->GetEntry();
                 MOT_LOG_DEBUG("Send create index: %s %lu", index->GetName().c_str(), index->GetExtId());
                 status = CreateIndex(index);
                 break;
+            }
             default:
                 break;
         }
@@ -418,7 +448,7 @@ RC RedoLog::SerializeTransaction()
 
         it++;
     }
-    uixMap.clear();
+    idxDDLMap.clear();
     return RC_OK;
 }
 

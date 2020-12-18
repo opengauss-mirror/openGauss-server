@@ -56,12 +56,94 @@ static bool ParseCmdLineSectionName(const mot_string& line, mot_string& sectionP
     return result;
 }
 
-#define REPORT_PARSE_ERROR(errorCode, format, ...)                                \
-    do {                                                                          \
+#define CMDLINE_REPORT_PARSE_ERROR_AND_BREAK(errorCode, format, ...)              \
+    {                                                                             \
         MOT_REPORT_ERROR(errorCode, "Load Configuration", format, ##__VA_ARGS__); \
         parseError = true;                                                        \
         break;                                                                    \
-    } while (0);
+    }
+
+static ConfigSection* GetCmdLineConfigSection(
+    const mot_string& sectionFullName, mot_list<ConfigSection*>& parsedSections, ConfigSectionMap& sectionMap)
+{
+    mot_string sectionPath;
+    mot_string sectionName;
+    ConfigSectionMap::iterator itr = sectionMap.find(sectionFullName);
+    if (itr == sectionMap.end()) {
+        if (!ConfigFileParser::BreakSectionName(sectionFullName, sectionPath, sectionName, CMDLINE_SEP)) {
+            MOT_REPORT_ERROR(MOT_ERROR_INTERNAL, "Load Configuration", "Failed to parse section name");
+            return nullptr;
+        }
+
+        ConfigSection* currentSection = ConfigSection::CreateConfigSection(sectionPath.c_str(), sectionName.c_str());
+        if (currentSection == nullptr) {
+            MOT_REPORT_ERROR(
+                MOT_ERROR_OOM, "Load Configuration", "Failed to allocate memory for configuration section");
+            return nullptr;
+        }
+
+        if (!parsedSections.push_back(currentSection)) {
+            MOT_REPORT_ERROR(MOT_ERROR_OOM, "Load Configuration", "Failed to insert parsed section");
+            return nullptr;
+        }
+
+        itr = sectionMap.insert(ConfigSectionMap::value_type(sectionFullName, currentSection)).first;
+    }
+
+    return itr->second;
+}
+
+static bool AddCmdLineArrayConfigItem(ConfigSection* currentSection, const mot_string& sectionFullName,
+    const mot_string& key, const mot_string& value, uint64_t arrayIndex)
+{
+    // create array if not created yet
+    ConfigArray* configArray = currentSection->ModifyConfigArray(key.c_str());
+    if (configArray == nullptr) {
+        configArray = ConfigArray::CreateConfigArray(sectionFullName.c_str(), key.c_str());
+        if (configArray == nullptr) {
+            MOT_REPORT_ERROR(MOT_ERROR_OOM, "Load Configuration", "Failed to allocate memory for configuration array");
+            return false;
+        }
+
+        if (!currentSection->AddConfigItem(configArray)) {
+            MOT_REPORT_ERROR(
+                MOT_ERROR_OOM, "Load Configuration", "Failed to add configuration array to parent section");
+            return false;
+        }
+    }
+
+    // create item and add it to array
+    if (arrayIndex != configArray->GetConfigItemCount()) {
+        // array items must be ordered
+        MOT_REPORT_ERROR(MOT_ERROR_INVALID_CFG,
+            "Load Configuration",
+            "Failed to parse command line arguments: array %s items not well-ordered, expecting %u, got %" PRIu64,
+            configArray->GetName(),
+            configArray->GetConfigItemCount(),
+            arrayIndex);
+        return false;
+    }
+
+    ConfigItem* configItem = ConfigFileParser::MakeArrayConfigValue(sectionFullName, arrayIndex, value);
+    if (configItem == nullptr) {
+        MOT_REPORT_ERROR(MOT_ERROR_OOM,
+            "Load Configuration",
+            "Failed to create array configuration value from raw value: %s",
+            value.c_str());
+        return false;
+    }
+
+    if (!configArray->AddConfigItem(configItem)) {
+        MOT_REPORT_ERROR(MOT_ERROR_OOM,
+            "Load Configuration",
+            "Failed to add %" PRIu64 "th item to configuration array %s",
+            arrayIndex,
+            configArray->GetName());
+        return false;
+    }
+
+    return true;
+}
 
 ConfigTree* CmdLineConfigLoader::ParseCmdLine(char** argv, int argc)
 {
@@ -76,8 +158,6 @@ ConfigTree* CmdLineConfigLoader::ParseCmdLine(char** argv, int argc)
     mot_string line;
     mot_string sectionFullName;
     mot_string keyValuePart;
-    mot_string sectionPath;
-    mot_string sectionName;
     ConfigSection* currentSection = nullptr;
     mot_list<ConfigSection*> parsedSections;
     ConfigSectionMap sectionMap;
@@ -89,86 +169,49 @@ ConfigTree* CmdLineConfigLoader::ParseCmdLine(char** argv, int argc)
 
     for (int i = 0; i < argc && !parseError; ++i) {
         if (!line.assign(argv[i])) {
-            REPORT_PARSE_ERROR(MOT_ERROR_OOM, "Failed to allocate memory for next command line argument");
+            CMDLINE_REPORT_PARSE_ERROR_AND_BREAK(
+                MOT_ERROR_OOM, "Failed to allocate memory for next command line argument");
         }
+
         if ((line.length() <= 2) || line[0] != '-' || line[1] != '-') {
             MOT_LOG_TRACE("Skipping ill-formed command line argument: %s", argv[i]);
-        } else {
-            if (!ParseCmdLineSectionName(line, sectionFullName, keyValuePart)) {
-                REPORT_PARSE_ERROR(MOT_ERROR_INTERNAL, "Failed to parse environment variable");
-            } else {
-                // get the configuration section
-                ConfigSectionMap::iterator itr = sectionMap.find(sectionFullName);
-                if (itr == sectionMap.end()) {
-                    if (!ConfigFileParser::BreakSectionName(sectionFullName, sectionPath, sectionName, CMDLINE_SEP)) {
-                        REPORT_PARSE_ERROR(MOT_ERROR_INTERNAL, "Failed to parse section name");
-                    }
-                    currentSection = ConfigSection::CreateConfigSection(sectionPath.c_str(), sectionName.c_str());
-                    if (currentSection == nullptr) {
-                        REPORT_PARSE_ERROR(MOT_ERROR_OOM, "Failed to allocate memory for configuration section");
-                    }
-                    if (!parsedSections.push_back(currentSection)) {
-                        REPORT_PARSE_ERROR(MOT_ERROR_OOM, "Failed to insert parsed section");
-                    }
-                    itr = sectionMap.insert(ConfigSectionMap::value_type(sectionFullName, currentSection)).first;
-                }
-                currentSection = itr->second;
+            continue;
+        }
 
-                // parse the key-value part
-                if (!ConfigFileParser::ParseKeyValue(
-                    keyValuePart, sectionFullName, key, value, arrayIndex, hasArrayIndex)) {
-                    // key-value line malformed
-                    parseError = true;
-                } else {
-                    // check for array item
-                    if (!hasArrayIndex) {
-                        ConfigItem* configItem = ConfigFileParser::MakeConfigValue(sectionFullName, key, value);
-                        if (configItem == nullptr) {
-                            REPORT_PARSE_ERROR(MOT_ERROR_INTERNAL,
-                                "Failed to create configuration value from raw key/value: %s/%s",
-                                key.c_str(),
-                                value.c_str());
-                        } else if (!currentSection->AddConfigItem(configItem)) {
-                            REPORT_PARSE_ERROR(MOT_ERROR_OOM, "Failed to add configuration value to parent section");
-                        }
-                    } else {
-                        // create array if not created yet
-                        ConfigArray* configArray = currentSection->ModifyConfigArray(key.c_str());
-                        if (configArray == nullptr) {
-                            configArray = ConfigArray::CreateConfigArray(sectionFullName.c_str(), key.c_str());
-                            if (configArray == nullptr) {
-                                REPORT_PARSE_ERROR(MOT_ERROR_OOM, "Failed to allocate memory for configuration array");
-                            } else if (!currentSection->AddConfigItem(configArray)) {
-                                REPORT_PARSE_ERROR(
-                                    MOT_ERROR_OOM, "Failed to add configuration array to parent section");
-                            }
-                        }
-                        // create item and add it to array
-                        if (arrayIndex != configArray->GetConfigItemCount()) {
-                            // array items must be ordered
-                            REPORT_PARSE_ERROR(MOT_ERROR_INVALID_CFG,
-                                "Failed to parse command line arguments: array %s items not well-ordered, "
-                                "expecting %u, got %" PRIu64 " (command line argument: %s)",
-                                configArray->GetName(),
-                                configArray->GetConfigItemCount(),
-                                arrayIndex,
-                                argv[i]);
-                        } else {
-                            ConfigItem* configItem =
-                                ConfigFileParser::MakeArrayConfigValue(sectionFullName, arrayIndex, value);
-                            if (configItem == nullptr) {
-                                REPORT_PARSE_ERROR(MOT_ERROR_OOM,
-                                    "Failed to create array configuration value from raw value: %s",
-                                    value.c_str());
-                            } else if (!configArray->AddConfigItem(configItem)) {
-                                REPORT_PARSE_ERROR(MOT_ERROR_OOM,
-                                    "Failed to add %" PRIu64 "th item to configuration array %s",
-                                    arrayIndex,
-                                    configArray->GetName());
-                            }
-                        }
-                    }
-                }
+        if (!ParseCmdLineSectionName(line, sectionFullName, keyValuePart)) {
+            CMDLINE_REPORT_PARSE_ERROR_AND_BREAK(MOT_ERROR_INTERNAL, "Failed to parse command line argument");
+        }
+
+        // get the configuration section
+        currentSection = GetCmdLineConfigSection(sectionFullName, parsedSections, sectionMap);
+        if (currentSection == nullptr) {
+            CMDLINE_REPORT_PARSE_ERROR_AND_BREAK(MOT_ERROR_INTERNAL, "Failed to get configuration section");
+        }
+
+        // parse the key-value part
+        if (!ConfigFileParser::ParseKeyValue(keyValuePart, sectionFullName, key, value, arrayIndex, hasArrayIndex)) {
+            // key-value line malformed
+            CMDLINE_REPORT_PARSE_ERROR_AND_BREAK(MOT_ERROR_INTERNAL, "Failed to parse key/value");
+        }
+
+        // check for array item
+        if (!hasArrayIndex) {
+            ConfigItem* configItem = ConfigFileParser::MakeConfigValue(sectionFullName, key, value);
+            if (configItem == nullptr) {
+                CMDLINE_REPORT_PARSE_ERROR_AND_BREAK(MOT_ERROR_INTERNAL,
+                    "Failed to create configuration value from raw key/value: %s/%s",
+                    key.c_str(),
+                    value.c_str());
+            } else if (!currentSection->AddConfigItem(configItem)) {
+                CMDLINE_REPORT_PARSE_ERROR_AND_BREAK(
+                    MOT_ERROR_OOM, "Failed to add configuration value to parent section");
+            }
+        } else {
+            if (!AddCmdLineArrayConfigItem(currentSection, sectionFullName, key, value, arrayIndex)) {
+                CMDLINE_REPORT_PARSE_ERROR_AND_BREAK(MOT_ERROR_INTERNAL,
+                    "Failed to add array item with arrayIndex %lu (command line argument: %s)",
+                    arrayIndex,
+                    line.c_str());
             }
         }
     }

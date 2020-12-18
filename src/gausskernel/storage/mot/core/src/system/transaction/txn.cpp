@@ -841,6 +841,33 @@ void TxnInsertAction::ReportError(RC rc, InsItem* currentItem)
     }
 }
 
+void TxnInsertAction::CleanupOptimisticInsert(
+    InsItem* currentItem, Sentinel* pIndexInsertResult, bool isInserted, bool isMappedToCache)
+{
+    // Clean current aborted row and clean secondary indexes that were not inserts
+    // Clean first Object! - wither primary or secondary!
+    // Return Local Row to pull for PI
+    Table* table = currentItem->m_row->GetTable();
+    if (currentItem->getIndexOrder() == IndexOrder::INDEX_ORDER_PRIMARY) {
+        table->DestroyRow(currentItem->m_row);
+    }
+    if (isInserted == true) {
+        if (isMappedToCache == false) {
+            RC rc = pIndexInsertResult->RefCountUpdate(DEC, m_manager->GetThdId());
+            MOT::Index* index_ = pIndexInsertResult->GetIndex();
+            if (rc == RC::RC_INDEX_DELETE) {
+                // Memory reclamation need to release the key from the primary sentinel back to the pool
+                MOT_ASSERT(pIndexInsertResult->GetCounter() == 0);
+                Sentinel* outputSen = index_->IndexRemove(currentItem->m_key, m_manager->GetThdId());
+                MOT_ASSERT(outputSen != nullptr);
+                m_manager->GcSessionRecordRcu(
+                    index_->GetIndexId(), outputSen, nullptr, Index::SentinelDtor, SENTINEL_SIZE(index_));
+                m_manager->m_accessMgr->IncreaseTableStat(table);
+            }
+        }
+    }
+}
+
 RC TxnInsertAction::ExecuteOptimisticInsert(Row* row)
 {
     Sentinel* pIndexInsertResult = nullptr;
@@ -926,28 +953,7 @@ RC TxnInsertAction::ExecuteOptimisticInsert(Row* row)
 
 end:
     if ((rc != RC_OK) && (currentItem != EndCursor())) {
-        // Clean current aborted row and clean secondary indexes that were not inserts
-        // Clean first Object! - wither primary or secondary!
-        // Return Local Row to pull for PI
-        Table* table = currentItem->m_row->GetTable();
-        if (currentItem->getIndexOrder() == IndexOrder::INDEX_ORDER_PRIMARY) {
-            table->DestroyRow(currentItem->m_row);
-        }
-        if (isInserted == true) {
-            if (isMappedToCache == false) {
-                RC rc = pIndexInsertResult->RefCountUpdate(DEC, m_manager->GetThdId());
-                MOT::Index* index_ = pIndexInsertResult->GetIndex();
-                if (rc == RC::RC_INDEX_DELETE) {
-                    // Memory reclamation need to release the key from the primary sentinel back to the pool
-                    MOT_ASSERT(pIndexInsertResult->GetCounter() == 0);
-                    Sentinel* outputSen = index_->IndexRemove(currentItem->m_key, m_manager->GetThdId());
-                    MOT_ASSERT(outputSen != nullptr);
-                    m_manager->GcSessionRecordRcu(
-                        index_->GetIndexId(), outputSen, nullptr, Index::SentinelDtor, SENTINEL_SIZE(index_));
-                    m_manager->m_accessMgr->IncreaseTableStat(table);
-                }
-            }
-        }
+        CleanupOptimisticInsert(currentItem, pIndexInsertResult, isInserted, isMappedToCache);
     }
 
     // Clean keys

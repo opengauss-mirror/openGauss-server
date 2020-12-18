@@ -155,6 +155,7 @@ typedef struct {
 #define WAL_NOT_COPIED 0
 #define WAL_COPIED 1
 #define WAL_COPY_SUSPEND (-1)
+#define WAL_SCANNED_LRC_INIT (-2)
 
 /* (ientry + 1) % WAL_INSERT_STATUS_ENTRIES */
 #define GET_NEXT_STATUS_ENTRY(ientry) ((ientry + 1) & (WAL_INSERT_STATUS_ENTRIES - 1))
@@ -471,5 +472,11 @@ typedef struct delayddlrange {
 
 #define TABLESPACE_MAP "tablespace_map"
 #define TABLESPACE_MAP_OLD "tablespace_map.old"
+
+static inline void WakeupWalSemaphore(PGSemaphore sema)
+{
+    PGSemaphoreReset(sema);
+    PGSemaphoreUnlock(sema);
+}
 
 #endif /* XLOG_H */

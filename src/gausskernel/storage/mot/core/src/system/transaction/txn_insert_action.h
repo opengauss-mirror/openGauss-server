@@ -180,6 +180,12 @@ private:
 
     void ShrinkInsertSet();
 
+    /**
+     * @brief Cleans up the current aborted row.
+     */
+    void CleanupOptimisticInsert(
+        InsItem* currentItem, Sentinel* pIndexInsertResult, bool isInserted, bool isMappedToCache);
+
     // class non-copy-able, non-assignable, non-movable
     /** @cond EXCLUDE_DOC */
     TxnInsertAction(const TxnInsertAction&) = delete;
