@@ -21,6 +21,8 @@ import sys
 
 sys.path.append(sys.path[0] + "/../../")
 from gspylib.common.Common import DefaultValue
+from gspylib.common.DbClusterInfo import dbClusterInfo
+from gspylib.common.VersionInfo import VersionInfo
 from gspylib.common.OMCommand import OMCommand
 from gspylib.common.ErrorCode import ErrorCode
 from gspylib.os.gsfile import g_file
@@ -50,7 +52,58 @@ class BackupImplOLAP(BackupImpl):
         self.context.logger.log("Parsing configuration files.")
 
         try:
-            self.context.initClusterInfoFromStaticFile(self.context.user)
+            # Parse cluster_static_config by backup_dir if binary.tar exists
+            if (self.context.action == BackupImpl.ACTION_RESTORE and self.context.isBinary == True):
+                # Obtain the path of binary.tar
+                tarFile = "%s/%s.tar" % (self.context.backupDir, "binary")
+                if (not os.path.exists(tarFile)): 
+                    raise Exception(ErrorCode.GAUSS_502["GAUSS_50201"] % \
+                            ("static configuration file [%s] of "
+                             "designated user [%s]" % (tarFile, self.context.user)))
+
+                # Decompress package on restore node
+                cmd = g_file.SHELL_CMD_DICT["decompressTarFile"] % (
+                self.context.backupDir, tarFile)
+                (status, output) = subprocess.getstatusoutput(cmd)
+                if (status != 0):
+                    raise Exception(ErrorCode.GAUSS_502[
+                                        "GAUSS_50217"] % tarFile
+                                    + " Error: \n%s." % output
+                                    + "The cmd is %s " % cmd)
+                    
+                # Obtain the node name on local node    
+                hostName = DefaultValue.GetHostIpOrName()
+                # Obtain the name of binary_hostname.tar on local node
+                binTarName = "binary_%s.tar" % hostName
+                # Obtain the name of binary_hostname.tar on local node
+                tarName = os.path.join(self.context.backupDir, binTarName)
+                
+                # Decompress binary_hostname.tar on local node
+                cmd = g_file.SHELL_CMD_DICT["decompressTarFile"] % (
+                self.context.backupDir, tarName)
+                (status, output) = subprocess.getstatusoutput(cmd)
+                if (status != 0):
+                    raise Exception(ErrorCode.GAUSS_502[
+                                        "GAUSS_50217"] % tarName
+                                    + " Error: \n%s." % output
+                                    + "The cmd is %s " % cmd)
+                # Obtain the path of cluster_static_config
+                commitId = VersionInfo.getCommitid()
+                staticFileName = "app_%s/bin/cluster_static_config" % (commitId)
+                self.context.clusterStaticFile = os.path.join(self.context.backupDir, staticFileName)
+                 
+                if os.path.exists(self.context.clusterStaticFile):
+                    # Parse cluster_static_config
+                    self.context.clusterInfo = dbClusterInfo()
+                    self.context.clusterInfo.initFromStaticConfig(self.context.user, self.context.clusterStaticFile)
+                else:
+                    raise Exception(ErrorCode.GAUSS_502["GAUSS_50201"] % \
+                            ("static configuration file [%s] of "
+                             "designated user [%s]" % (staticFile, self.context.user)))
+            else:
+                # Get the path of cluster_static_config directly from system environment variables
+                self.context.initClusterInfoFromStaticFile(self.context.user)  
+             
             nodeNames = self.context.clusterInfo.getClusterNodeNames()
             if (self.context.nodename == ""):
                 self.context.nodename = nodeNames
@@ -218,6 +271,7 @@ class BackupImplOLAP(BackupImpl):
             cmd += " -p"
         if self.context.isBinary:
             cmd += " -b"
+            cmd += " -s %s" % self.context.clusterStaticFile
         self.context.logger.debug("Remote restoration command: %s." % cmd)
 
         try:
