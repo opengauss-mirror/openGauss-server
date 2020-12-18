@@ -1231,20 +1231,20 @@ static void init_configure_names_bool()
             NULL,
             NULL
         },
-        {                                                                       
-            {                                                                   
-                "enable_hypo_index",                                          
-                PGC_USERSET,                                                      
-                QUERY_TUNING_METHOD,                                            
-                gettext_noop("Enable hypothetical index for explain."),               
-                NULL                                                            
-            },                                                                  
-            &u_sess->attr.attr_sql.enable_hypo_index,                         
-            false,                                                               
-            NULL,                                                               
-            NULL,                                                               
-            NULL                                                                
-        }, 
+        {
+            {
+                "enable_hypo_index",
+                PGC_USERSET,
+                QUERY_TUNING_METHOD,
+                gettext_noop("Enable hypothetical index for explain."),
+                NULL
+            },
+            &u_sess->attr.attr_sql.enable_hypo_index,
+            false,
+            NULL,
+            NULL,
+            NULL
+        },
 #ifdef ENABLE_MULTIPLE_NODES
         {
             {
@@ -1689,16 +1689,16 @@ static void init_configure_names_bool()
         },
         {
             {
-                "enable_parallel_hash", 
-                PGC_USERSET, 
+                "enable_parallel_hash",
+                PGC_USERSET,
                 QUERY_TUNING_METHOD,
                 gettext_noop("Enables the planner's user of parallel hash plans."),
                 NULL
             },
             &u_sess->attr.attr_sql.enable_parallel_hash,
             true,
-            NULL, 
-            NULL, 
+            NULL,
+            NULL,
             NULL
         },
         {
@@ -4730,8 +4730,8 @@ static void init_configure_names_int()
         },
         {
             {
-                "vacuum_gtt_defer_check_age", 
-                PGC_USERSET, 
+                "vacuum_gtt_defer_check_age",
+                PGC_USERSET,
                 CLIENT_CONN_STATEMENT,
                 gettext_noop("The defer check age of GTT, used to check expired data after vacuum."),
                 NULL
@@ -12578,7 +12578,7 @@ static void init_single_node_unsupport_guc()
     u_sess->attr.attr_storage.gds_debug_mod = false;
     u_sess->attr.attr_sql.enable_slot_log = false;
     u_sess->attr.attr_storage.enable_twophase_commit = false;
-    
+
     /* for Int Guc Variables */
     u_sess->attr.attr_resource.max_active_statements = -1;
     u_sess->attr.attr_resource.dynamic_memory_quota = 80;
@@ -14268,11 +14268,10 @@ bool parse_int(const char* value, int* result, int flags, const char** hintmsg)
          * Note: the multiple-switch coding technique here is a bit tedious,
          * but seems necessary to avoid intermediate-value overflows.
          */
-        int64 temp = val;
         if (flags & GUC_UNIT_MEMORY) {
-            temp = (int64)memory_unit_convert(&endptr, val, flags, hintmsg);
+            val = (int64)memory_unit_convert(&endptr, val, flags, hintmsg);
         } else if (flags & GUC_UNIT_TIME) {
-            temp = (int64)time_unit_convert(&endptr, val, flags, hintmsg);
+            val = (int64)time_unit_convert(&endptr, val, flags, hintmsg);
         }
 
         /* allow whitespace after unit */
@@ -14411,7 +14410,7 @@ bool parse_real(const char* value, double* result, int flags, const char** hintm
     return true;
 }
 
-/* 
+/*
  * The reference is used because auto-increment of formal parameters does not change the value of the actual parameter.
  * As a result, an error is reported.
  */
@@ -14436,11 +14435,11 @@ double memory_unit_convert(char** endptr, double value, int flags, const char** 
 
         switch (flags & GUC_UNIT_MEMORY) {
             case GUC_UNIT_BLOCKS:
-                val /= (BLCKSZ / 1024);
+                val /= (double)(BLCKSZ / 1024);
                 break;
 
             case GUC_UNIT_XBLOCKS:
-                val /= (XLOG_BLCKSZ / 1024);
+                val /= (double)(XLOG_BLCKSZ / 1024);
                 break;
             default:
                 break;
