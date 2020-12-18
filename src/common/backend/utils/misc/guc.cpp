@@ -14572,7 +14572,7 @@ double time_unit_convert(char** endptr, double value, int flags, const char** hi
         *endptr += 1;
         switch (flags & GUC_UNIT_TIME) {
             case GUC_UNIT_MS:
-                        val *= MS_PER_D;
+                val *= MS_PER_D;
                 break;
 
             case GUC_UNIT_S:
