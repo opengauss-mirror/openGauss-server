@@ -98,5 +98,11 @@ typedef union syncrep_scanner_YYSTYPE {
 extern int syncrep_scanner_yylex(syncrep_scanner_YYSTYPE* lvalp, YYLTYPE* llocp, syncrep_scanner_yyscan_t yyscanner);
 extern void syncrep_scanner_yyerror(const char* message, syncrep_scanner_yyscan_t yyscanner);
 
+typedef enum {
+    ALL_NODE,
+    ONLY_SYNC_NODE,
+    NONE_NODE
+} Sync_Config_Strategy;
+
 #endif /* _SYNCREP_H */
 

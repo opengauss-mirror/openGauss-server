@@ -1112,7 +1112,7 @@ static void knl_t_walreceiver_init(knl_t_walreceiver_context* walreceiver_cxt)
     rc = memset_s(walreceiver_cxt->gucconf_lock_file, MAXPGPATH, 0, MAXPGPATH);
     securec_check(rc, "\0", "\0");
     walreceiver_cxt->reserve_item = {0};
-    walreceiver_cxt->check_file_timeout = g_instance.attr.attr_common.config_sync_interval;
+    walreceiver_cxt->check_file_timeout = 60 * 60 * 1000;
     walreceiver_cxt->walRcvCtlBlock = NULL;
     walreceiver_cxt->reply_message = (StandbyReplyMessage*)palloc0(sizeof(StandbyReplyMessage));
     walreceiver_cxt->feedback_message = (StandbyHSFeedbackMessage*)palloc0(sizeof(StandbyHSFeedbackMessage));

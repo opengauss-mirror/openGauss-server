@@ -962,6 +962,13 @@ static const struct config_enum_entry unique_sql_track_option[] = {
 extern struct config_enum_entry wal_level_options[];
 extern struct config_enum_entry sync_method_options[];
 
+static const struct config_enum_entry sync_config_strategy_options[] = {
+    {"all_node", ALL_NODE, true},
+    {"only_sync_node", ONLY_SYNC_NODE, true},
+    {"none_node", NONE_NODE, true},
+    {NULL, 0, false}
+};
+
 /*
  * GUC option variables that are exported from this module
  */
@@ -4696,22 +4703,6 @@ void set_qunit_case_number_hook(int newval, void* extra)
 static void init_configure_names_int()
 {
     struct config_int local_configure_names_int[] = {
-        {
-	    {
-	        "config_sync_interval",
-		PGC_POSTMASTER,
-		WAL_SETTINGS,
-		gettext_noop("The synchronization time interval for the config file."),
-		NULL
-	    },
-	    &g_instance.attr.attr_common.config_sync_interval,
-	    3600000,
-	    0,
-	    INT_MAX,
-	    NULL,
-	    NULL,
-	    NULL
-	},
         {
             {
                 "max_active_global_temporary_table",
@@ -11619,6 +11610,21 @@ static void init_configure_names_string()
 static void init_configure_names_enum()
 {
     struct config_enum local_configure_names_enum[] = {
+	{
+            {
+		"sync_config_strategy",
+		PGC_POSTMASTER,
+		WAL_SETTINGS,
+		gettext_noop("Synchronization strategy for configuration files between host and standby."),
+		NULL
+	    },
+	    &g_instance.attr.attr_common.sync_config_strategy,
+	    ALL_NODE,
+	    sync_config_strategy_options,
+	    NULL,
+	    NULL,
+	    NULL
+	},
         {
             {
                 "backslash_quote",

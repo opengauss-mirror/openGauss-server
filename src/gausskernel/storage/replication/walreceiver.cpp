@@ -114,7 +114,7 @@ const char* g_reserve_param[RESERVE_SIZE] = {"application_name",
     "synchronous_standby_names",
     "local_bind_address",
     "archive_dest",
-    NULL,
+    "sync_config_strategy",
     NULL,
     NULL,
     NULL,
@@ -494,7 +494,8 @@ void WalReceiverMain(void)
      * Note: If switchover in one hour, and there is no parameter is reloaded,
      * the parameters set by client will be disabled. So we should do this.
      */
-    firstSynchStandbyFile();
+    if (g_instance.attr.attr_common.sync_config_strategy != NONE_NODE)
+        firstSynchStandbyFile();
 
     set_disable_conn_mode();
     knl_g_set_is_local_redo_finish(false);
@@ -581,7 +582,8 @@ void WalReceiverMain(void)
             XLogWalRcvSendReply(requestReply, requestReply);
             XLogWalRcvSendHSFeedback();
         }
-        ConfigFileTimer();
+        if (g_instance.attr.attr_common.sync_config_strategy != NONE_NODE)
+            ConfigFileTimer();
     }
 }
 
@@ -2551,8 +2553,6 @@ static bool ProcessConfigFileMessage(char* buf, Size len)
  */
 static void firstSynchStandbyFile(void)
 {
-    if (g_instance.attr.attr_common.config_sync_interval <= 0)
-	 return;
     char bufTime[sizeof(ConfigModifyTimeMessage) + 1];
     errno_t errorno = EOK;
 
