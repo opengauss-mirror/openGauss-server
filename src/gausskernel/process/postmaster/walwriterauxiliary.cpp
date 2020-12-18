@@ -1,5 +1,8 @@
-/* -------------------------------------------------------------------------
- *
+/* 
+ * Copyright (c) 2020 Huawei Technologies Co.,Ltd.
+ * 
+ * -------------------------------------------------------------------------
+ * 
  * walwriterauxiliary.cpp
  *
  * The WAL writer auxiliary background process. It creates and zeros xlog segment
@@ -16,12 +19,9 @@
  * as a backend crash: shared memory may be corrupted, so remaining backends
  * should be killed by SIGQUIT and then a recovery cycle started.
  *
- *
- * Portions Copyright (c) 1996-2012, PostgreSQL Global Development Group
- *
- *
+ * 
  * IDENTIFICATION
- *	  src/backend/postmaster/walwriterauxiliary.cpp
+ *    src/backend/postmaster/walwriterauxiliary.cpp
  *
  * -------------------------------------------------------------------------
  */
@@ -55,18 +55,6 @@
 
 #include "gssignal/gs_signal.h"
 
-/*
- * GUC parameters
- */
-THR_LOCAL int WalWriterAuxiliaryDelay = 1000; /* (in ms) */
-/*
- * Number of do-nothing loops before lengthening the delay time, and the
- * multiplier to apply to WalWriterDelay when we do decide to hibernate.
- * (Perhaps these need to be configurable?)
- */
-#define LOOPS_UNTIL_HIBERNATE 50
-#define HIBERNATE_FACTOR 25
-
 /* Signal handlers */
 static void walwriterauxiliary_quickdie(SIGNAL_ARGS);
 static void WalwriterauxiliarySigHupHandler(SIGNAL_ARGS);
@@ -84,14 +72,16 @@ void WalWriterAuxiliaryMain(void)
     sigjmp_buf local_sigjmp_buf;
     MemoryContext walwriterauxiliary_context;
     sigset_t old_sig_mask;
+
     t_thrd.role = WALWRITERAUXILIARY;
     ereport(LOG, (errmsg("walwriterauxiliary started")));
+
     /*
      * Properly accept or ignore signals the postmaster might send us
      *
      * We have no particular use for SIGINT at the moment, but seems
      * reasonable to treat like SIGTERM.
-     *
+     * 
      * Reset some signals that are accepted by postmaster but not here.
      */
     (void)gspqsignal(SIGHUP, WalwriterauxiliarySigHupHandler); /* set flag to read config file */
@@ -109,7 +99,7 @@ void WalWriterAuxiliaryMain(void)
     (void)gspqsignal(SIGWINCH, SIG_DFL);
 
     /* We allow SIGQUIT (quickdie) at all times */
-    sigdelset(&t_thrd.libpq_cxt.BlockSig, SIGQUIT);
+    (void)sigdelset(&t_thrd.libpq_cxt.BlockSig, SIGQUIT);
 
     /*
      * Create a resource owner to keep track of our resources (not clear that
@@ -128,7 +118,7 @@ void WalWriterAuxiliaryMain(void)
         ALLOCSET_DEFAULT_MINSIZE,
         ALLOCSET_DEFAULT_INITSIZE,
         ALLOCSET_DEFAULT_MAXSIZE);
-    MemoryContextSwitchTo(walwriterauxiliary_context);
+    (void)MemoryContextSwitchTo(walwriterauxiliary_context);
 
     /*
      * If an exception is encountered, processing resumes here.
@@ -137,7 +127,8 @@ void WalWriterAuxiliaryMain(void)
      */
     if (sigsetjmp(local_sigjmp_buf, 1) != 0) {
         /* We need restore the signal mask of current thread */
-        pthread_sigmask(SIG_SETMASK, &old_sig_mask, NULL);
+        (void)pthread_sigmask(SIG_SETMASK, &old_sig_mask, NULL);
+
         /* Since not using PG_TRY, must reset error stack by hand */
         t_thrd.log_cxt.error_context_stack = NULL;
 
@@ -171,7 +162,7 @@ void WalWriterAuxiliaryMain(void)
          * Now return to normal top-level context and clear ErrorContext for
          * next time.
          */
-        MemoryContextSwitchTo(walwriterauxiliary_context);
+        (void)MemoryContextSwitchTo(walwriterauxiliary_context);
         FlushErrorState();
 
         /* Flush any leaked data in the top-level context */
@@ -217,15 +208,9 @@ void WalWriterAuxiliaryMain(void)
      * Loop forever
      */
     for (;;) {
-        long cur_timeout = 0;
-        int  rc = 0;
-
         if (g_instance.wal_cxt.isWalWriterUp) {
             PGSemaphoreLock(&g_instance.wal_cxt.walInitSegLock->l.sem, true);
         }
-
-        /* Clear any already-pending wakeups */
-        ResetLatch(&t_thrd.proc->procLatch);
 
         /*
          * Process any requests or signals received recently.
@@ -241,18 +226,6 @@ void WalWriterAuxiliaryMain(void)
         }
 
         XLogMultiFileInit(g_instance.attr.attr_storage.wal_file_init_num);
-
-        if (cur_timeout > 0) {
-            rc = WaitLatch(&t_thrd.proc->procLatch, WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH, cur_timeout);
-        }
-
-        /*
-         * Emergency bailout if postmaster has died.  This is to avoid the
-         * necessity for manual cleanup of all postmaster children.
-         */
-        if (rc & WL_POSTMASTER_DEATH) {
-            gs_thread_exit(1);
-        }
     }
 }
 

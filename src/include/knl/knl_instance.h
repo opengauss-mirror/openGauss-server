@@ -569,17 +569,10 @@ typedef struct knl_g_wal_context {
     volatile bool isWalWriterSleeping;
     pthread_mutex_t criticalEntryMutex;
     pthread_cond_t criticalEntryCV;
-    volatile uint32 walWaitFlushCount3;
-    volatile double XLogFlushWaitTime;
-    /*
-     * walWaitFlushCount3 and XLogFlushWaitTime are only for xlog statistics use.
-     * We need this variable as well as XLogStat_shared->xlogFlushWaitTime because
-     * we want to only update XLogStat_shared->xlogFlushWaitTime together with other
-     * fields of XLogStat_shared so that we can probably get a consistent snapshot
-     * of statistics data without resorting to locks.
-     */
+    volatile uint32 walWaitFlushCount; /* only for xlog statistics use */
     volatile XLogSegNo globalEndPosSegNo; /* Global variable for init xlog segment files. */
     int lastWalStatusEntryFlushed;
+    volatile int lastLRCScanned;
 } knl_g_wal_context;
 
 typedef struct knl_instance_context {
