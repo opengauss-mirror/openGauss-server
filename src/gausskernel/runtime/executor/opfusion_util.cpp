@@ -93,6 +93,10 @@ const char *getBypassReason(FusionType result)
             return "Bypass not executed because query used unsupported indexscan condition";
         }
 
+        case NOBYPASS_ONLY_SUPPORT_BTREE_INDEX: {
+            return "Bypass not executed because only support btree index currently";
+        }
+
         case NOBYPASS_INDEXONLYSCAN_WITH_ORDERBY: {
             return "Bypass not executed because query used indexonlyscan with order by clause method";
         }
@@ -438,12 +442,14 @@ template <bool is_dml, bool isonlyindex> FusionType checkFusionIndexScan(Node *n
     List *indexorderby = NULL;
     List *indexqual = NULL;
     List *qual = NULL;
+    Oid indexOid = InvalidOid;
+    Relation index = NULL;
     if (isonlyindex) {
         tarlist = ((IndexOnlyScan *)node)->scan.plan.targetlist;
         indexorderby = ((IndexOnlyScan *)node)->indexorderby;
         indexqual = ((IndexOnlyScan *)node)->indexqual;
         qual = ((IndexOnlyScan *)node)->scan.plan.qual;
-
+        indexOid = ((IndexOnlyScan *)node)->indexid;
         if (indexorderby != NULL) {
             return NOBYPASS_INDEXONLYSCAN_WITH_ORDERBY;
         }
@@ -452,11 +458,18 @@ template <bool is_dml, bool isonlyindex> FusionType checkFusionIndexScan(Node *n
         indexorderby = ((IndexScan *)node)->indexorderby;
         indexqual = ((IndexScan *)node)->indexqual;
         qual = ((IndexScan *)node)->scan.plan.qual;
-
+        indexOid = ((IndexScan *)node)->indexid;
         if (indexorderby != NULL) {
             return NOBYPASS_INDEXSCAN_WITH_ORDERBY;
         }
     }
+
+    index = index_open(indexOid, AccessShareLock);
+    if (index->rd_rel->relam != BTREE_AM_OID) {
+        index_close(index, AccessShareLock);
+        return NOBYPASS_ONLY_SUPPORT_BTREE_INDEX;
+    }
+    index_close(index, AccessShareLock);
 
     ListCell *lc = NULL;
 
