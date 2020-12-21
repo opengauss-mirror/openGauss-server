@@ -258,8 +258,8 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
                      * Since the TransactionXmin won't advance immediately(see CalculateLocalLatestSnapshot),
                      * we need to check CSN for the visibility.
                      */
-                    CommitSeqNo csn = TransactionIdGetCommitSeqNo(xmin, true, true, false);
-                    if (csn >= u_sess->utils_cxt.CurrentSnapshot->snapshotcsn) {
+                    CommitSeqNo csn = TransactionIdGetCommitSeqNo(xmin, false, true, false);
+                    if (!COMMITSEQNO_IS_COMMITTED(csn) || csn >= u_sess->utils_cxt.CurrentSnapshot->snapshotcsn) {
                         root->glob->transientPlan = true;
                         index_close(indexRelation, NoLock);
                         continue;
