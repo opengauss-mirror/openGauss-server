@@ -251,11 +251,20 @@ void get_relation_info(PlannerInfo* root, Oid relationObjectId, bool inhparent, 
              * mark the plan we are generating as transient. See
              * src/backend/access/heap/README.HOT for discussion.
              */
-            if (index->indcheckxmin && !TransactionIdPrecedes(HeapTupleGetRawXmin(indexRelation->rd_indextuple),
-                u_sess->utils_cxt.TransactionXmin)) {
-                root->glob->transientPlan = true;
-                index_close(indexRelation, NoLock);
-                continue;
+            if (index->indcheckxmin) {
+                TransactionId xmin = HeapTupleGetRawXmin(indexRelation->rd_indextuple);
+                if (!TransactionIdPrecedes(xmin, u_sess->utils_cxt.TransactionXmin)) {
+                    /*
+                     * Since the TransactionXmin won't advance immediately(see CalculateLocalLatestSnapshot),
+                     * we need to check CSN for the visibility.
+                     */
+                    CommitSeqNo csn = TransactionIdGetCommitSeqNo(xmin, true, true, false);
+                    if (csn >= u_sess->utils_cxt.CurrentSnapshot->snapshotcsn) {
+                        root->glob->transientPlan = true;
+                        index_close(indexRelation, NoLock);
+                        continue;
+                    }
+                }
             }
 
             info = makeNode(IndexOptInfo);

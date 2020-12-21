@@ -968,3 +968,22 @@ drop index test_table_idx1;
 drop index test_table_col_idx1;
 drop table test_table;
 drop table test_table_col;
+
+SET enable_seqscan=off;
+reset enable_indexscan;
+reset enable_bitmapscan;
+
+DROP TABLE IF EXISTS ddl_index_visibility;
+CREATE TABLE ddl_index_visibility(id INT, first_name text, last_name text);
+--insert data
+INSERT INTO ddl_index_visibility SELECT id, md5(random()::text), md5(random()::text) FROM (SELECT * FROM generate_series(1,2000) AS id) AS x;
+--this update will produce a HOT, then the next created index need to check xmin when using it(get_relation_info)
+update ddl_index_visibility set first_name='+dw', last_name='dw_rt' where id = 698;
+--create index, indcheckxmin will be true
+create index ddl_index_visibility_idx on ddl_index_visibility USING btree(id);
+--explain, should be BitmapHeapScan
+explain(costs off) select * from ddl_index_visibility where id=698;
+select * from ddl_index_visibility where id=698;
+
+reset enable_seqscan;
+DROP TABLE ddl_index_visibility;
