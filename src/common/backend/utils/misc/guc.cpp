@@ -3935,7 +3935,7 @@ static void init_configure_names_bool()
                 "most_available_sync",
                 PGC_POSTMASTER,
                 REPLICATION_MASTER,
-                gettext_noop("Enables master to continue as standalone on sync standbys failure."),
+                gettext_noop("Enables master to continue when sync standbys failure."),
                 NULL,
             },
             &g_instance.attr.attr_storage.gucMostAvailableSync,
