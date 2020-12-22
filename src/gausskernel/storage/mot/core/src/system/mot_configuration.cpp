@@ -1417,7 +1417,7 @@ static inline bool IsTimeUnitMicroSeconds(mot_string& suffix)
 
 uint64_t MOTConfiguration::ParseTimeValueMicros(const char* timeValue, uint64_t defaultValue, const char* cfgPath)
 {
-    uint64_t timeValueMicors = defaultValue;
+    uint64_t timeValueMicros = defaultValue;
     char* endptr = NULL;
     unsigned long long value = strtoull(timeValue, &endptr, 0);
     if (endptr == timeValue) {
@@ -1425,27 +1425,27 @@ uint64_t MOTConfiguration::ParseTimeValueMicros(const char* timeValue, uint64_t 
     } else if (*endptr == 0) {
         MOT_LOG_WARN("Invalid %s time value format: %s (expecting unit type after value)", cfgPath, timeValue);
     } else {
-        // get unit type and convert to milli-seconds
+        // get unit type and convert to micro-seconds
         mot_string suffix(endptr);
         suffix.trim();
         if (IsTimeUnitDays(suffix)) {
             MOT_LOG_TRACE("Loaded %s: %u days", cfgPath, value);
-            timeValueMicors = ((uint64_t)value) * 24ull * 60ull * 60ull * 1000ull * 1000ull;
+            timeValueMicros = ((uint64_t)value) * 24ull * 60ull * 60ull * 1000ull * 1000ull;
         } else if (IsTimeUnitHours(suffix)) {
             MOT_LOG_TRACE("Loaded %s: %u hours", cfgPath, value);
-            timeValueMicors = ((uint64_t)value) * 60ull * 60ull * 1000ull * 1000ull;
+            timeValueMicros = ((uint64_t)value) * 60ull * 60ull * 1000ull * 1000ull;
         } else if (IsTimeUnitMinutes(suffix)) {
             MOT_LOG_TRACE("Loaded %s: %u minutes", cfgPath, value);
-            timeValueMicors = ((uint64_t)value) * 60ull * 1000ull * 1000ull;
+            timeValueMicros = ((uint64_t)value) * 60ull * 1000ull * 1000ull;
         } else if (IsTimeUnitSeconds(suffix)) {
             MOT_LOG_TRACE("Loaded %s: %u seconds", cfgPath, value);
-            timeValueMicors = ((uint64_t)value) * 1000ull * 1000ull;
+            timeValueMicros = ((uint64_t)value) * 1000ull * 1000ull;
         } else if (IsTimeUnitMilliSeconds(suffix)) {
             MOT_LOG_TRACE("Loaded %s: %u milli-seconds", cfgPath, value);
-            timeValueMicors = ((uint64_t)value) * 1000ull;
+            timeValueMicros = ((uint64_t)value) * 1000ull;
         } else if (IsTimeUnitMicroSeconds(suffix)) {
             MOT_LOG_TRACE("Loaded %s: %u micro-seconds", cfgPath, value);
-            timeValueMicors = ((uint64_t)value);
+            timeValueMicros = ((uint64_t)value);
         } else {
             MOT_LOG_WARN("Invalid %s time value format: %s (invalid unit specifier '%s' - should be one of d, h, m, s, "
                          "ms or us)",
@@ -1454,7 +1454,7 @@ uint64_t MOTConfiguration::ParseTimeValueMicros(const char* timeValue, uint64_t 
                 suffix.c_str());
         }
     }
-    return timeValueMicors;
+    return timeValueMicros;
 }
 
 bool MOTConfiguration::CheckHyperThreads()

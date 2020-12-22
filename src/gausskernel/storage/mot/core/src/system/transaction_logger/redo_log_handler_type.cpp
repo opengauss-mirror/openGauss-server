@@ -32,16 +32,12 @@ DECLARE_LOGGER(RedoLogHandlerType, RedoLog)
 
 static const char* NONE_STR = "none";
 static const char* SYNC_REDO_LOG_HANDLER_STR = "synchronous";
-static const char* GROUP_SYNC_REDO_LOG_HANDLER_STR = "group_synchronous";
 static const char* SEGMENTED_GROUP_SYNC_REDO_LOG_HANDLER_STR = "segmented_group_synchronous";
-static const char* ASYNC_REDO_LOG_HANDLER_STR = "asynchronous";
 static const char* INVALID_REDO_LOG_HANDLER_STR = "INVALID";
 
 static const char* redoLogHandlerTypeNames[] = {NONE_STR,
     SYNC_REDO_LOG_HANDLER_STR,
-    GROUP_SYNC_REDO_LOG_HANDLER_STR,
-    SEGMENTED_GROUP_SYNC_REDO_LOG_HANDLER_STR,
-    ASYNC_REDO_LOG_HANDLER_STR};
+    SEGMENTED_GROUP_SYNC_REDO_LOG_HANDLER_STR};
 
 RedoLogHandlerType RedoLogHandlerTypeFromString(const char* redoLogHandlerType)
 {
@@ -51,12 +47,8 @@ RedoLogHandlerType RedoLogHandlerTypeFromString(const char* redoLogHandlerType)
         handlerType = RedoLogHandlerType::NONE;
     } else if (strcmp(redoLogHandlerType, SYNC_REDO_LOG_HANDLER_STR) == 0) {
         handlerType = RedoLogHandlerType::SYNC_REDO_LOG_HANDLER;
-    } else if (strcmp(redoLogHandlerType, GROUP_SYNC_REDO_LOG_HANDLER_STR) == 0) {
-        handlerType = RedoLogHandlerType::GROUP_SYNC_REDO_LOG_HANDLER;
     } else if (strcmp(redoLogHandlerType, SEGMENTED_GROUP_SYNC_REDO_LOG_HANDLER_STR) == 0) {
         handlerType = RedoLogHandlerType::SEGMENTED_GROUP_SYNC_REDO_LOG_HANDLER;
-    } else if (strcmp(redoLogHandlerType, ASYNC_REDO_LOG_HANDLER_STR) == 0) {
-        handlerType = RedoLogHandlerType::ASYNC_REDO_LOG_HANDLER;
     } else {
         MOT_LOG_ERROR("Invalid redo log handler type: %s", redoLogHandlerType);
     }

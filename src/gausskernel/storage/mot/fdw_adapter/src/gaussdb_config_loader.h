@@ -141,9 +141,13 @@ private:
     {
         bool result = true;
         if (u_sess->attr.attr_storage.guc_synchronous_commit == SYNCHRONOUS_COMMIT_OFF) {
+            /*
+             * In MOT, for asynchronous redo log mode also we use SYNC_REDO_LOG_HANDLER.
+             * Asynchronous behavior is handled by the envelope.
+             */
             MOT_LOG_INFO("Configuring asynchronous redo-log handler due to synchronous_commit=off");
             result = AddExtTypedConfigItem<MOT::RedoLogHandlerType>(
-                "", "redo_log_handler_type", MOT::RedoLogHandlerType::ASYNC_REDO_LOG_HANDLER);
+                "", "redo_log_handler_type", MOT::RedoLogHandlerType::SYNC_REDO_LOG_HANDLER);
         } else if (MOT::GetGlobalConfiguration().m_enableGroupCommit) {
             MOT_LOG_INFO("Configuring segmented-group redo-log handler");
             result = AddExtTypedConfigItem<MOT::RedoLogHandlerType>(

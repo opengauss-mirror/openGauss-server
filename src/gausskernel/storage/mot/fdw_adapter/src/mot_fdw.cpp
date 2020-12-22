@@ -68,7 +68,6 @@
 #include "access/sysattr.h"
 #include "tcop/utility.h"
 #include "postmaster/bgwriter.h"
-#include "postmaster/walwriter.h"
 #include "storage/lmgr.h"
 #include "storage/ipc.h"
 
@@ -163,7 +162,6 @@ static MotSessionMemoryDetail* MOTGetForeignSessionMemSize(uint32_t* sessionCoun
 static void MOTNotifyForeignConfigChange();
 
 static void MOTCheckpointCallback(CheckpointEvent checkpointEvent, uint64_t lsn, void* arg);
-static void MOTWalCallback(void* arg);
 
 /*
  * Helper functions
@@ -1788,16 +1786,6 @@ static void MOTCheckpointCallback(CheckpointEvent checkpointEvent, uint64_t lsn,
     }
 }
 
-static void MOTWalCallback(void* arg)
-{
-    MOT::MOTEngine* engine = MOT::MOTEngine::GetInstance();
-    if (engine == nullptr) {
-        elog(INFO, "Failed to create MOT engine");
-        return;
-    }
-    engine->WriteLog();
-}
-
 /* @MOT
  * brief: Validate table definition
  * input param @obj: A Obj including infomation to validate when alter tabel and create table.
@@ -1950,11 +1938,6 @@ static void InitMOTHandler()
     if (MOT::GetGlobalConfiguration().m_enableIncrementalCheckpoint == false) {
         // Register our checkpoint and redo callbacks to the envelope.
         if (!MOTAdaptor::m_callbacks_initialized) {
-            if (MOT::GetGlobalConfiguration().m_enableRedoLog &&
-                MOT::GetGlobalConfiguration().m_redoLogHandlerType == MOT::RedoLogHandlerType::ASYNC_REDO_LOG_HANDLER) {
-                RegisterWALCallback(MOTWalCallback, NULL);
-            }
-
             if (MOT::GetGlobalConfiguration().m_enableCheckpoint) {
                 RegisterCheckpointCallback(MOTCheckpointCallback, NULL);
             } else {

@@ -523,7 +523,6 @@ typedef struct knl_g_executor_context {
 
 typedef struct knl_g_xlog_context {
     int num_locks_in_group;
-    struct WALCallbackItem* walCallback;
     struct RedoCommitCallbackItem* redoCommitCallback;
 } knl_g_xlog_context;
 

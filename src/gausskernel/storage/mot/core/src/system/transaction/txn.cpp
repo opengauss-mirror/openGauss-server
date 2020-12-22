@@ -247,8 +247,7 @@ void TxnManager::CommitInternal()
         GetCheckpointManager()->EndCommit(this);
     }
 
-    if (!GetGlobalConfiguration().m_enableRedoLog ||
-        GetGlobalConfiguration().m_redoLogHandlerType == RedoLogHandlerType::ASYNC_REDO_LOG_HANDLER) {
+    if (!GetGlobalConfiguration().m_enableRedoLog) {
         m_occManager.ReleaseLocks(this);
     }
 }
@@ -299,8 +298,7 @@ void TxnManager::CommitPrepared()
         GetCheckpointManager()->EndCommit(this);
     }
 
-    if (!GetGlobalConfiguration().m_enableRedoLog ||
-        GetGlobalConfiguration().m_redoLogHandlerType == RedoLogHandlerType::ASYNC_REDO_LOG_HANDLER) {
+    if (!GetGlobalConfiguration().m_enableRedoLog) {
         m_occManager.ReleaseLocks(this);
     }
     MOT::DbSessionStatisticsProvider::GetInstance().AddCommitPreparedTxn();
@@ -320,7 +318,6 @@ void TxnManager::LiteCommitPrepared()
 void TxnManager::EndTransaction()
 {
     if (GetGlobalConfiguration().m_enableRedoLog &&
-        GetGlobalConfiguration().m_redoLogHandlerType != RedoLogHandlerType::ASYNC_REDO_LOG_HANDLER &&
         IsFailedCommitPrepared() == false) {
         m_occManager.ReleaseLocks(this);
     }

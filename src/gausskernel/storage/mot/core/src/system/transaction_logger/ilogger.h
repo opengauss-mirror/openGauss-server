@@ -26,7 +26,6 @@
 #define ILOGGER_H
 
 #include "redo_log_writer.h"
-#include "redo_log_buffer_array.h"
 
 namespace MOT {
 /**
@@ -54,16 +53,6 @@ public:
         uint32_t size;
         uint8_t* data = buffer->Serialize(&size);
         return AddToLog(data, size);
-    }
-
-    /**
-     * Serializes a RedoLogBuffer array into the logger.
-     * @param redoLogBufferArray The RedoLogBuffers to write to the logger.
-     * @return The amount of bytes written.
-     */
-    virtual uint64_t AddToLog(RedoLogBufferArray& redoLogBufferArray)
-    {
-        return AddToLog(redoLogBufferArray.GetEntries(), redoLogBufferArray.Size());
     }
 
     /**

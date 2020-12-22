@@ -66,12 +66,6 @@
 #define NANOSECONDS_PER_MILLISECOND 1000000L
 #define NANOSECONDS_PER_SECOND 1000000000L
 
-typedef struct WALCallbackItem {
-    struct WALCallbackItem* next;
-    WALCallback callback;
-    void* arg;
-} WALCallbackItem;
-
 /* Signal handlers */
 static void wal_quickdie(SIGNAL_ARGS);
 static void WalSigHupHandler(SIGNAL_ARGS);
@@ -283,9 +277,6 @@ void WalWriterMain(void)
             proc_exit(0); /* done */
         }
 
-        /* execute callbacks (i.e. write data from MOT) */
-        CallWALCallback();
-
         wrote_something = XLogBackgroundFlush();
 
         if (!wrote_something && ++times_wrote_nothing > g_instance.attr.attr_storage.xlog_idle_flushes_before_sleep) {
@@ -414,24 +405,4 @@ static void walwriter_sigusr1_handler(SIGNAL_ARGS)
     latch_sigusr1_handler();
 
     errno = save_errno;
-}
-
-void RegisterWALCallback(WALCallback callback, void* arg)
-{
-    WALCallbackItem* item;
-
-    item = (WALCallbackItem*)MemoryContextAlloc(g_instance.instance_context, sizeof(WALCallbackItem));
-    item->callback = callback;
-    item->arg = arg;
-    item->next = g_instance.xlog_cxt.walCallback;
-    g_instance.xlog_cxt.walCallback = item;
-}
-
-void CallWALCallback()
-{
-    WALCallbackItem* item;
-
-    for (item = g_instance.xlog_cxt.walCallback; item; item = item->next) {
-        (*item->callback) (item->arg);
-    }
 }
