@@ -30,8 +30,6 @@
 #include "logger_factory.h"
 #include "logger_type.h"
 #include "synchronous_redo_log_handler.h"
-#include "asynchronous_redo_log_handler.h"
-#include "group_synchronous_redo_log_handler.h"
 #include "segmented_group_synchronous_redo_log_handler.h"
 #include "mot_error.h"
 
@@ -56,15 +54,8 @@ RedoLogHandler* RedoLogHandlerFactory::CreateRedoLogHandler()
         case RedoLogHandlerType::SYNC_REDO_LOG_HANDLER:
             handler = new (std::nothrow) SynchronousRedoLogHandler();
             break;
-        case RedoLogHandlerType::GROUP_SYNC_REDO_LOG_HANDLER:
-            // GroupSyncRedoLogHandler was replaced with SegmentedGroupSyncRedoLogHandler
-            handler = new (std::nothrow) SegmentedGroupSyncRedoLogHandler();
-            break;
         case RedoLogHandlerType::SEGMENTED_GROUP_SYNC_REDO_LOG_HANDLER:
             handler = new (std::nothrow) SegmentedGroupSyncRedoLogHandler();
-            break;
-        case RedoLogHandlerType::ASYNC_REDO_LOG_HANDLER:
-            handler = new (std::nothrow) AsyncRedoLogHandler();
             break;
         default:
             MOT_REPORT_PANIC(MOT_ERROR_INTERNAL,

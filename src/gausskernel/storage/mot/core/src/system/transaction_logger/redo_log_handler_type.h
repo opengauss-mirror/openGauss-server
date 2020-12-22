@@ -36,14 +36,8 @@ enum class RedoLogHandlerType : uint32_t {
     /** @var Denotes SynchronousRedoLogHandler. */
     SYNC_REDO_LOG_HANDLER,
 
-    /** @var Denotes GroupSyncRedoLogHandler. */
-    GROUP_SYNC_REDO_LOG_HANDLER,
-
     /** @var Denotes SegmentedGroupSyncRedoLogHandler. */
     SEGMENTED_GROUP_SYNC_REDO_LOG_HANDLER,
-
-    /** @var Denotes AsyncRedoLogHandler. */
-    ASYNC_REDO_LOG_HANDLER,
 
     /** @var Denotes invalid handler type. */
     INVALID_REDO_LOG_HANDLER

@@ -310,15 +310,13 @@ private:
      */
     void ReleaseAccess(Access* ac)
     {
-        m_allocatedAc--;
         m_rowCnt--;
         uint32_t release_id = ac->GetBufferId();
         // Swap buffer_id's
-        ac->SwapId(*m_accessesSetBuff[m_allocatedAc]);
-        m_accessesSetBuff[release_id] = m_accessesSetBuff[m_allocatedAc];
-        m_accessesSetBuff[m_allocatedAc] = nullptr;
+        ac->SwapId(*m_accessesSetBuff[m_rowCnt]);
+        m_accessesSetBuff[release_id] = m_accessesSetBuff[m_rowCnt];
+        m_accessesSetBuff[m_rowCnt] = ac;
         DestroyAccess(ac);
-        delete ac;
     }
 
     /** @brief Doubles the size of the access set. */

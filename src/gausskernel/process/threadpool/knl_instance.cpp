@@ -242,7 +242,6 @@ static void knl_g_executor_init(knl_g_executor_context* exec_cxt)
 static void knl_g_xlog_init(knl_g_xlog_context *xlog_cxt)
 {
     xlog_cxt->num_locks_in_group = 0;
-    xlog_cxt->walCallback = NULL;
     xlog_cxt->redoCommitCallback = NULL;
 }
 
