@@ -7128,7 +7128,7 @@ static void xact_redo_commit_internal(TransactionId xid, XLogRecPtr lsn, Transac
                          ((unsigned)nsubxacts * sizeof(TransactionId)) +
                          ((unsigned)nmsgs * sizeof(SharedInvalidationMessage));
 #else
-        char* filename = (char*)xnodes + (nrels * sizeof(ColFileNodeRel)) + ((nsubxacts - 1) * sizeof(TransactionId)) +
+        char* filename = (char*)xnodes + (nrels * sizeof(ColFileNodeRel)) + ((nsubxacts + 1) * sizeof(TransactionId)) +
                          (nmsgs * sizeof(SharedInvalidationMessage));
 #endif
         parseAndRemoveLibrary(filename, nlibrary);
