@@ -21,7 +21,9 @@ password=`cat ${xmlpath} |grep -w "password"|awk -F'"' '{print $4}'`
 usergroup="dbgrp"
 envfilepath="${workspace}/om/env"
 logfilesavepath=/usr1/opengaussautoinstall/log
-package_path=${workspace}/openGauss/package/openGauss-1.0.1-CentOS-64bit.tar.gz
+package_path_om=${workspace}/openGauss/package/openGauss-1.0.1-CentOS-64bit-om.tar.gz
+package_path_app=${workspace}/openGauss/package/openGauss-1.0.1-CentOS-64bit.tar.bz2
+package_path_app_sha256=${workspace}/openGauss/package/openGauss-1.0.1-CentOS-64bit.sha256
 shellfilepath=$(cd $(dirname "${BASH_SOURCE[0]}") && pwd)
 hostname=`hostname`
 ip=`hostname -i|awk '{print $1}'`
@@ -57,8 +59,9 @@ else
 fi
 chmod -R 777 ${workspace}/om/package
 
-tar -zvxf ${package_path} -C ${workspace}/om/package/
-
+tar -zvxf ${package_path_om} -C ${workspace}/om/package/
+cp ${package_path_app} ${workspace}/om/package/
+cp ${package_path_app_sha256} ${workspace}/om/package/
 chmod -R 777 ${workspace}/om
 
 if [ ! -e ${scriptpath} ]
