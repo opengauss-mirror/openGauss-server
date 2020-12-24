@@ -21,7 +21,9 @@ password=`cat ${xmlpath} |grep -w "password"|awk -F'"' '{print $4}'`
 usergroup="dbgrp"
 envfilepath="${workdir}/om/env1"
 logfilesavepath=/home/OM/log
-upgradefilepath=${workdir}/openGauss/package/${upgradepackage}
+upgradefilepath_om=${workdir}/openGauss/package/openGauss-1.0.1-CentOS-64bit-om.tar.gz
+upgradefilepath_app=${workdir}/openGauss/package/openGauss-1.0.1-CentOS-64bit.tar.bz2
+upgradefilepath_app_sha256=${workdir}/openGauss/package/openGauss-1.0.1-CentOS-64bit.sha256
 package_path=/home/openGauss-1.0.1-CentOS-b109-64bit.tar.gz 
 shellfilepath=$(cd $(dirname "${BASH_SOURCE[0]}") && pwd)
 # 用户校验
@@ -233,7 +235,9 @@ startwithhostname()
 #升级
 upgradectl()
 {
-        chmod 777 ${upgradefilepath}
+        chmod 777 ${upgradefilepath_om}
+        chmod 777 ${upgradefilepath_app}
+        chmod 777 ${upgradefilepath_app_sha256}
         echo "准备停止集群"
         logdir=`logCheck stopdb.log`
         echo -e "\033[32m 正在执行stop操作：gs_om -t stop \033[0m"
@@ -248,7 +252,9 @@ upgradectl()
                 echo "gs_om -t 停止集群操作执行成功，准备进行升级包解压"
                 if [ ! -e ${workdir}/package/upgrade/ ]
                 then
-                        tar -zxvf ${upgradefilepath} -C ${workdir}/om/package/
+                        tar -zxvf ${upgradefilepath_om} -C ${workdir}/om/package/
+                        cp -rf ${upgradefilepath_app} ${workdir}/om/package/
+                        cp -rf ${upgradefilepath_app_sha256} ${workdir}/om/package/
                 fi
                 if [ $? == 0 ]
                 then
