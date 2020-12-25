@@ -87,3 +87,4 @@ test: alter_set_same_parameter
 test: gs_guc_value_range
 test: global_temporary_table_get_table_def
 test: double_support_unit
+test: unify_definition_superuser
