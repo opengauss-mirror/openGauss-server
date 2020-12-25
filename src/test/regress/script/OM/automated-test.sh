@@ -1,4 +1,4 @@
-﻿# !/bin/bash
+﻿#!/bin/bash
 
 # username:omm  usergroup:dbgrp 工具脚本路径：/home/om/ xml文件路径：/home/om/cluster_1m0s_config.xml
 
@@ -21,9 +21,9 @@ password=`cat ${xmlpath} |grep -w "password"|awk -F'"' '{print $4}'`
 usergroup="dbgrp"
 envfilepath="${workspace}/om/env"
 logfilesavepath=/usr1/opengaussautoinstall/log
-package_path_om=${workspace}/openGauss/package/openGauss-1.0.1-CentOS-64bit-om.tar.gz
-package_path_app=${workspace}/openGauss/package/openGauss-1.0.1-CentOS-64bit.tar.bz2
-package_path_app_sha256=${workspace}/openGauss/package/openGauss-1.0.1-CentOS-64bit.sha256
+package_path_om=${workspace}/openGauss/package/openGauss-1.1.0-CentOS-64bit-om.tar.gz
+package_path_app=${workspace}/openGauss/package/openGauss-1.1.0-CentOS-64bit.tar.bz2
+package_path_app_sha256=${workspace}/openGauss/package/openGauss-1.1.0-CentOS-64bit.sha256
 shellfilepath=$(cd $(dirname "${BASH_SOURCE[0]}") && pwd)
 hostname=`hostname`
 ip=`hostname -i|awk '{print $1}'`

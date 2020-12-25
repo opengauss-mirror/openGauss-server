@@ -87,7 +87,7 @@ fi
 ##default install version storage path
 declare server_version='openGauss'
 declare server_name_for_package="$(echo ${server_version} | sed 's/ /-/g')" # replace blank with '-' for package name.
-declare version_number='1.0.1'
+declare version_number='1.1.0'
 
 #######################################################################
 ##putout the version of server
