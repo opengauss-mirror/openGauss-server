@@ -75,7 +75,7 @@ class BackupImplOLAP(BackupImpl):
                 hostName = DefaultValue.GetHostIpOrName()
                 # Obtain the name of binary_hostname.tar on local node
                 binTarName = "binary_%s.tar" % hostName
-                # Obtain the name of binary_hostname.tar on local node
+                # Obtain the path of binary_hostname.tar on local node
                 tarName = os.path.join(self.context.backupDir, binTarName)
                 
                 # Decompress binary_hostname.tar on local node
