@@ -83,6 +83,8 @@ const int ONE_MILLISECOND = 1;
 const int TEN_MICROSECOND = 10;
 const int MILLISECOND_TO_MICROSECOND = 1000;
 const float PAGE_QUEUE_SLOT_USED_MAX_PERCENTAGE = 0.8;
+const long CHKPT_LOG_TIME_INTERVAL = 1000000 * 60; /* 60000000us -> 1min */
+const double CHKPT_LOG_PERCENT_INTERVAL = 0.1;
 
 /*
  * Status of buffers to checkpoint for a particular tablespace, used
@@ -3035,6 +3037,7 @@ static void BufferSync(int flags)
     int num_spaces;
     int num_processed;
     int num_written;
+    double bufferFlushPercent = CHKPT_LOG_PERCENT_INTERVAL;
     CkptTsStatus* per_ts_stat = NULL;
     Oid last_tsid;
     binaryheap* ts_heap = NULL;
@@ -3248,7 +3251,15 @@ static void BufferSync(int flags)
         /*
          * Sleep to throttle our I/O rate.
          */
-        CheckpointWriteDelay(flags, (double)num_processed / num_to_scan);
+        double progress = (double)num_processed / num_to_scan;
+        CheckpointWriteDelay(flags, progress);
+
+        if (((uint32)flags & CHECKPOINT_IS_SHUTDOWN) && progress >= bufferFlushPercent) {
+            /* print warning log and increase counter if flushed percent exceed threshold */
+            ereport(WARNING, (errmsg("full checkpoint mode, shuting down, wait for dirty page flush, remain num:%d",
+                num_to_scan - num_processed)));
+            bufferFlushPercent += CHKPT_LOG_PERCENT_INTERVAL;
+        }
     }
 
     /* issue all pending flushes */
@@ -3922,6 +3933,7 @@ void CheckPointBuffers(int flags, bool doFullCheckpoint)
         pg_atomic_read_u32(&g_instance.ckpt_cxt_ctl->current_page_writer_count) < 1) {
         BufferSync(flags);
     } else if (g_instance.attr.attr_storage.enableIncrementalCheckpoint && doFullCheckpoint) {
+        long waitCount = 0;
         /*
          * If the enable_incremental_checkpoint is on, but doFullCheckpoint is true (full checkpoint),
          * checkpoint thread don't need flush dirty page, but need wait pagewriter thread flush given
@@ -3934,10 +3946,25 @@ void CheckPointBuffers(int flags, bool doFullCheckpoint)
                 break;
             } else {
                 /* sleep 1 ms wait the dirty page flush */
-                pg_usleep(ONE_MILLISECOND * MILLISECOND_TO_MICROSECOND);
+                long sleepTime = ONE_MILLISECOND * MILLISECOND_TO_MICROSECOND;
+                pg_usleep(sleepTime);
                 /* do smgrsync in case dw file recycle of pagewriter is being blocked */
                 if (dw_enabled()) {
                     smgrsync_with_absorption();
+                }
+                if (((uint32)flags & CHECKPOINT_IS_SHUTDOWN)) {
+                    /*
+                     * since we use sleep time as counter so there will be some error in calculate the interval,
+                     * but it doesn't mater cause we don't need a precise counter.
+                     */
+                    waitCount += sleepTime;
+                    if (waitCount >= CHKPT_LOG_TIME_INTERVAL) {
+                        /* print warning log and reset counter if waitting time exceed threshold */
+                        ereport(WARNING, (errmsg("incremental checkpoint mode, shuting down, "
+                            "wait for dirty page flush, remain num:%u",
+                            g_instance.ckpt_cxt_ctl->actual_dirty_page_num)));
+                        waitCount = 0;
+                    }
                 }
             }
         }
