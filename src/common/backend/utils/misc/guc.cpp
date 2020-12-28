@@ -16438,8 +16438,9 @@ void ExecSetVariableStmt(VariableSetStmt* stmt)
                 if (spcname != NULL) {
                     char* tempname = strstr(spcname, SCHEMA_TEMP_NAME);
                     char* catalogname = strstr(spcname, SCHEMA_CATALOG_NAME);
-                    if ((tempname != NULL && JudgeSystemSchema(spcname, SYSTEM_SCHEMA, sizeof(SYSTEM_SCHEMA)) == 0) ||
-                        (catalogname != NULL && JudgeSystemSchema(spcname, SYSTEM_SCHEMA, sizeof(SYSTEM_SCHEMA)) == 0)) {
+                    int schema_type_size = sizeof(SYSTEM_SCHEMA) / sizeof(SYSTEM_SCHEMA[0]);
+                    if ((tempname != NULL && JudgeSystemSchema(spcname, SYSTEM_SCHEMA, schema_type_size) == 0) ||
+                        (catalogname != NULL && JudgeSystemSchema(spcname, SYSTEM_SCHEMA, schema_type_size) == 0)) {
                         ereport(WARNING,
                             (errmsg("It is invalid to set pg_temp or pg_catalog behind other schemas in search path "
                                     "explicitly. The priority order is pg_temp, pg_catalog and other schemas.")));
