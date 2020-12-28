@@ -828,9 +828,11 @@ select * from tt order by 1, 2;
 -- note that nextval() gets executed a second time in the rule expansion,
 -- which is expected.
 select * from tt_log order by 1, 2;
- f1 | data 
-----+------
-(0 rows)
+ f1 |  data   
+----+---------
+    | barlog
+    | foollog
+(2 rows)
 
 -- test case for a whole-row-variable bug
 create function foo1(n integer, out a text, out b text)

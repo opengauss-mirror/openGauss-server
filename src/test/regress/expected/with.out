@@ -1463,6 +1463,12 @@ WITH t AS (
 SELECT * FROM t;
  a  
 ----
+ 42
+(1 row)
+
+SELECT * FROM y order by 1;
+ a  
+----
   0
   1
   2
@@ -1470,19 +1476,15 @@ SELECT * FROM t;
   4
   5
   6
- 11
   7
- 12
   8
- 13
   9
+ 11
+ 12
+ 13
  14
-(14 rows)
-
-SELECT * FROM y order by 1;
- a 
----
-(0 rows)
+ 42
+(15 rows)
 
 DROP RULE y_rule ON y;
 -- check merging of outer CTE with CTE in a rule action
@@ -1515,17 +1517,20 @@ INSERT INTO bug6051 SELECT * FROM t1;
 SELECT * FROM bug6051 ORDER BY 1;
  i 
 ---
+(0 rows)
+
+SELECT * FROM bug6051_2 ORDER BY 1;
+ i 
+---
  1
  2
  3
 (3 rows)
 
-SELECT * FROM bug6051_2 ORDER BY 1;
- i 
----
-(0 rows)
-
 -- a truly recursive CTE in the same list
+DROP TABLE y;
+CREATE TABLE y (a INTEGER PRIMARY KEY INITIALLY DEFERRED);
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "y_pkey" for table "y"
 WITH RECURSIVE t(a) AS (
 	SELECT 0
 		UNION ALL
@@ -1890,11 +1895,7 @@ WITH t AS (
 	INSERT INTO y VALUES(0)
 )
 VALUES(FALSE);
- column1 
----------
- f
-(1 row)
-
+ERROR:  conditional DO INSTEAD rules are not supported for data-modifying statements in WITH
 DROP RULE y_rule ON y;
 -- check cte replace when pulling up
 -- case 1: exists/any sublink

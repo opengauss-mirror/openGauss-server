@@ -1,0 +1,23 @@
+<refentry id="SQL-CREATE_RULE">
+<refmeta>
+<refentrytitle>ALTER TABLE</refentrytitle>
+<manvolnum>7</manvolnum>
+<refmiscinfo>SQL - Language Statements</refmiscinfo>
+</refmeta>
+<refnamediv>
+<refname>CREATE RULE</refname>
+<refpurpose>define a new rewrite rule</refpurpose>
+</refnamediv>
+<refsynopsisdiv>
+<synopsis>
+CREATE [ OR REPLACE ] RULE name AS ON event
+    TO table_name [ WHERE condition ]
+    DO [ ALSO | INSTEAD ] { NOTHING | command | ( command ; command ... ) }
+
+where event can be one of:
+
+    SELECT | INSERT | UPDATE | DELETE
+
+</synopsis>
+</refsynopsisdiv>
+</refentry>

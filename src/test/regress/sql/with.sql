@@ -748,6 +748,8 @@ SELECT * FROM bug6051 ORDER BY 1;
 SELECT * FROM bug6051_2 ORDER BY 1;
 
 -- a truly recursive CTE in the same list
+DROP TABLE y;
+CREATE TABLE y (a INTEGER PRIMARY KEY INITIALLY DEFERRED);
 WITH RECURSIVE t(a) AS (
 	SELECT 0
 		UNION ALL
@@ -759,7 +761,6 @@ WITH RECURSIVE t(a) AS (
 SELECT * FROM t2 JOIN y USING (a) ORDER BY a;
 
 SELECT * FROM y order by 1;
-
 -- data-modifying WITH in a modifying statement
 WITH t AS (
     DELETE FROM y
