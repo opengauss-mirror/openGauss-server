@@ -331,7 +331,7 @@ class DefaultValue():
     # default cluster config xml
     CLUSTER_CONFIG_PATH = "/opt/huawei/wisequery/clusterconfig.xml"
     # default alarm tools
-    ALARM_COMPONENT_PATH = "/opt/huawei/snas/bin/snas_cm_cmd"
+    ALARM_COMPONENT_PATH = "/opt/snas/bin/snas_cm_cmd"
     # GPHOME
     CLUSTER_TOOL_PATH = "/opt/huawei/wisequery"
     # root scripts path
